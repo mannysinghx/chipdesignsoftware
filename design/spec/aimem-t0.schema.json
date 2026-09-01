@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aimem.local/schemas/aimem-t0.schema.json",
+  "title": "AIMEM-X1 T0 Pathfinder specification",
+  "type": "object",
+  "required": ["id", "name", "revision", "status", "dram", "interface", "base_die", "decision_gates"],
+  "properties": {
+    "id": { "const": "aimem-x1-t0" },
+    "name": { "type": "string", "minLength": 1 },
+    "revision": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": { "enum": ["hypothesis", "modeled", "rtl-verified", "silicon-verified"] },
+    "scale_relative_to_x1": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+    "dram": {
+      "type": "object",
+      "required": ["tiers", "channels", "channel_width_bits", "pseudochannels_per_channel", "banks_per_pseudochannel", "row_size_bytes"],
+      "properties": {
+        "tiers": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "channels": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "channel_width_bits": { "type": "integer", "enum": [32, 64] },
+        "pseudochannels_per_channel": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "banks_per_pseudochannel": { "type": "integer", "enum": [8, 16, 32] },
+        "row_size_bytes": { "type": "integer", "enum": [256, 512, 1024, 2048] }
+      }
+    },
+    "interface": {
+      "type": "object",
+      "required": ["payload_lanes", "lane_rate_gbps", "nominal_raw_bandwidth_tbps", "phy_energy_target_pj_per_bit"],
+      "properties": {
+        "payload_lanes": { "type": "integer", "minimum": 1 },
+        "nominal_raw_bandwidth_tbps": { "type": "number", "exclusiveMinimum": 0 },
+        "phy_energy_target_pj_per_bit": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "base_die": {
+      "type": "object",
+      "required": ["sram_mib", "noc_regions", "channels_per_region"],
+      "properties": {
+        "sram_mib": { "type": "integer", "minimum": 0 },
+        "noc_regions": { "type": "integer", "minimum": 1 },
+        "channels_per_region": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "decision_gates": {
+      "type": "array",
+      "minItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "metric", "operator", "target", "evidence"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^T0-" },
+          "metric": { "type": "string" },
+          "operator": { "enum": [">", ">=", "<", "<=", "="] },
+          "target": { "type": "number" },
+          "evidence": { "enum": ["analytical", "cycle", "rtl", "formal", "physical", "silicon"] }
+        }
+      }
+    }
+  }
+}

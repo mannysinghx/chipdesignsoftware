@@ -1,0 +1,74 @@
+{
+  "$schema": "./aimem-t0.schema.json",
+  "id": "aimem-x1-t0",
+  "name": "AIMEM-X1 T0 Pathfinder",
+  "revision": "0.1.0",
+  "status": "hypothesis",
+  "scale_relative_to_x1": 0.125,
+  "dram": {
+    "tiers": 4,
+    "capacity_per_tier_mib": {
+      "minimum": 64,
+      "maximum": 128
+    },
+    "total_capacity_mib": {
+      "minimum": 256,
+      "maximum": 512
+    },
+    "channels": 16,
+    "channel_width_bits": 64,
+    "pseudochannels_per_channel": 2,
+    "banks_per_pseudochannel": 16,
+    "row_size_bytes": 512
+  },
+  "interface": {
+    "payload_lanes": 1024,
+    "lane_rate_gbps": {
+      "eco": 4,
+      "nominal": 8,
+      "performance": 10,
+      "experimental": 12
+    },
+    "signaling": "short-reach source-synchronous NRZ",
+    "nominal_raw_bandwidth_tbps": 1.024,
+    "experimental_raw_bandwidth_tbps": 1.536,
+    "phy_energy_target_pj_per_bit": 0.2
+  },
+  "base_die": {
+    "sram_mib": 16,
+    "noc_regions": 2,
+    "channels_per_region": 8,
+    "target_process": "5/4 nm-class for physical T0; public PDK proxy for FOSS lane"
+  },
+  "ai_operations": [
+    "gather",
+    "scatter",
+    "prefetch_linear",
+    "prefetch_strided",
+    "simple_kv_manager",
+    "lossless_compression"
+  ],
+  "reliability": [
+    "interface_ecc",
+    "link_crc",
+    "retry",
+    "lane_repair",
+    "refresh_deadline_tracking",
+    "rowhammer_tracking",
+    "telemetry"
+  ],
+  "decision_gates": [
+    { "id": "T0-BW-RAW", "metric": "raw_bandwidth_tbps", "operator": ">", "target": 1.0, "evidence": "silicon" },
+    { "id": "T0-BW-STREAM", "metric": "streaming_efficiency_percent", "operator": ">=", "target": 85, "evidence": "silicon" },
+    { "id": "T0-BW-RANDOM", "metric": "random_efficiency_percent", "operator": ">=", "target": 65, "evidence": "silicon" },
+    { "id": "T0-THERMAL", "metric": "thermal_runaway", "operator": "=", "target": 0, "evidence": "silicon" },
+    { "id": "T0-PHY-ENERGY", "metric": "phy_energy_pj_per_bit", "operator": "<", "target": 0.2, "evidence": "silicon" },
+    { "id": "T0-BOND", "metric": "hybrid_bond_reliable", "operator": "=", "target": 1, "evidence": "silicon" },
+    { "id": "T0-SRAM-LATENCY", "metric": "sram_hit_latency_ns", "operator": "<", "target": 10, "evidence": "silicon" },
+    { "id": "T0-GATHER", "metric": "gather_host_traffic_reduction_percent", "operator": ">", "target": 0, "evidence": "rtl" },
+    { "id": "T0-ECC", "metric": "ecc_fault_campaign_pass", "operator": "=", "target": 1, "evidence": "rtl" },
+    { "id": "T0-LANE-REPAIR", "metric": "lane_repair_pass", "operator": "=", "target": 1, "evidence": "rtl" },
+    { "id": "T0-LIVENESS", "metric": "controller_deadlocks", "operator": "=", "target": 0, "evidence": "formal" },
+    { "id": "T0-REFRESH", "metric": "missed_refresh_deadlines", "operator": "=", "target": 0, "evidence": "formal" }
+  ]
+}
