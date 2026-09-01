@@ -20,7 +20,7 @@ const rankedSweep = runT0Sweep(DEFAULT_T0_CONFIG)
 const bundle = {
   schema_version: '1.0',
   milestone: 'AIMEM-X1 T0 open-source engineering readiness',
-  revision: '0.2.0',
+  revision: '0.3.0',
   evidence_policy: 'Proxy and formal evidence never upgrades a silicon-required gate.',
   baseline: DEFAULT_T0_CONFIG,
   architecture,
@@ -36,9 +36,14 @@ const bundle = {
       'design/spec/t0-completion.json',
       'lib/t0-model.ts',
       'lib/t0-campaign.ts',
+      'lib/t0-reliability.ts',
+      'rtl/aimem_secded_64.sv',
+      'rtl/aimem_sparse_gather.sv',
+      'rtl/aimem_lane_repair.sv',
       'rtl/aimem_t0_channel.sv',
       'rtl/aimem_t0_top.sv',
-      'formal/aimem_t0_channel_formal.sv'
+      'formal/aimem_t0_channel_formal.sv',
+      'formal/aimem_secded_formal.sv'
     ]
   }
 };

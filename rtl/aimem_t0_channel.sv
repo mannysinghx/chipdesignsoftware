@@ -11,9 +11,11 @@ module aimem_t0_channel #(
   input  wire [$clog2(BANKS)-1:0] cmd_bank,
   input  wire [ROW_BITS-1:0]   cmd_row,
   input  wire [63:0]           cmd_wdata,
+  input  wire [71:0]           fault_mask,
   output reg                   rsp_valid,
   output reg  [63:0]           rsp_rdata,
   output reg                   ecc_corrected,
+  output reg                   ecc_uncorrectable,
   output wire                  refresh_urgent,
   output wire                  controller_live
 );
@@ -30,9 +32,28 @@ module aimem_t0_channel #(
   reg [ROW_BITS-1:0] active_row;
   reg active_write;
   reg [63:0] active_wdata;
+  reg [71:0] active_fault_mask;
   reg [15:0] refresh_age;
   reg [3:0] operation_age;
   integer bank_index;
+  wire [71:0] encoded_wdata;
+  wire [63:0] corrected_wdata;
+  wire ecc_decode_corrected;
+  wire ecc_decode_uncorrectable;
+  wire [6:0] ecc_syndrome;
+
+  aimem_secded_64_encoder ecc_encoder (
+    .data_in(active_wdata),
+    .code_out(encoded_wdata)
+  );
+
+  aimem_secded_64_decoder ecc_decoder (
+    .code_in(encoded_wdata ^ active_fault_mask),
+    .data_out(corrected_wdata),
+    .corrected(ecc_decode_corrected),
+    .uncorrectable(ecc_decode_uncorrectable),
+    .syndrome(ecc_syndrome)
+  );
 
   assign refresh_urgent = refresh_age >= REFRESH_LIMIT;
   assign cmd_ready = state == IDLE && !refresh_urgent;
@@ -46,16 +67,19 @@ module aimem_t0_channel #(
       active_row <= 0;
       active_write <= 0;
       active_wdata <= 0;
+      active_fault_mask <= 0;
       refresh_age <= 0;
       operation_age <= 0;
       rsp_valid <= 0;
       rsp_rdata <= 0;
       ecc_corrected <= 0;
+      ecc_uncorrectable <= 0;
       for (bank_index = 0; bank_index < BANKS; bank_index = bank_index + 1)
         open_row[bank_index] <= 0;
     end else begin
       rsp_valid <= 0;
       ecc_corrected <= 0;
+      ecc_uncorrectable <= 0;
       if (state == IDLE)
         operation_age <= 0;
       else
@@ -73,6 +97,7 @@ module aimem_t0_channel #(
             active_row <= cmd_row;
             active_write <= cmd_write;
             active_wdata <= cmd_wdata;
+            active_fault_mask <= fault_mask;
             if (row_open[cmd_bank] && open_row[cmd_bank] == cmd_row)
               state <= ACCESS;
             else
@@ -85,8 +110,9 @@ module aimem_t0_channel #(
           state <= ACCESS;
         end
         ACCESS: begin
-          rsp_rdata <= active_wdata ^ {48'h0, active_row};
-          ecc_corrected <= ^active_wdata === 1'bx;
+          rsp_rdata <= corrected_wdata;
+          ecc_corrected <= ecc_decode_corrected;
+          ecc_uncorrectable <= ecc_decode_uncorrectable;
           state <= RESPOND;
         end
         RESPOND: begin

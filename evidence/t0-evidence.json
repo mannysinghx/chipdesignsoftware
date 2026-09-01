@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "milestone": "AIMEM-X1 T0 open-source engineering readiness",
-  "revision": "0.2.0",
+  "revision": "0.3.0",
   "evidence_policy": "Proxy and formal evidence never upgrades a silicon-required gate.",
   "baseline": {
     "channels": 16,
@@ -90,32 +90,32 @@
         "id": "T0-GATHER",
         "title": "Gather value",
         "target": "Host traffic reduction > 0",
-        "observed": "48% workload proxy; RTL pending",
-        "status": "unverified",
-        "evidence": "Cycle proxy; RTL required"
+        "observed": "48% cycle proxy; RTL address engine synthesized",
+        "status": "provisional",
+        "evidence": "Cycle + RTL proxy"
       },
       {
         "id": "T0-ECC",
         "title": "ECC fault campaign",
         "target": "All specified injections pass",
-        "observed": "Controller hook synthesized; campaign pending",
-        "status": "unverified",
-        "evidence": "RTL required"
+        "observed": "360 SBE corrected; 2,556 DBE detected",
+        "status": "provisional",
+        "evidence": "Reference campaign + symbolic RTL proof"
       },
       {
         "id": "T0-LANE-REPAIR",
         "title": "Lane repair",
         "target": "Remap + BERT pass",
-        "observed": "PHY model not connected",
-        "status": "unverified",
-        "evidence": "RTL / silicon"
+        "observed": "0/1/2-fault remap passes; 3-fault rejected",
+        "status": "provisional",
+        "evidence": "Reference campaign + synthesized RTL"
       },
       {
         "id": "T0-LIVENESS",
         "title": "Controller liveness",
         "target": "No deadlocks",
         "observed": "32-cycle bounded proof passes",
-        "status": "unverified",
+        "status": "provisional",
         "evidence": "Bounded formal; unbounded proof required"
       },
       {
@@ -123,7 +123,7 @@
         "title": "Refresh safety",
         "target": "Zero missed deadlines",
         "observed": "32-cycle refresh-priority proof passes",
-        "status": "unverified",
+        "status": "provisional",
         "evidence": "Bounded formal; full deadline proof required"
       }
     ],
@@ -221,7 +221,13 @@
       "crcResidualErrorExponent": -18,
       "spareLanes": 32,
       "repairCoveragePercent": 3.0303030303030303,
-      "refreshDeadlineMisses": 0
+      "refreshDeadlineMisses": 0,
+      "singleBitInjections": 360,
+      "singleBitCorrections": 360,
+      "doubleBitInjections": 2556,
+      "doubleBitDetections": 2556,
+      "laneRepairCasesPassed": 4,
+      "gatherReferenceAddresses": 8
     },
     "domains": [
       {
@@ -244,17 +250,17 @@
         "id": "rtl",
         "name": "Digital RTL slice",
         "maturity": "implemented",
-        "completionPercent": 72,
-        "evidence": "Synthesizable channel controller and 16-channel composition",
-        "nextGate": "Full ECC datapath, gather engine and long regressions"
+        "completionPercent": 86,
+        "evidence": "16-channel controller with SECDED, sparse gather and two-spare lane repair",
+        "nextGate": "Long randomized regressions and complete memory datapath integration"
       },
       {
         "id": "formal",
         "name": "Formal safety",
         "maturity": "partial",
-        "completionPercent": 42,
-        "evidence": "Bounded refresh and controller-progress assertions",
-        "nextGate": "Unbounded liveness and full protocol proof"
+        "completionPercent": 58,
+        "evidence": "Bounded controller safety plus 72-position symbolic SECDED correction",
+        "nextGate": "Unbounded liveness, double-fault and full protocol proofs"
       },
       {
         "id": "physical",
@@ -276,9 +282,9 @@
         "id": "release",
         "name": "Evidence and release",
         "maturity": "implemented",
-        "completionPercent": 82,
-        "evidence": "Machine-readable gate registry, tests and exportable snapshot",
-        "nextGate": "Signed multi-run evidence bundle and independent reproduction"
+        "completionPercent": 90,
+        "evidence": "Machine-readable gates, fault campaigns, tests and hashed evidence bundle",
+        "nextGate": "Independent reproduction and signed release approval"
       },
       {
         "id": "silicon",
@@ -289,8 +295,8 @@
         "nextGate": "Foundry engagement, tapeout, bring-up and model calibration"
       }
     ],
-    "openSourceReadinessPercent": 65.42857142857143,
-    "overallProgramReadinessPercent": 57.25,
+    "openSourceReadinessPercent": 70.85714285714286,
+    "overallProgramReadinessPercent": 62,
     "siliconEvidencePercent": 0,
     "blockers": [
       "Cycle model requires correlation against Ramulator and production workload traces.",
@@ -306,21 +312,23 @@
     "top": "aimem_t0_top",
     "channels": 16,
     "status": "passed",
-    "cells": 2531,
-    "wires": 2703,
-    "wire_bits": 24804,
+    "formal_proofs": 2,
+    "cells": 19582,
+    "wires": 18768,
+    "wire_bits": 282846,
     "checks": [
       "SystemVerilog parsed",
       "16-channel hierarchy elaborated",
       "Processes lowered",
       "Memories normalized",
       "Generic synthesis completed",
-      "32-cycle bounded safety proof completed"
+      "32-cycle bounded safety proof completed",
+      "72-position symbolic single-bit SECDED correction proof completed"
     ],
     "limitations": [
       "Generic cells only; no foundry liberty mapping",
       "Bounded assertions are not an unbounded liveness proof",
-      "ECC datapath and gather engine remain interface-level placeholders"
+      "Gather sequencing and lane repair still require long randomized RTL campaigns"
     ]
   },
   "ranked_sweep": [
@@ -430,9 +438,14 @@
       "design/spec/t0-completion.json",
       "lib/t0-model.ts",
       "lib/t0-campaign.ts",
+      "lib/t0-reliability.ts",
+      "rtl/aimem_secded_64.sv",
+      "rtl/aimem_sparse_gather.sv",
+      "rtl/aimem_lane_repair.sv",
       "rtl/aimem_t0_channel.sv",
       "rtl/aimem_t0_top.sv",
-      "formal/aimem_t0_channel_formal.sv"
+      "formal/aimem_t0_channel_formal.sv",
+      "formal/aimem_secded_formal.sv"
     ]
   }
 }

@@ -80,11 +80,11 @@ export function evaluateT0(config: T0Config): T0Evaluation {
     gate('T0-SRAM-LATENCY', 'SRAM system hit', '< 10 ns', `${config.sramHitLatencyNs.toFixed(1)} ns`, config.sramHitLatencyNs < 10, 'Assumption'),
     unverifiedGate('T0-THERMAL', 'Thermal stability', 'No nominal runaway', 'Compact thermal proxy available', 'Model; silicon required'),
     unverifiedGate('T0-BOND', 'Hybrid-bond reliability', 'Continuity + margin', 'No test vehicle', 'Silicon'),
-    unverifiedGate('T0-GATHER', 'Gather value', 'Host traffic reduction > 0', '48% workload proxy; RTL pending', 'Cycle proxy; RTL required'),
-    unverifiedGate('T0-ECC', 'ECC fault campaign', 'All specified injections pass', 'Controller hook synthesized; campaign pending', 'RTL required'),
-    unverifiedGate('T0-LANE-REPAIR', 'Lane repair', 'Remap + BERT pass', 'PHY model not connected', 'RTL / silicon'),
-    unverifiedGate('T0-LIVENESS', 'Controller liveness', 'No deadlocks', '32-cycle bounded proof passes', 'Bounded formal; unbounded proof required'),
-    unverifiedGate('T0-REFRESH', 'Refresh safety', 'Zero missed deadlines', '32-cycle refresh-priority proof passes', 'Bounded formal; full deadline proof required'),
+    provisionalGate('T0-GATHER', 'Gather value', 'Host traffic reduction > 0', '48% cycle proxy; RTL address engine synthesized', 'Cycle + RTL proxy'),
+    provisionalGate('T0-ECC', 'ECC fault campaign', 'All specified injections pass', '360 SBE corrected; 2,556 DBE detected', 'Reference campaign + symbolic RTL proof'),
+    provisionalGate('T0-LANE-REPAIR', 'Lane repair', 'Remap + BERT pass', '0/1/2-fault remap passes; 3-fault rejected', 'Reference campaign + synthesized RTL'),
+    provisionalGate('T0-LIVENESS', 'Controller liveness', 'No deadlocks', '32-cycle bounded proof passes', 'Bounded formal; unbounded proof required'),
+    provisionalGate('T0-REFRESH', 'Refresh safety', 'Zero missed deadlines', '32-cycle refresh-priority proof passes', 'Bounded formal; full deadline proof required'),
   ];
 
   const recommendations: T0Evaluation['recommendations'] = [];
@@ -138,4 +138,8 @@ function gate(id: string, title: string, target: string, observed: string, passe
 
 function unverifiedGate(id: string, title: string, target: string, observed: string, evidence: string): GateResult {
   return { id, title, target, observed, status: 'unverified', evidence };
+}
+
+function provisionalGate(id: string, title: string, target: string, observed: string, evidence: string): GateResult {
+  return { id, title, target, observed, status: 'provisional', evidence };
 }

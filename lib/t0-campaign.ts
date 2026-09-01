@@ -1,4 +1,5 @@
 import { evaluateT0, type T0Config } from './t0-model.ts';
+import { runReliabilityCampaign } from './t0-reliability.ts';
 
 export type WorkloadId = 'dense-stream' | 'bank-random' | 'kv-decode' | 'sparse-gather';
 
@@ -56,6 +57,12 @@ export type T0Campaign = {
     spareLanes: number;
     repairCoveragePercent: number;
     refreshDeadlineMisses: number;
+    singleBitInjections: number;
+    singleBitCorrections: number;
+    doubleBitInjections: number;
+    doubleBitDetections: number;
+    laneRepairCasesPassed: number;
+    gatherReferenceAddresses: number;
   };
   domains: T0Domain[];
   openSourceReadinessPercent: number;
@@ -106,15 +113,16 @@ export function evaluateT0Campaign(config: T0Config): T0Campaign {
   const spareLanes = Math.max(16, Math.round(architecture.payloadLanes * 0.03125));
   const repairCoveragePercent = (spareLanes / (architecture.payloadLanes + spareLanes)) * 100;
   const refreshDeadlineMisses = workloads.reduce((sum, workload) => sum + (workload.refreshStalls > 0 ? 0 : 0), 0);
+  const faultCampaign = runReliabilityCampaign();
 
   const domains: T0Domain[] = [
     { id: 'architecture', name: 'Architecture contract', maturity: 'verified-proxy', completionPercent: 100, evidence: 'Versioned schema, arithmetic checks, deterministic parameter model', nextGate: 'Calibrate against measured silicon' },
     { id: 'workloads', name: 'Workload campaign', maturity: 'verified-proxy', completionPercent: 100, evidence: 'Four seeded cycle-level traffic profiles with latency and queue metrics', nextGate: 'Cross-check against Ramulator and production traces' },
-    { id: 'rtl', name: 'Digital RTL slice', maturity: 'implemented', completionPercent: 72, evidence: 'Synthesizable channel controller and 16-channel composition', nextGate: 'Full ECC datapath, gather engine and long regressions' },
-    { id: 'formal', name: 'Formal safety', maturity: 'partial', completionPercent: 42, evidence: 'Bounded refresh and controller-progress assertions', nextGate: 'Unbounded liveness and full protocol proof' },
+    { id: 'rtl', name: 'Digital RTL slice', maturity: 'implemented', completionPercent: 86, evidence: '16-channel controller with SECDED, sparse gather and two-spare lane repair', nextGate: 'Long randomized regressions and complete memory datapath integration' },
+    { id: 'formal', name: 'Formal safety', maturity: 'partial', completionPercent: 58, evidence: 'Bounded controller safety plus 72-position symbolic SECDED correction', nextGate: 'Unbounded liveness, double-fault and full protocol proofs' },
     { id: 'physical', name: 'Physical design', maturity: 'partial', completionPercent: 28, evidence: 'Open-source RTL synthesis plus analytical area/timing proxy', nextGate: 'OpenROAD placement, CTS, extraction and timing closure with a public PDK' },
     { id: 'multiphysics', name: 'PHY/package/thermal', maturity: 'partial', completionPercent: 34, evidence: 'Link-risk, power and compact thermal models', nextGate: 'openEMS, Elmer and package-geometry correlation' },
-    { id: 'release', name: 'Evidence and release', maturity: 'implemented', completionPercent: 82, evidence: 'Machine-readable gate registry, tests and exportable snapshot', nextGate: 'Signed multi-run evidence bundle and independent reproduction' },
+    { id: 'release', name: 'Evidence and release', maturity: 'implemented', completionPercent: 90, evidence: 'Machine-readable gates, fault campaigns, tests and hashed evidence bundle', nextGate: 'Independent reproduction and signed release approval' },
     { id: 'silicon', name: 'Foundry and silicon', maturity: 'external', completionPercent: 0, evidence: 'No private PDK, test vehicle or measured silicon', nextGate: 'Foundry engagement, tapeout, bring-up and model calibration' },
   ];
 
@@ -152,6 +160,12 @@ export function evaluateT0Campaign(config: T0Config): T0Campaign {
       spareLanes,
       repairCoveragePercent,
       refreshDeadlineMisses,
+      singleBitInjections: faultCampaign.singleBitInjections,
+      singleBitCorrections: faultCampaign.singleBitCorrections,
+      doubleBitInjections: faultCampaign.doubleBitInjections,
+      doubleBitDetections: faultCampaign.doubleBitDetections,
+      laneRepairCasesPassed: faultCampaign.laneRepairCases.filter((result, index) => result.repairable === (index < 3)).length,
+      gatherReferenceAddresses: faultCampaign.gatherReference.length,
     },
     domains,
     openSourceReadinessPercent,

@@ -108,7 +108,7 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> Spec 0.2.0 · evidence linked</span>
+          <span className="baseline-status"><i /> Spec 0.3.0 · evidence linked</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
@@ -174,7 +174,7 @@ export default function Home() {
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>Spec: aimem-t0.json · evidence rev 0.2.0</span>
+            <span>Spec: aimem-t0.json · evidence rev 0.3.0</span>
             <span>Fidelity: analytical + RTL/formal proxy · not silicon evidence</span>
           </footer>
         </section>
@@ -336,7 +336,7 @@ function ReadinessView({ campaign }: { campaign: T0Campaign }) {
           <p className="eyebrow accent">T0 completion contract</p>
           <h3>Engineering workspace implemented. Silicon proof remains external.</h3>
           <p>The product now connects deterministic workloads, a synthesizable 16-channel controller composition, bounded formal safety, generic synthesis, compact physical and thermal models, and traceable decision gates.</p>
-          <div className="readiness-tags"><span className="good">8 automated tests</span><span className="good">16 RTL channels</span><span className="good">32-cycle proof</span><span className="pending">5 external gates</span></div>
+          <div className="readiness-tags"><span className="good">13 automated tests</span><span className="good">16 RTL channels</span><span className="good">2 formal proofs</span><span className="pending">2 silicon-only gates</span></div>
         </div>
         <div className="silicon-score"><span>Measured silicon evidence</span><strong>{campaign.siliconEvidencePercent.toFixed(0)}%</strong><small>Foundry and measured-silicon work is intentionally zero until real evidence exists.</small></div>
       </section>
@@ -382,6 +382,16 @@ function ReadinessView({ campaign }: { campaign: T0Campaign }) {
           </div>
         </section>
       </div>
+
+      <section className="panel reliability-panel">
+        <PanelTitle label="Reliability closure" meta="Deterministic fault campaign + synthesized datapaths" />
+        <div className="reliability-grid">
+          <div><span>Single-bit correction</span><strong>{campaign.reliability.singleBitCorrections}/{campaign.reliability.singleBitInjections}</strong><small>All 72 codeword positions × 5 patterns</small></div>
+          <div><span>Double-bit detection</span><strong>{campaign.reliability.doubleBitDetections.toLocaleString()}/{campaign.reliability.doubleBitInjections.toLocaleString()}</strong><small>Every two-bit pair on the reference pattern</small></div>
+          <div><span>Lane repair cases</span><strong>{campaign.reliability.laneRepairCasesPassed}/4</strong><small>0–2 faults repaired; 3 faults rejected</small></div>
+          <div><span>Gather reference</span><strong>{campaign.reliability.gatherReferenceAddresses}</strong><small>Strided addresses checked per descriptor</small></div>
+        </div>
+      </section>
 
       <section className="panel blocker-panel">
         <PanelTitle label="T0 closure blockers" meta="These cannot be converted into passes by an AI agent" />

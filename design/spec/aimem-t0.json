@@ -2,7 +2,7 @@
   "$schema": "./aimem-t0.schema.json",
   "id": "aimem-x1-t0",
   "name": "AIMEM-X1 T0 Pathfinder",
-  "revision": "0.2.0",
+  "revision": "0.3.0",
   "status": "modeled",
   "scale_relative_to_x1": 0.125,
   "dram": {
@@ -59,8 +59,9 @@
   ],
   "open_source_evidence": {
     "architecture": ["TypeScript analytical model", "seeded request-level workload campaign"],
-    "rtl": ["SystemVerilog channel controller", "16-channel top-level composition"],
-    "formal": ["32-cycle bounded controller-progress and refresh-priority proof"],
+    "rtl": ["SystemVerilog channel controller", "16-channel top-level composition", "SECDED ECC datapath", "sparse-gather address engine", "two-spare lane repair mapper"],
+    "formal": ["32-cycle bounded controller-progress and refresh-priority proof", "72-position symbolic SECDED single-bit correction proof"],
+    "fault_campaign": ["360 single-bit corrections", "2,556 double-bit detections", "lane repair and gather reference cases"],
     "synthesis": ["YoWASP Yosys generic synthesis"],
     "physical": ["analytical area and timing proxy; no PDK mapping"],
     "thermal": ["compact steady-state power-to-temperature proxy"],

@@ -7,9 +7,13 @@ const files = {
   rtl: {
     'aimem_t0_channel.sv': encoder.encode(await readFile('rtl/aimem_t0_channel.sv', 'utf8')),
     'aimem_t0_top.sv': encoder.encode(await readFile('rtl/aimem_t0_top.sv', 'utf8')),
+    'aimem_secded_64.sv': encoder.encode(await readFile('rtl/aimem_secded_64.sv', 'utf8')),
+    'aimem_sparse_gather.sv': encoder.encode(await readFile('rtl/aimem_sparse_gather.sv', 'utf8')),
+    'aimem_lane_repair.sv': encoder.encode(await readFile('rtl/aimem_lane_repair.sv', 'utf8')),
   },
   formal: {
     'aimem_t0_channel_formal.sv': encoder.encode(await readFile('formal/aimem_t0_channel_formal.sv', 'utf8')),
+    'aimem_secded_formal.sv': encoder.encode(await readFile('formal/aimem_secded_formal.sv', 'utf8')),
   },
 };
 
@@ -31,7 +35,7 @@ async function run(args) {
 
 const synthesisFiles = await run([
   '-p',
-  'read_verilog -sv rtl/aimem_t0_channel.sv rtl/aimem_t0_top.sv; hierarchy -top aimem_t0_top; proc; flatten; opt; memory; opt; stat; write_json synth.json',
+  'read_verilog -sv rtl/aimem_secded_64.sv rtl/aimem_sparse_gather.sv rtl/aimem_lane_repair.sv rtl/aimem_t0_channel.sv rtl/aimem_t0_top.sv; hierarchy -top aimem_t0_top; proc; flatten; opt; memory; opt; stat; write_json synth.json',
 ]);
 
 const netlistBytes = synthesisFiles?.['synth.json'];
@@ -47,7 +51,12 @@ const wireBitCount = Object.values(topModule.netnames ?? {}).reduce((sum, net) =
 
 await run([
   '-p',
-  'read_verilog -formal -D FORMAL -sv rtl/aimem_t0_channel.sv formal/aimem_t0_channel_formal.sv; prep -top aimem_t0_channel_formal; flatten; async2sync; memory_map; opt; sat -verify -prove-asserts -seq 32 -set-init-zero',
+  'read_verilog -formal -D FORMAL -sv rtl/aimem_secded_64.sv rtl/aimem_t0_channel.sv formal/aimem_t0_channel_formal.sv; prep -top aimem_t0_channel_formal; flatten; async2sync; memory_map; opt; sat -verify -prove-asserts -seq 32 -set-init-zero',
+]);
+
+await run([
+  '-p',
+  'read_verilog -formal -sv rtl/aimem_secded_64.sv formal/aimem_secded_formal.sv; prep -top aimem_secded_formal; flatten; opt; sat -verify -prove proof_ok 1 -set-def-inputs',
 ]);
 
 const report = {
@@ -56,6 +65,7 @@ const report = {
   top: 'aimem_t0_top',
   channels: 16,
   status: 'passed',
+  formal_proofs: 2,
   cells: cellCount,
   wires: wireCount,
   wire_bits: wireBitCount,
@@ -66,11 +76,12 @@ const report = {
     'Memories normalized',
     'Generic synthesis completed',
     '32-cycle bounded safety proof completed',
+    '72-position symbolic single-bit SECDED correction proof completed',
   ],
   limitations: [
     'Generic cells only; no foundry liberty mapping',
     'Bounded assertions are not an unbounded liveness proof',
-    'ECC datapath and gather engine remain interface-level placeholders',
+    'Gather sequencing and lane repair still require long randomized RTL campaigns',
   ],
 };
 

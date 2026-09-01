@@ -4,20 +4,22 @@
   "top": "aimem_t0_top",
   "channels": 16,
   "status": "passed",
-  "cells": 2531,
-  "wires": 2703,
-  "wire_bits": 24804,
+  "formal_proofs": 2,
+  "cells": 19582,
+  "wires": 18768,
+  "wire_bits": 282846,
   "checks": [
     "SystemVerilog parsed",
     "16-channel hierarchy elaborated",
     "Processes lowered",
     "Memories normalized",
     "Generic synthesis completed",
-    "32-cycle bounded safety proof completed"
+    "32-cycle bounded safety proof completed",
+    "72-position symbolic single-bit SECDED correction proof completed"
   ],
   "limitations": [
     "Generic cells only; no foundry liberty mapping",
     "Bounded assertions are not an unbounded liveness proof",
-    "ECC datapath and gather engine remain interface-level placeholders"
+    "Gather sequencing and lane repair still require long randomized RTL campaigns"
   ]
 }

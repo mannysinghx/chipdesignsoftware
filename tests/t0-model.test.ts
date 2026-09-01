@@ -15,7 +15,7 @@ test('default T0 organization matches the pathfinder baseline', () => {
 test('proxy evidence never marks a silicon-required gate as passed', () => {
   const result = evaluateT0(DEFAULT_T0_CONFIG);
   assert.equal(result.gates.filter((gate) => gate.status === 'pass').length, 0);
-  assert.equal(result.gates.filter((gate) => gate.status === 'provisional').length, 5);
+  assert.equal(result.gates.filter((gate) => gate.status === 'provisional').length, 10);
 });
 
 test('eco mode fails the raw T0 bandwidth gate', () => {
