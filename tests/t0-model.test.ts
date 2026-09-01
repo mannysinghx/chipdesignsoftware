@@ -9,6 +9,13 @@ test('default T0 organization matches the pathfinder baseline', () => {
   assert.equal(result.banks, 512);
   assert.equal(result.rawBandwidthTbps, 1.024);
   assert.equal(result.perChannelBandwidthGbps, 64);
+  assert.equal(result.gates.find((gate) => gate.id === 'T0-BW-RAW')?.status, 'provisional');
+});
+
+test('proxy evidence never marks a silicon-required gate as passed', () => {
+  const result = evaluateT0(DEFAULT_T0_CONFIG);
+  assert.equal(result.gates.filter((gate) => gate.status === 'pass').length, 0);
+  assert.equal(result.gates.filter((gate) => gate.status === 'provisional').length, 5);
 });
 
 test('eco mode fails the raw T0 bandwidth gate', () => {

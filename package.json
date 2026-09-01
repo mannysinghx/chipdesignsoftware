@@ -11,7 +11,9 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
-    "validate:spec": "node scripts/validate-spec.mjs"
+    "validate:spec": "node scripts/validate-spec.mjs",
+    "verify:rtl": "node --experimental-wasm-exnref scripts/verify-rtl.mjs",
+    "evidence": "npm run validate:spec && npm test && npm run verify:rtl && node --experimental-strip-types scripts/generate-evidence.mjs"
   },
   "dependencies": {
     "next": "16.3.4",
@@ -28,6 +30,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
+    "@yowasp/yosys": "0.65.176-dev.1145",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.4",
     "react-server-dom-webpack": "19.2.6",

@@ -14,7 +14,7 @@ export type T0Config = {
   sramHitLatencyNs: number;
 };
 
-export type GateStatus = 'pass' | 'fail' | 'unverified';
+export type GateStatus = 'pass' | 'fail' | 'provisional' | 'unverified';
 
 export type GateResult = {
   id: string;
@@ -78,13 +78,13 @@ export function evaluateT0(config: T0Config): T0Evaluation {
     gate('T0-BW-RANDOM', 'Banked random efficiency', '≥ 65%', `${config.randomEfficiencyPercent.toFixed(0)}%`, config.randomEfficiencyPercent >= 65, 'Analytical proxy'),
     gate('T0-PHY-ENERGY', 'PHY energy', '< 0.20 pJ/bit', `${config.phyEnergyPjPerBit.toFixed(2)} pJ/bit`, config.phyEnergyPjPerBit < 0.2, 'Assumption'),
     gate('T0-SRAM-LATENCY', 'SRAM system hit', '< 10 ns', `${config.sramHitLatencyNs.toFixed(1)} ns`, config.sramHitLatencyNs < 10, 'Assumption'),
-    unverifiedGate('T0-THERMAL', 'Thermal stability', 'No nominal runaway', 'Not simulated', 'Coupled model'),
+    unverifiedGate('T0-THERMAL', 'Thermal stability', 'No nominal runaway', 'Compact thermal proxy available', 'Model; silicon required'),
     unverifiedGate('T0-BOND', 'Hybrid-bond reliability', 'Continuity + margin', 'No test vehicle', 'Silicon'),
-    unverifiedGate('T0-GATHER', 'Gather value', 'Host traffic reduction > 0', 'RTL not connected', 'RTL'),
-    unverifiedGate('T0-ECC', 'ECC fault campaign', 'All specified injections pass', 'RTL not connected', 'RTL'),
+    unverifiedGate('T0-GATHER', 'Gather value', 'Host traffic reduction > 0', '48% workload proxy; RTL pending', 'Cycle proxy; RTL required'),
+    unverifiedGate('T0-ECC', 'ECC fault campaign', 'All specified injections pass', 'Controller hook synthesized; campaign pending', 'RTL required'),
     unverifiedGate('T0-LANE-REPAIR', 'Lane repair', 'Remap + BERT pass', 'PHY model not connected', 'RTL / silicon'),
-    unverifiedGate('T0-LIVENESS', 'Controller liveness', 'No deadlocks', 'Formal proof pending', 'Formal'),
-    unverifiedGate('T0-REFRESH', 'Refresh safety', 'Zero missed deadlines', 'Formal proof pending', 'Formal'),
+    unverifiedGate('T0-LIVENESS', 'Controller liveness', 'No deadlocks', '32-cycle bounded proof passes', 'Bounded formal; unbounded proof required'),
+    unverifiedGate('T0-REFRESH', 'Refresh safety', 'Zero missed deadlines', '32-cycle refresh-priority proof passes', 'Bounded formal; full deadline proof required'),
   ];
 
   const recommendations: T0Evaluation['recommendations'] = [];
@@ -133,7 +133,7 @@ export function runT0Sweep(config: T0Config) {
 }
 
 function gate(id: string, title: string, target: string, observed: string, passed: boolean, evidence: string): GateResult {
-  return { id, title, target, observed, status: passed ? 'pass' : 'fail', evidence };
+  return { id, title, target, observed, status: passed ? 'provisional' : 'fail', evidence };
 }
 
 function unverifiedGate(id: string, title: string, target: string, observed: string, evidence: string): GateResult {

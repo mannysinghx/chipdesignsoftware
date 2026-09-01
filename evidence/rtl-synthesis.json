@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "tool": "YoWASP Yosys 0.65.176-dev.1145",
+  "top": "aimem_t0_top",
+  "channels": 16,
+  "status": "passed",
+  "cells": 2531,
+  "wires": 2703,
+  "wire_bits": 24804,
+  "checks": [
+    "SystemVerilog parsed",
+    "16-channel hierarchy elaborated",
+    "Processes lowered",
+    "Memories normalized",
+    "Generic synthesis completed",
+    "32-cycle bounded safety proof completed"
+  ],
+  "limitations": [
+    "Generic cells only; no foundry liberty mapping",
+    "Bounded assertions are not an unbounded liveness proof",
+    "ECC datapath and gather engine remain interface-level placeholders"
+  ]
+}

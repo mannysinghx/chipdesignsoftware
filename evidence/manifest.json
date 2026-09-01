@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "artifact": "t0-evidence.json",
+  "sha256": "68fcb014192c927fbdc4b0b73d6e530230d8f79e495b604af438e8ff0a3c7e96",
+  "reproducible": true,
+  "external_gates_remain_unverified": true
+}

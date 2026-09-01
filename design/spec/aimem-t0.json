@@ -2,8 +2,8 @@
   "$schema": "./aimem-t0.schema.json",
   "id": "aimem-x1-t0",
   "name": "AIMEM-X1 T0 Pathfinder",
-  "revision": "0.1.0",
-  "status": "hypothesis",
+  "revision": "0.2.0",
+  "status": "modeled",
   "scale_relative_to_x1": 0.125,
   "dram": {
     "tiers": 4,
@@ -57,6 +57,15 @@
     "rowhammer_tracking",
     "telemetry"
   ],
+  "open_source_evidence": {
+    "architecture": ["TypeScript analytical model", "seeded request-level workload campaign"],
+    "rtl": ["SystemVerilog channel controller", "16-channel top-level composition"],
+    "formal": ["32-cycle bounded controller-progress and refresh-priority proof"],
+    "synthesis": ["YoWASP Yosys generic synthesis"],
+    "physical": ["analytical area and timing proxy; no PDK mapping"],
+    "thermal": ["compact steady-state power-to-temperature proxy"],
+    "artifacts": ["evidence/rtl-synthesis.json", "evidence/t0-evidence.json", "evidence/manifest.json"]
+  },
   "decision_gates": [
     { "id": "T0-BW-RAW", "metric": "raw_bandwidth_tbps", "operator": ">", "target": 1.0, "evidence": "silicon" },
     { "id": "T0-BW-STREAM", "metric": "streaming_efficiency_percent", "operator": ">=", "target": 85, "evidence": "silicon" },

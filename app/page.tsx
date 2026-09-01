@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { evaluateT0Campaign, type T0Campaign } from '@/lib/t0-campaign';
 import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep, type GateStatus, type T0Config } from '@/lib/t0-model';
 
-type View = 'architecture' | 'explore' | 'gates';
+type View = 'readiness' | 'architecture' | 'workloads' | 'explore' | 'gates';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
 const views: Array<{ id: View; label: string }> = [
+  { id: 'readiness', label: 'Readiness' },
   { id: 'architecture', label: 'Architecture' },
+  { id: 'workloads', label: 'Workloads' },
   { id: 'explore', label: 'Experiment' },
-  { id: 'gates', label: 'Evidence gates' },
+  { id: 'gates', label: 'Gates' },
 ];
 
 const hierarchy = [
@@ -24,7 +27,7 @@ const hierarchy = [
 
 export default function Home() {
   const [config, setConfig] = useState<T0Config>(DEFAULT_T0_CONFIG);
-  const [view, setView] = useState<View>('architecture');
+  const [view, setView] = useState<View>('readiness');
   const [selectedNode, setSelectedNode] = useState('system');
   const [selectedTier, setSelectedTier] = useState(3);
   const [runProgress, setRunProgress] = useState(0);
@@ -32,6 +35,7 @@ export default function Home() {
   const [sweep, setSweep] = useState<SweepPoint[]>([]);
   const timer = useRef<number | null>(null);
   const evaluation = useMemo(() => evaluateT0(config), [config]);
+  const campaign = useMemo(() => evaluateT0Campaign(config), [config]);
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current);
@@ -68,10 +72,11 @@ export default function Home() {
     const snapshot = {
       schema_version: '1.0',
       product: 'AIMEM-X1 T0 Pathfinder',
-      fidelity: 'analytical-proxy',
+      fidelity: 'multi-domain-open-source-proxy',
       generated_at: new Date().toISOString(),
       config,
       evaluation,
+      campaign,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -83,6 +88,7 @@ export default function Home() {
 
   const passCount = evaluation.gates.filter((gate) => gate.status === 'pass').length;
   const failCount = evaluation.gates.filter((gate) => gate.status === 'fail').length;
+  const provisionalCount = evaluation.gates.filter((gate) => gate.status === 'provisional').length;
 
   return (
     <main className="app-shell">
@@ -102,8 +108,8 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> Spec 0.1.0 · linked</span>
-          <button className="ghost-button" onClick={exportSnapshot}>Export snapshot</button>
+          <span className="baseline-status"><i /> Spec 0.2.0 · evidence linked</span>
+          <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
 
@@ -122,51 +128,54 @@ export default function Home() {
           </section>
 
           <section className="rail-section evidence-summary">
-            <div className="section-heading"><span>Evidence state</span><b>{passCount}/12</b></div>
+            <div className="section-heading"><span>Open-source readiness</span><b>{campaign.openSourceReadinessPercent.toFixed(0)}%</b></div>
             <div className="evidence-bar" aria-label={`${passCount} analytical gates pass, ${failCount} fail`}>
               <i className="pass" style={{ width: `${(passCount / 12) * 100}%` }} />
+              <i className="provisional" style={{ width: `${(provisionalCount / 12) * 100}%` }} />
               <i className="fail" style={{ width: `${(failCount / 12) * 100}%` }} />
             </div>
-            <div className="evidence-legend"><span><i className="dot pass" />{passCount} pass</span><span><i className="dot fail" />{failCount} fail</span><span><i className="dot pending" />{12 - passCount - failCount} pending</span></div>
+            <div className="evidence-legend"><span><i className="dot provisional" />{provisionalCount} proxy</span><span><i className="dot fail" />{failCount} fail</span><span><i className="dot pending" />{12 - passCount - provisionalCount - failCount} external</span></div>
           </section>
 
           <section className="assistant-card">
-            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>Architecture assistant</p><small>Rule + model evidence</small></div></div>
-            <p className={`assistant-tag ${evaluation.recommendations[0]?.severity ?? 'good'}`}>{evaluation.recommendations[0]?.title}</p>
-            <p className="assistant-detail">{evaluation.recommendations[0]?.detail}</p>
-            <button onClick={() => setView('gates')}>Review evidence <span>→</span></button>
+            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>T0 program agent</p><small>Evidence-aware guidance</small></div></div>
+            <p className="assistant-tag watch">Open-source milestone implemented; silicon remains gated</p>
+            <p className="assistant-detail">{campaign.blockers[0]}</p>
+            <button onClick={() => setView('readiness')}>Review readiness <span>→</span></button>
           </section>
         </aside>
 
         <section className="main-stage">
           <div className="stage-header">
             <div>
-              <p className="eyebrow">{view === 'architecture' ? 'Executable architecture' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
-              <h2>{view === 'architecture' ? 'T0 memory system' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p className="eyebrow">{view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
+              <h2>{view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
+              <p>{view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${runStatus}`}>{runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Analytical proxy'}</span>
+              <span className={`fidelity-pill ${runStatus}`}>{runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.2'}</span>
               <button className="primary-button" onClick={startSweep}>{runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
 
           <div className="metric-strip">
             <Metric label="Raw bandwidth" value={evaluation.rawBandwidthTbps.toFixed(3)} unit="TB/s" accent />
-            <Metric label="Streaming" value={evaluation.streamingBandwidthTbps.toFixed(3)} unit="TB/s" />
-            <Metric label="Banked random" value={evaluation.randomBandwidthTbps.toFixed(3)} unit="TB/s" />
-            <Metric label="PHY link power" value={evaluation.phyPowerWatts.toFixed(2)} unit="W" />
-            <Metric label="Bank fabric" value={evaluation.banks.toLocaleString()} unit="banks" />
+            <Metric label="Dense stream" value={campaign.workloads[0].usefulBandwidthTbps.toFixed(3)} unit="TB/s" />
+            <Metric label="Total power proxy" value={campaign.power.totalWatts.toFixed(1)} unit="W" />
+            <Metric label="Thermal hotspot" value={campaign.thermal.hotspotC.toFixed(1)} unit="°C" />
+            <Metric label="OSS readiness" value={campaign.openSourceReadinessPercent.toFixed(0)} unit="%" />
           </div>
 
+          {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
+          {view === 'workloads' && <WorkloadsView campaign={campaign} />}
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>Spec: aimem-t0.json · rev 0.1.0</span>
-            <span>Fidelity: analytical proxy · not silicon evidence</span>
+            <span>Spec: aimem-t0.json · evidence rev 0.2.0</span>
+            <span>Fidelity: analytical + RTL/formal proxy · not silicon evidence</span>
           </footer>
         </section>
 
@@ -306,12 +315,114 @@ function ExploreView({ config, evaluation, sweep, runStatus, runProgress, startS
           <div className="candidate-table">
             <div className="table-row head"><span>Candidate</span><span>Raw</span><span>Stream</span><span>PHY W</span><span>Gates</span></div>
             {ranked.slice(0, 6).map((point, index) => {
-              const passes = point.evaluation.gates.filter((gate) => gate.status === 'pass').length;
-              return <div className="table-row" key={`${point.config.laneRateGbps}-${point.config.sramMib}`}><span><b>{index + 1}</b>{point.config.laneRateGbps} Gb/s · {point.config.sramMib} MB</span><span>{point.evaluation.rawBandwidthTbps.toFixed(3)}</span><span>{point.evaluation.streamingBandwidthTbps.toFixed(3)}</span><span>{point.evaluation.phyPowerWatts.toFixed(2)}</span><span className={passes >= 5 ? 'pass-text' : 'watch-text'}>{passes}/5 analytical</span></div>;
+              const proxies = point.evaluation.gates.filter((gate) => gate.status === 'pass' || gate.status === 'provisional').length;
+              return <div className="table-row" key={`${point.config.laneRateGbps}-${point.config.sramMib}`}><span><b>{index + 1}</b>{point.config.laneRateGbps} Gb/s · {point.config.sramMib} MB</span><span>{point.evaluation.rawBandwidthTbps.toFixed(3)}</span><span>{point.evaluation.streamingBandwidthTbps.toFixed(3)}</span><span>{point.evaluation.phyPowerWatts.toFixed(2)}</span><span className={proxies >= 5 ? 'pass-text' : 'watch-text'}>{proxies}/5 proxy</span></div>;
             })}
           </div>
         ) : <div className="empty-table">No sweep result yet. Current configuration remains available in the live estimate above.</div>}
       </section>
+    </div>
+  );
+}
+
+function ReadinessView({ campaign }: { campaign: T0Campaign }) {
+  return (
+    <div className="readiness-layout">
+      <section className="panel readiness-hero">
+        <div className="readiness-dial" style={{ '--readiness': `${campaign.openSourceReadinessPercent}%` } as CSSProperties}>
+          <div><strong>{campaign.openSourceReadinessPercent.toFixed(0)}%</strong><span>open-source</span></div>
+        </div>
+        <div className="readiness-copy">
+          <p className="eyebrow accent">T0 completion contract</p>
+          <h3>Engineering workspace implemented. Silicon proof remains external.</h3>
+          <p>The product now connects deterministic workloads, a synthesizable 16-channel controller composition, bounded formal safety, generic synthesis, compact physical and thermal models, and traceable decision gates.</p>
+          <div className="readiness-tags"><span className="good">8 automated tests</span><span className="good">16 RTL channels</span><span className="good">32-cycle proof</span><span className="pending">5 external gates</span></div>
+        </div>
+        <div className="silicon-score"><span>Measured silicon evidence</span><strong>{campaign.siliconEvidencePercent.toFixed(0)}%</strong><small>Foundry and measured-silicon work is intentionally zero until real evidence exists.</small></div>
+      </section>
+
+      <section className="panel domain-panel">
+        <PanelTitle label="Evidence domains" meta="Completion is evidence-weighted, not task-count theater" />
+        <div className="domain-grid">
+          {campaign.domains.map((domain) => (
+            <article className="domain-card" key={domain.id}>
+              <div className="domain-head"><span className={`maturity ${domain.maturity}`}>{domain.maturity.replace('-', ' ')}</span><strong>{domain.completionPercent}%</strong></div>
+              <h3>{domain.name}</h3>
+              <p>{domain.evidence}</p>
+              <div className="domain-meter"><i style={{ width: `${domain.completionPercent}%` }} /></div>
+              <small>Next gate · {domain.nextGate}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <div className="proxy-grid">
+        <section className="panel proxy-panel">
+          <PanelTitle label="Power and thermal proxy" meta={`${campaign.thermal.marginC.toFixed(1)}°C modeled margin`} />
+          <div className="power-stack">
+            {[
+              ['PHY', campaign.power.phyWatts, 'mint'],
+              ['Controller', campaign.power.controllerWatts, 'blue'],
+              ['SRAM', campaign.power.sramWatts, 'violet'],
+              ['DRAM', campaign.power.dramWatts, 'amber'],
+            ].map(([label, value, color]) => (
+              <div key={String(label)}><span>{label}</span><div><i className={String(color)} style={{ width: `${(Number(value) / campaign.power.totalWatts) * 100}%` }} /></div><strong>{Number(value).toFixed(2)} W</strong></div>
+            ))}
+          </div>
+          <div className="proxy-footer"><span>Total <strong>{campaign.power.totalWatts.toFixed(2)} W</strong></span><span>Hotspot <strong>{campaign.thermal.hotspotC.toFixed(1)}°C</strong></span></div>
+        </section>
+
+        <section className="panel proxy-panel">
+          <PanelTitle label="Physical-design proxy" meta="Generic OSS synthesis · no PDK mapping" />
+          <div className="physical-metrics">
+            <div><span>Total proxy area</span><strong>{campaign.physicalProxy.totalAreaMm2.toFixed(1)}<small>mm²</small></strong></div>
+            <div><span>Estimated Fmax</span><strong>{campaign.physicalProxy.estimatedFmaxMhz.toFixed(0)}<small>MHz</small></strong></div>
+            <div><span>Timing margin</span><strong className={campaign.physicalProxy.timingMarginPs >= 0 ? 'pass-text' : 'watch-text'}>{campaign.physicalProxy.timingMarginPs.toFixed(0)}<small>ps</small></strong></div>
+            <div><span>Spare lanes</span><strong>{campaign.reliability.spareLanes}<small>lanes</small></strong></div>
+          </div>
+        </section>
+      </div>
+
+      <section className="panel blocker-panel">
+        <PanelTitle label="T0 closure blockers" meta="These cannot be converted into passes by an AI agent" />
+        <div className="blocker-list">{campaign.blockers.map((blocker, index) => <div key={blocker}><b>{String(index + 1).padStart(2, '0')}</b><p>{blocker}</p><span>{index < 3 ? 'engineering' : 'external'}</span></div>)}</div>
+      </section>
+    </div>
+  );
+}
+
+function WorkloadsView({ campaign }: { campaign: T0Campaign }) {
+  return (
+    <div className="workloads-layout">
+      <section className="panel workload-campaign-panel">
+        <PanelTitle label="Seeded cycle campaign" meta={`${campaign.workloads.reduce((sum, item) => sum + item.requests, 0).toLocaleString()} deterministic requests`} />
+        <div className="campaign-table">
+          <div className="campaign-row campaign-head"><span>Workload</span><span>Useful BW</span><span>Util.</span><span>Avg latency</span><span>P99</span><span>Row hits</span><span>Q99</span></div>
+          {campaign.workloads.map((workload) => (
+            <div className="campaign-row" key={workload.id}>
+              <span><strong>{workload.name}</strong><small>{workload.description}</small></span>
+              <span>{workload.usefulBandwidthTbps.toFixed(3)} TB/s</span>
+              <span>{workload.utilizationPercent.toFixed(1)}%</span>
+              <span>{workload.averageLatencyNs.toFixed(1)} ns</span>
+              <span>{workload.p99LatencyNs.toFixed(1)} ns</span>
+              <span>{workload.rowHitPercent.toFixed(1)}%</span>
+              <span>{workload.queueDepthP99}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="workload-summary-grid">
+        {campaign.workloads.map((workload) => (
+          <article className="panel workload-result" key={workload.id}>
+            <div className="workload-result-head"><span>{workload.id}</span><strong>{workload.usefulBandwidthTbps.toFixed(3)} TB/s</strong></div>
+            <div className="workload-arc" style={{ '--arc': `${workload.utilizationPercent}%` } as CSSProperties}><i /></div>
+            <div className="workload-result-copy"><strong>{workload.utilizationPercent.toFixed(1)}% physical utilization</strong><span>{workload.hostTrafficReductionPercent}% host traffic reduction · {workload.refreshStalls} modeled refresh stalls</span></div>
+          </article>
+        ))}
+      </div>
+
+      <section className="gate-note"><strong>Campaign fidelity</strong><p>This deterministic request-level model is reproducible and useful for architecture decisions. It still requires correlation with Ramulator, RTL simulation, extracted timing, and measured silicon.</p></section>
     </div>
   );
 }
@@ -405,5 +516,5 @@ function ThroughputBar({ label, value, max, color }: { label: string; value: num
 }
 
 function GateIcon({ status }: { status: GateStatus }) {
-  return <span className={`gate-icon ${status}`} aria-hidden="true">{status === 'pass' ? '✓' : status === 'fail' ? '!' : '·'}</span>;
+  return <span className={`gate-icon ${status}`} aria-hidden="true">{status === 'pass' ? '✓' : status === 'fail' ? '!' : status === 'provisional' ? '~' : '·'}</span>;
 }

@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "milestone": "AIMEM-X1 T0 open-source engineering readiness",
+  "definition": "A reproducible architecture, workload, RTL-slice, formal-safety, synthesis, power, thermal and evidence workflow using only open-source technology.",
+  "complete_when": [
+    "Architecture arithmetic and decision gates are versioned and executable",
+    "Deterministic workload campaigns emit bandwidth, latency, queue and refresh metrics",
+    "A 16-channel controller composition parses and synthesizes in open-source tooling",
+    "Bounded safety properties cover refresh priority and controller progress",
+    "Power, thermal, reliability and physical proxies are tied to the same configuration",
+    "Every result states its evidence class and limitations",
+    "The product exports a reproducible evidence snapshot"
+  ],
+  "external_silicon_gates": [
+    "Private-PDK implementation and foundry sign-off",
+    "Hybrid-bond and package test vehicle",
+    "Fabrication and bring-up",
+    "Measured bandwidth, energy, thermal, repair and reliability",
+    "Calibration of all analytical and physical models against silicon"
+  ],
+  "policy": "External silicon gates must remain unverified until real artifacts are ingested."
+}

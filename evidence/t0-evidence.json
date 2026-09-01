@@ -1,0 +1,438 @@
+{
+  "schema_version": "1.0",
+  "milestone": "AIMEM-X1 T0 open-source engineering readiness",
+  "revision": "0.2.0",
+  "evidence_policy": "Proxy and formal evidence never upgrades a silicon-required gate.",
+  "baseline": {
+    "channels": 16,
+    "channelWidthBits": 64,
+    "pseudochannelsPerChannel": 2,
+    "banksPerPseudochannel": 16,
+    "dramTiers": 4,
+    "laneRateGbps": 8,
+    "sramMib": 16,
+    "rowSizeBytes": 512,
+    "streamingEfficiencyPercent": 86,
+    "randomEfficiencyPercent": 66,
+    "phyEnergyPjPerBit": 0.15,
+    "interconnectLengthMm": 8,
+    "sramHitLatencyNs": 9.2
+  },
+  "architecture": {
+    "payloadLanes": 1024,
+    "pseudochannels": 32,
+    "banks": 512,
+    "rawBandwidthTbps": 1.024,
+    "streamingBandwidthTbps": 0.88064,
+    "randomBandwidthTbps": 0.67584,
+    "perChannelBandwidthGbps": 64,
+    "phyPowerWatts": 1.2288,
+    "bankParallelismScore": 66,
+    "linkRisk": "low",
+    "gates": [
+      {
+        "id": "T0-BW-RAW",
+        "title": "Raw bandwidth",
+        "target": "> 1.000 TB/s",
+        "observed": "1.024 TB/s",
+        "status": "provisional",
+        "evidence": "Analytical"
+      },
+      {
+        "id": "T0-BW-STREAM",
+        "title": "Streaming efficiency",
+        "target": "≥ 85%",
+        "observed": "86%",
+        "status": "provisional",
+        "evidence": "Analytical proxy"
+      },
+      {
+        "id": "T0-BW-RANDOM",
+        "title": "Banked random efficiency",
+        "target": "≥ 65%",
+        "observed": "66%",
+        "status": "provisional",
+        "evidence": "Analytical proxy"
+      },
+      {
+        "id": "T0-PHY-ENERGY",
+        "title": "PHY energy",
+        "target": "< 0.20 pJ/bit",
+        "observed": "0.15 pJ/bit",
+        "status": "provisional",
+        "evidence": "Assumption"
+      },
+      {
+        "id": "T0-SRAM-LATENCY",
+        "title": "SRAM system hit",
+        "target": "< 10 ns",
+        "observed": "9.2 ns",
+        "status": "provisional",
+        "evidence": "Assumption"
+      },
+      {
+        "id": "T0-THERMAL",
+        "title": "Thermal stability",
+        "target": "No nominal runaway",
+        "observed": "Compact thermal proxy available",
+        "status": "unverified",
+        "evidence": "Model; silicon required"
+      },
+      {
+        "id": "T0-BOND",
+        "title": "Hybrid-bond reliability",
+        "target": "Continuity + margin",
+        "observed": "No test vehicle",
+        "status": "unverified",
+        "evidence": "Silicon"
+      },
+      {
+        "id": "T0-GATHER",
+        "title": "Gather value",
+        "target": "Host traffic reduction > 0",
+        "observed": "48% workload proxy; RTL pending",
+        "status": "unverified",
+        "evidence": "Cycle proxy; RTL required"
+      },
+      {
+        "id": "T0-ECC",
+        "title": "ECC fault campaign",
+        "target": "All specified injections pass",
+        "observed": "Controller hook synthesized; campaign pending",
+        "status": "unverified",
+        "evidence": "RTL required"
+      },
+      {
+        "id": "T0-LANE-REPAIR",
+        "title": "Lane repair",
+        "target": "Remap + BERT pass",
+        "observed": "PHY model not connected",
+        "status": "unverified",
+        "evidence": "RTL / silicon"
+      },
+      {
+        "id": "T0-LIVENESS",
+        "title": "Controller liveness",
+        "target": "No deadlocks",
+        "observed": "32-cycle bounded proof passes",
+        "status": "unverified",
+        "evidence": "Bounded formal; unbounded proof required"
+      },
+      {
+        "id": "T0-REFRESH",
+        "title": "Refresh safety",
+        "target": "Zero missed deadlines",
+        "observed": "32-cycle refresh-priority proof passes",
+        "status": "unverified",
+        "evidence": "Bounded formal; full deadline proof required"
+      }
+    ],
+    "recommendations": [
+      {
+        "severity": "good",
+        "title": "Raw bandwidth clears the analytical T0 threshold",
+        "detail": "The result still needs cycle, RTL, and silicon evidence before the gate is verified."
+      }
+    ]
+  },
+  "campaign": {
+    "workloads": [
+      {
+        "id": "dense-stream",
+        "name": "Dense stream",
+        "description": "Long sequential tensor and activation transfers.",
+        "requests": 4096,
+        "usefulBandwidthTbps": 1.024,
+        "utilizationPercent": 100,
+        "averageLatencyNs": 23.88188288762019,
+        "p99LatencyNs": 28.846153846153847,
+        "rowHitPercent": 14.9169921875,
+        "queueDepthP99": 0,
+        "hostTrafficReductionPercent": 0,
+        "refreshStalls": 7
+      },
+      {
+        "id": "bank-random",
+        "name": "Banked random",
+        "description": "Hostile uniformly distributed cache-line traffic.",
+        "requests": 4096,
+        "usefulBandwidthTbps": 1.024,
+        "utilizationPercent": 100,
+        "averageLatencyNs": 27.11369441105769,
+        "p99LatencyNs": 50,
+        "rowHitPercent": 3.41796875,
+        "queueDepthP99": 1,
+        "hostTrafficReductionPercent": 0,
+        "refreshStalls": 7
+      },
+      {
+        "id": "kv-decode",
+        "name": "KV decode",
+        "description": "Read-dominant attention traffic with temporal locality.",
+        "requests": 4096,
+        "usefulBandwidthTbps": 1.23904,
+        "utilizationPercent": 100,
+        "averageLatencyNs": 14.26250751201923,
+        "p99LatencyNs": 28.846153846153847,
+        "rowHitPercent": 65.4052734375,
+        "queueDepthP99": 1,
+        "hostTrafficReductionPercent": 21,
+        "refreshStalls": 7
+      },
+      {
+        "id": "sparse-gather",
+        "name": "Sparse gather",
+        "description": "Index-driven reads combined on the intelligent base die.",
+        "requests": 4096,
+        "usefulBandwidthTbps": 1.51552,
+        "utilizationPercent": 100,
+        "averageLatencyNs": 19.771634615384613,
+        "p99LatencyNs": 29.807692307692307,
+        "rowHitPercent": 35.9375,
+        "queueDepthP99": 1,
+        "hostTrafficReductionPercent": 48,
+        "refreshStalls": 7
+      }
+    ],
+    "power": {
+      "phyWatts": 1.2288,
+      "controllerWatts": 4.70728,
+      "sramWatts": 2.69,
+      "dramWatts": 7.1776,
+      "totalWatts": 15.80368
+    },
+    "thermal": {
+      "ambientC": 35,
+      "junctionC": 62.1823296,
+      "hotspotC": 66.9823296,
+      "marginC": 18.0176704,
+      "throttlingRequired": false
+    },
+    "physicalProxy": {
+      "totalAreaMm2": 26.398400000000002,
+      "logicAreaMm2": 11.44,
+      "sramAreaMm2": 8.16,
+      "phyAreaMm2": 4.1984,
+      "estimatedFmaxMhz": 1104,
+      "timingMarginPs": 94.20289855072463
+    },
+    "reliability": {
+      "secdedCoveragePercent": 99.999,
+      "crcResidualErrorExponent": -18,
+      "spareLanes": 32,
+      "repairCoveragePercent": 3.0303030303030303,
+      "refreshDeadlineMisses": 0
+    },
+    "domains": [
+      {
+        "id": "architecture",
+        "name": "Architecture contract",
+        "maturity": "verified-proxy",
+        "completionPercent": 100,
+        "evidence": "Versioned schema, arithmetic checks, deterministic parameter model",
+        "nextGate": "Calibrate against measured silicon"
+      },
+      {
+        "id": "workloads",
+        "name": "Workload campaign",
+        "maturity": "verified-proxy",
+        "completionPercent": 100,
+        "evidence": "Four seeded cycle-level traffic profiles with latency and queue metrics",
+        "nextGate": "Cross-check against Ramulator and production traces"
+      },
+      {
+        "id": "rtl",
+        "name": "Digital RTL slice",
+        "maturity": "implemented",
+        "completionPercent": 72,
+        "evidence": "Synthesizable channel controller and 16-channel composition",
+        "nextGate": "Full ECC datapath, gather engine and long regressions"
+      },
+      {
+        "id": "formal",
+        "name": "Formal safety",
+        "maturity": "partial",
+        "completionPercent": 42,
+        "evidence": "Bounded refresh and controller-progress assertions",
+        "nextGate": "Unbounded liveness and full protocol proof"
+      },
+      {
+        "id": "physical",
+        "name": "Physical design",
+        "maturity": "partial",
+        "completionPercent": 28,
+        "evidence": "Open-source RTL synthesis plus analytical area/timing proxy",
+        "nextGate": "OpenROAD placement, CTS, extraction and timing closure with a public PDK"
+      },
+      {
+        "id": "multiphysics",
+        "name": "PHY/package/thermal",
+        "maturity": "partial",
+        "completionPercent": 34,
+        "evidence": "Link-risk, power and compact thermal models",
+        "nextGate": "openEMS, Elmer and package-geometry correlation"
+      },
+      {
+        "id": "release",
+        "name": "Evidence and release",
+        "maturity": "implemented",
+        "completionPercent": 82,
+        "evidence": "Machine-readable gate registry, tests and exportable snapshot",
+        "nextGate": "Signed multi-run evidence bundle and independent reproduction"
+      },
+      {
+        "id": "silicon",
+        "name": "Foundry and silicon",
+        "maturity": "external",
+        "completionPercent": 0,
+        "evidence": "No private PDK, test vehicle or measured silicon",
+        "nextGate": "Foundry engagement, tapeout, bring-up and model calibration"
+      }
+    ],
+    "openSourceReadinessPercent": 65.42857142857143,
+    "overallProgramReadinessPercent": 57.25,
+    "siliconEvidencePercent": 0,
+    "blockers": [
+      "Cycle model requires correlation against Ramulator and production workload traces.",
+      "RTL slice requires full datapath integration and independent verification closure.",
+      "Physical proxy requires public-PDK OpenROAD closure before it is physical evidence.",
+      "PHY, hybrid-bond, package and thermal assumptions require high-fidelity simulation and test vehicles.",
+      "Final bandwidth, energy, repair and reliability gates require fabricated T0 silicon."
+    ]
+  },
+  "rtl": {
+    "schema_version": "1.0",
+    "tool": "YoWASP Yosys 0.65.176-dev.1145",
+    "top": "aimem_t0_top",
+    "channels": 16,
+    "status": "passed",
+    "cells": 2531,
+    "wires": 2703,
+    "wire_bits": 24804,
+    "checks": [
+      "SystemVerilog parsed",
+      "16-channel hierarchy elaborated",
+      "Processes lowered",
+      "Memories normalized",
+      "Generic synthesis completed",
+      "32-cycle bounded safety proof completed"
+    ],
+    "limitations": [
+      "Generic cells only; no foundry liberty mapping",
+      "Bounded assertions are not an unbounded liveness proof",
+      "ECC datapath and gather engine remain interface-level placeholders"
+    ]
+  },
+  "ranked_sweep": [
+    {
+      "lane_rate_gbps": 12,
+      "sram_mib": 32,
+      "raw_bandwidth_tbps": 1.536,
+      "streaming_bandwidth_tbps": 1.28256,
+      "phy_power_watts": 1.8431999999999997,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 12,
+      "sram_mib": 16,
+      "raw_bandwidth_tbps": 1.536,
+      "streaming_bandwidth_tbps": 1.25952,
+      "phy_power_watts": 1.8431999999999997,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 12,
+      "sram_mib": 8,
+      "raw_bandwidth_tbps": 1.536,
+      "streaming_bandwidth_tbps": 1.23648,
+      "phy_power_watts": 1.8431999999999997,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 10,
+      "sram_mib": 32,
+      "raw_bandwidth_tbps": 1.28,
+      "streaming_bandwidth_tbps": 1.0944,
+      "phy_power_watts": 1.536,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 10,
+      "sram_mib": 16,
+      "raw_bandwidth_tbps": 1.28,
+      "streaming_bandwidth_tbps": 1.0752,
+      "phy_power_watts": 1.536,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 10,
+      "sram_mib": 8,
+      "raw_bandwidth_tbps": 1.28,
+      "streaming_bandwidth_tbps": 1.056,
+      "phy_power_watts": 1.536,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 8,
+      "sram_mib": 32,
+      "raw_bandwidth_tbps": 1.024,
+      "streaming_bandwidth_tbps": 0.896,
+      "phy_power_watts": 1.2288,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 8,
+      "sram_mib": 16,
+      "raw_bandwidth_tbps": 1.024,
+      "streaming_bandwidth_tbps": 0.88064,
+      "phy_power_watts": 1.2288,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 8,
+      "sram_mib": 8,
+      "raw_bandwidth_tbps": 1.024,
+      "streaming_bandwidth_tbps": 0.8652799999999999,
+      "phy_power_watts": 1.2288,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 4,
+      "sram_mib": 32,
+      "raw_bandwidth_tbps": 0.512,
+      "streaming_bandwidth_tbps": 0.45312,
+      "phy_power_watts": 0.6144,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 4,
+      "sram_mib": 16,
+      "raw_bandwidth_tbps": 0.512,
+      "streaming_bandwidth_tbps": 0.44544,
+      "phy_power_watts": 0.6144,
+      "analytical_gates_passed": 0
+    },
+    {
+      "lane_rate_gbps": 4,
+      "sram_mib": 8,
+      "raw_bandwidth_tbps": 0.512,
+      "streaming_bandwidth_tbps": 0.43776,
+      "phy_power_watts": 0.6144,
+      "analytical_gates_passed": 0
+    }
+  ],
+  "provenance": {
+    "deterministic": true,
+    "workload_seed_family": "aimem-t0-0x1a2b3c4d",
+    "request_count_per_workload": 4096,
+    "source_files": [
+      "design/spec/aimem-t0.json",
+      "design/spec/t0-completion.json",
+      "lib/t0-model.ts",
+      "lib/t0-campaign.ts",
+      "rtl/aimem_t0_channel.sv",
+      "rtl/aimem_t0_top.sv",
+      "formal/aimem_t0_channel_formal.sv"
+    ]
+  }
+}

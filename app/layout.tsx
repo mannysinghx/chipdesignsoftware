@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 const title = 'AIMEM Design Studio — T0 Pathfinder';
 const description =
-  'AI-native architecture exploration for the AIMEM-X1 1,024-lane memory pathfinder.';
+  'Evidence-driven architecture, workload, RTL, formal, physical, and thermal exploration for the AIMEM-X1 1,024-lane T0 pathfinder.';
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
