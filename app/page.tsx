@@ -6,10 +6,11 @@ import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep, type GateStatus, type T0Conf
 import { evaluateT1DigitalCampaign, type T1DigitalCampaign } from '@/lib/t1-campaign';
 import { DEFAULT_T1_CONFIG, evaluateT1, type T1Config } from '@/lib/t1-model';
 import { evaluateT1PhysicalProxy, type T1PhysicalProxy } from '@/lib/t1-physical';
+import { evaluateFoundryReadiness } from '@/lib/foundry-readiness';
 import correlation from '@/evidence/ramulator-correlation.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 't1' | 'guide';
+type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 't1' | 'foundry' | 'guide';
 type UserLevel = 'beginner' | 'practitioner' | 'expert';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
@@ -21,6 +22,7 @@ const views: Array<{ id: View; label: string }> = [
   { id: 'explore', label: 'Experiment' },
   { id: 'gates', label: 'Gates' },
   { id: 't1', label: 'T1 scale-up' },
+  { id: 'foundry', label: 'Foundry readiness' },
   { id: 'guide', label: 'User guide' },
 ];
 
@@ -46,17 +48,25 @@ const t1Hierarchy = [
 
 const guideHierarchy = [
   { id: 'guide-start', label: 'Start here', meta: 'Choose your level' },
-  { id: 'guide-workflow', label: 'End-to-end workflow', meta: '8 steps' },
-  { id: 'guide-views', label: 'Platform views', meta: '7 workspaces' },
+  { id: 'guide-workflow', label: 'End-to-end workflow', meta: '9 steps' },
+  { id: 'guide-views', label: 'Platform views', meta: '8 workspaces' },
   { id: 'guide-roles', label: 'Role-based paths', meta: '6 disciplines' },
   { id: 'guide-evidence', label: 'Evidence language', meta: '4 statuses' },
   { id: 'guide-recipes', label: 'Practical recipes', meta: '4 walkthroughs' },
   { id: 'guide-help', label: 'Help & troubleshooting', meta: 'Common issues' },
 ];
 
+const foundryHierarchy = [
+  { id: 'foundry-boundary', label: 'Trust boundary', meta: '4 stages' },
+  { id: 'foundry-inputs', label: 'Qualified inputs', meta: '8 contracts' },
+  { id: 'foundry-approvals', label: 'Approval chain', meta: '6 decisions' },
+  { id: 'foundry-policy', label: 'Release policy', meta: 'deny by default' },
+  { id: 'foundry-roles', label: 'Human authority', meta: 'named owners' },
+];
+
 export default function Home() {
   const [config, setConfig] = useState<T0Config>(DEFAULT_T0_CONFIG);
-  const [view, setView] = useState<View>('t1');
+  const [view, setView] = useState<View>('foundry');
   const [selectedNode, setSelectedNode] = useState('system');
   const [selectedTier, setSelectedTier] = useState(3);
   const [runProgress, setRunProgress] = useState(0);
@@ -70,7 +80,8 @@ export default function Home() {
   const t1Evaluation = useMemo(() => evaluateT1(t1Config, evaluation.gates), [t1Config, evaluation.gates]);
   const t1Campaign = useMemo(() => evaluateT1DigitalCampaign(t1Config), [t1Config]);
   const t1Physical = useMemo(() => evaluateT1PhysicalProxy(t1Config), [t1Config]);
-  const activeHierarchy = view === 'guide' ? guideHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
+  const foundryReadiness = useMemo(() => evaluateFoundryReadiness(evaluation.gates), [evaluation.gates]);
+  const activeHierarchy = view === 'guide' ? guideHierarchy : view === 'foundry' ? foundryHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current);
@@ -106,18 +117,19 @@ export default function Home() {
   const exportSnapshot = () => {
     const snapshot = {
       schema_version: '1.0',
-      product: 'AIMEM-X1 T0 Pathfinder',
+      product: view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
       fidelity: 'multi-domain-open-source-proxy',
       generated_at: new Date().toISOString(),
       config,
       evaluation,
       campaign,
-      t1: view === 't1' ? { config: t1Config, evaluation: t1Evaluation, campaign: t1Campaign, physical: t1Physical, evidence_class: 'deterministic digital and coupled analytical physical proxy' } : undefined,
+      t1: view === 't1' || view === 'foundry' ? { config: t1Config, evaluation: t1Evaluation, campaign: t1Campaign, physical: t1Physical, evidence_class: 'deterministic digital and coupled analytical physical proxy' } : undefined,
+      foundry_readiness: view === 'foundry' ? foundryReadiness : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'aimem-t0-snapshot.json';
+    anchor.download = view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -133,7 +145,7 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>{view === 'guide' ? 'Platform Guide' : view === 't1' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
+            <h1>{view === 'guide' ? 'Platform Guide' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
@@ -144,7 +156,7 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> {view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
+          <span className="baseline-status"><i /> {view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
@@ -152,11 +164,11 @@ export default function Home() {
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
-            <div className="section-heading"><span>{view === 'guide' ? 'Guide contents' : view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
+            <div className="section-heading"><span>{view === 'guide' ? 'Guide contents' : view === 'foundry' ? 'Foundry-entry contract' : view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
             <div className="hierarchy-list">
               {activeHierarchy.map((item, index) => (
-                <button key={item.id} className={(view === 't1' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => {
-                  if (view === 'guide') {
+                <button key={item.id} className={(view === 't1' || view === 'foundry' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => {
+                  if (view === 'guide' || view === 'foundry') {
                     setSelectedNode(item.id);
                     document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   } else if (view !== 't1') {
@@ -172,38 +184,46 @@ export default function Home() {
           </section>
 
           <section className="rail-section evidence-summary">
-            <div className="section-heading"><span>{view === 'guide' ? 'Guide coverage' : view === 't1' ? 'T1 entry verification' : 'Open-source readiness'}</span><b>{view === 'guide' ? 'E2E' : view === 't1' ? `${t1Evaluation.verifiedT0Gates}/12` : `${campaign.openSourceReadinessPercent.toFixed(0)}%`}</b></div>
-            {view === 'guide' ? <><div className="evidence-bar" aria-label="End-to-end guide coverage complete"><i className="pass" style={{ width: '100%' }} /></div><div className="evidence-legend"><span><i className="dot pass" />Beginner</span><span><i className="dot provisional" />Practitioner</span><span><i className="dot pending" />Expert</span></div></> : <><div className="evidence-bar" aria-label={`${passCount} analytical gates pass, ${failCount} fail`}><i className="pass" style={{ width: `${(passCount / 12) * 100}%` }} /><i className="provisional" style={{ width: `${(provisionalCount / 12) * 100}%` }} /><i className="fail" style={{ width: `${(failCount / 12) * 100}%` }} /></div><div className="evidence-legend"><span><i className="dot provisional" />{provisionalCount} proxy</span><span><i className="dot fail" />{failCount} fail</span><span><i className="dot pending" />{12 - passCount - provisionalCount - failCount} external</span></div></>}
+            <div className="section-heading"><span>{view === 'guide' ? 'Guide coverage' : view === 'foundry' ? 'Qualified inputs' : view === 't1' ? 'T1 entry verification' : 'Open-source readiness'}</span><b>{view === 'guide' ? 'E2E' : view === 'foundry' ? `${foundryReadiness.readyInputs}/${foundryReadiness.totalInputs}` : view === 't1' ? `${t1Evaluation.verifiedT0Gates}/12` : `${campaign.openSourceReadinessPercent.toFixed(0)}%`}</b></div>
+            {view === 'guide' ? <><div className="evidence-bar" aria-label="End-to-end guide coverage complete"><i className="pass" style={{ width: '100%' }} /></div><div className="evidence-legend"><span><i className="dot pass" />Beginner</span><span><i className="dot provisional" />Practitioner</span><span><i className="dot pending" />Expert</span></div></> : view === 'foundry' ? <><div className="evidence-bar" aria-label={`${foundryReadiness.readyInputs} ready, ${foundryReadiness.plannedInputs} planned, ${foundryReadiness.absentInputs} absent inputs`}><i className="pass" style={{ width: `${(foundryReadiness.readyInputs / foundryReadiness.totalInputs) * 100}%` }} /><i className="provisional" style={{ width: `${(foundryReadiness.plannedInputs / foundryReadiness.totalInputs) * 100}%` }} /></div><div className="evidence-legend"><span><i className="dot pass" />{foundryReadiness.readyInputs} ready</span><span><i className="dot provisional" />{foundryReadiness.plannedInputs} planned</span><span><i className="dot pending" />{foundryReadiness.absentInputs} absent</span></div></> : <><div className="evidence-bar" aria-label={`${passCount} analytical gates pass, ${failCount} fail`}><i className="pass" style={{ width: `${(passCount / 12) * 100}%` }} /><i className="provisional" style={{ width: `${(provisionalCount / 12) * 100}%` }} /><i className="fail" style={{ width: `${(failCount / 12) * 100}%` }} /></div><div className="evidence-legend"><span><i className="dot provisional" />{provisionalCount} proxy</span><span><i className="dot fail" />{failCount} fail</span><span><i className="dot pending" />{12 - passCount - provisionalCount - failCount} external</span></div></>}
           </section>
 
           <section className="assistant-card">
-            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 'guide' ? 'Embedded guide' : view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
-            <p className="assistant-tag watch">{view === 'guide' ? 'Start with the guided workflow; every result links to its evidence class' : view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
-            <p className="assistant-detail">{view === 'guide' ? 'Choose a level, follow the eight-step flow, then use the role paths and recipes for deeper work.' : view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
-            <button onClick={() => setView(view === 'guide' ? 'readiness' : view === 't1' ? 'gates' : 'readiness')}>{view === 'guide' ? 'Open first workspace' : view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
+            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 'guide' ? 'Embedded guide' : view === 'foundry' ? 'Foundry entry agent' : view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
+            <p className="assistant-tag watch">{view === 'guide' ? 'Start with the guided workflow; every result links to its evidence class' : view === 'foundry' ? 'Foundry entry remains on hold; the secure handoff contract is prepared' : view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
+            <p className="assistant-detail">{view === 'guide' ? 'Choose a level, follow the eight-step flow, then use the role paths and recipes for deeper work.' : view === 'foundry' ? foundryReadiness.blockers[0] : view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
+            <button onClick={() => setView(view === 'guide' ? 'readiness' : view === 'foundry' || view === 't1' ? 'gates' : 'readiness')}>{view === 'guide' ? 'Open first workspace' : view === 'foundry' || view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
           </section>
         </aside>
 
         <section className="main-stage">
           <div className="stage-header">
             <div>
-              <p className="eyebrow">{view === 'guide' ? 'Embedded learning center' : view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
-              <h2>{view === 'guide' ? 'End-to-end user guide' : view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p className="eyebrow">{view === 'guide' ? 'Embedded learning center' : view === 'foundry' ? 'Restricted-lane control plane' : view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
+              <h2>{view === 'guide' ? 'End-to-end user guide' : view === 'foundry' ? 'T1 foundry-entry readiness' : view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
+              <p>{view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 'foundry' ? 'Prepare a secure, auditable path from the open-source control plane into a future authorized foundry enclave—without moving proprietary inputs into this platform.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${view === 'guide' || view === 't1' ? 'running' : runStatus}`}>{view === 'guide' ? `${userLevel} path` : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
-              <button className="primary-button" onClick={view === 'guide' ? () => setView('readiness') : view === 't1' ? () => setView('gates') : startSweep}>{view === 'guide' ? 'Start guided workflow' : view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
+              <span className={`fidelity-pill ${view === 'guide' || view === 't1' || view === 'foundry' ? 'running' : runStatus}`}>{view === 'guide' ? `${userLevel} path` : view === 'foundry' ? 'Policy enforced · hold' : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
+              <button className="primary-button" onClick={view === 'guide' ? () => setView('readiness') : view === 'foundry' || view === 't1' ? () => setView('gates') : startSweep}>{view === 'guide' ? 'Start guided workflow' : view === 'foundry' ? 'Review blocking gates' : view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
 
           {view === 'guide' ? (
             <div className="metric-strip">
               <Metric label="Experience levels" value="3" unit="paths" accent />
-              <Metric label="Workflow steps" value="8" unit="steps" />
-              <Metric label="Platform views" value="7" unit="views" />
+              <Metric label="Workflow steps" value="9" unit="steps" />
+              <Metric label="Platform views" value="8" unit="views" />
               <Metric label="Role tracks" value="6" unit="roles" />
               <Metric label="Evidence states" value="4" unit="states" />
+            </div>
+          ) : view === 'foundry' ? (
+            <div className="metric-strip">
+              <Metric label="Entry decision" value="HOLD" unit="policy" accent />
+              <Metric label="Measured T0 gates" value={String(foundryReadiness.verifiedT0Gates)} unit={`/${foundryReadiness.requiredT0Gates}`} />
+              <Metric label="Qualified inputs" value={String(foundryReadiness.readyInputs)} unit={`/${foundryReadiness.totalInputs}`} />
+              <Metric label="Boundary stages" value={String(foundryReadiness.boundary.length)} unit="stages" />
+              <Metric label="Human approvals" value={String(foundryReadiness.approvals.length)} unit="required" />
             </div>
           ) : view === 't1' ? (
             <div className="metric-strip">
@@ -230,16 +250,17 @@ export default function Home() {
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
           {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} />}
+          {view === 'foundry' && <FoundryReadinessView readiness={foundryReadiness} />}
           {view === 'guide' && <GuideView level={userLevel} setLevel={setUserLevel} navigate={setView} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>{view === 'guide' ? 'Guide: embedded · contextual · role-aware' : view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
-            <span>{view === 'guide' ? 'Use the evidence labels before making any engineering decision' : view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
+            <span>{view === 'guide' ? 'Guide: embedded · contextual · role-aware' : view === 'foundry' ? 'Contract: t1-enclave-handoff.json · schema 1.0.0' : view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
+            <span>{view === 'guide' ? 'Use the evidence labels before making any engineering decision' : view === 'foundry' ? 'No proprietary PDK, IP, package, or signoff data is bundled or exported' : view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
           </footer>
         </section>
 
-        {view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
+        {view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 'foundry' ? <FoundryControlPanel readiness={foundryReadiness} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
@@ -334,7 +355,8 @@ function GuideView({ level, setLevel, navigate }: {
     { number: '05', title: 'Run a design-space experiment', view: 'explore', action: 'Adjust T0 controls, run the 12-point lane-rate/SRAM sweep, inspect the chart, and compare ranked candidates.', output: 'A reproducible candidate comparison with bandwidth, power, and proxy-gate context.', stop: 'Treat a favorable point as a hypothesis until higher-fidelity evidence replaces it.' },
     { number: '06', title: 'Audit decision gates', view: 'gates', action: 'Read each target, current observation, evidence type, and status before recommending promotion.', output: 'A requirement-by-requirement decision record and explicit list of missing proof.', stop: 'An agent explanation can never upgrade a gate without its named artifact.' },
     { number: '07', title: 'Explore the T1 scale-up', view: 't1', action: 'Sweep capacity, lane rate, PHY energy, bond pitch, route length, cooling, and activity; inspect digital and multiphysics proxies.', output: 'A bounded 8-high, 4,096-lane T1 research plan with solver handoffs.', stop: 'Foundry entry stays on hold until measured T0 and qualified process/package evidence exists.' },
-    { number: '08', title: 'Export and review', view: null, action: 'Use Export evidence in the header after setting the desired configuration. Store the JSON with the review decision and source revision.', output: 'A portable snapshot of configuration, calculations, campaign results, evidence class, and timestamp.', stop: 'The export records the current model state; it is not a signed release or signoff certificate.' },
+    { number: '08', title: 'Prepare foundry entry', view: 'foundry', action: 'Review the trust boundary, qualified inputs, approval chain, release policy, and named human owners.', output: 'A secure handoff contract that keeps proprietary inputs inside an authorized enclave.', stop: 'A prepared contract is not fabrication authorization; every measured gate, qualified input, and human approval remains mandatory.' },
+    { number: '09', title: 'Export and review', view: null, action: 'Use Export evidence in the header after setting the desired configuration. Store the JSON with the review decision and source revision.', output: 'A portable snapshot of configuration, calculations, campaign results, evidence class, and timestamp.', stop: 'The export records the current model state; it is not a signed release or signoff certificate.' },
   ];
   const workspaceCards: Array<{ view: View; title: string; purpose: string; firstQuestion: string }> = [
     { view: 'readiness', title: 'Readiness', purpose: 'Program-level evidence and blockers', firstQuestion: 'What is actually complete, and what still depends on external proof?' },
@@ -344,14 +366,15 @@ function GuideView({ level, setLevel, navigate }: {
     { view: 'explore', title: 'Experiment', purpose: 'T0 parameter sweep and ranking', firstQuestion: 'Which candidate trades bandwidth, SRAM, PHY power, and risk most effectively?' },
     { view: 'gates', title: 'Gates', purpose: 'Requirement-level decision audit', firstQuestion: 'What evidence is required before a result can be called passing?' },
     { view: 't1', title: 'T1 scale-up', purpose: 'Next-milestone digital and physical proxies', firstQuestion: 'What breaks when the stack, lanes, SRAM, routing, and thermal load scale up?' },
+    { view: 'foundry', title: 'Foundry readiness', purpose: 'Secure restricted-lane handoff', firstQuestion: 'Which inputs, controls, and human approvals are still required before fabrication review?' },
   ];
   const roles = [
-    ['New user / executive', 'Readiness → Gates → T1', 'Focus on decision state, blockers, evidence class, and irreversible-spend boundaries.'],
+    ['New user / executive', 'Readiness → Gates → T1 → Foundry', 'Focus on decision state, blockers, evidence class, and irreversible-spend boundaries.'],
     ['System architect', 'Architecture → Workloads → Experiment → Gates', 'Challenge organization, address mapping, efficiency assumptions, and rejected alternatives.'],
     ['Performance engineer', 'Workloads → Correlation → Experiment', 'Compare seeded workloads, inspect latency/locality gaps, and preserve input lineage.'],
     ['RTL / verification engineer', 'Readiness → Gates → Architecture', 'Use gate IDs and next artifacts to drive controller, ECC, repair, refresh, and liveness work.'],
-    ['Physical / package / thermal engineer', 'T1 → Readiness → Gates', 'Replace analytical indicators with OpenROAD, openEMS, Elmer, and OpenFOAM artifacts.'],
-    ['Program or release lead', 'Readiness → Gates → Export', 'Require reproducibility, review blockers, record waivers, and prevent unsupported promotion.'],
+    ['Physical / package / thermal engineer', 'T1 → Foundry → Gates', 'Replace analytical indicators with OpenROAD, openEMS, Elmer, and OpenFOAM artifacts, then define qualified signoff handoffs.'],
+    ['Program or release lead', 'Readiness → Gates → Foundry → Export', 'Require reproducibility, review blockers, record waivers, and prevent unsupported promotion.'],
   ];
   const evidenceStates = [
     ['Pass', 'The named verification method and required artifact satisfy the gate. Use only when the evidence contract is met.'],
@@ -375,7 +398,7 @@ function GuideView({ level, setLevel, navigate }: {
       </section>
 
       <section className="panel guide-workflow-panel" id="guide-workflow">
-        <PanelTitle label="End-to-end operating workflow" meta={`${currentLevel.label} path · eight steps`} />
+        <PanelTitle label="End-to-end operating workflow" meta={`${currentLevel.label} path · nine steps`} />
         <div className="guide-workflow">{workflow.map((step) => <article key={step.number}><b>{step.number}</b><div><h3>{step.title}</h3><p>{step.action}</p><dl><div><dt>Expected output</dt><dd>{step.output}</dd></div><div><dt>Evidence stop</dt><dd>{step.stop}</dd></div></dl></div>{step.view ? <button onClick={() => navigate(step.view)}>Open {step.view === 'explore' ? 'experiment' : step.view}<span>→</span></button> : <span className="guide-header-hint">Header action</span>}</article>)}</div>
       </section>
 
@@ -428,8 +451,8 @@ function T1ScaleUpView({ config, evaluation, campaign, physical }: {
   const sequence = [
     ['01', 'Freeze the T1 contract', 'Version all source-defined targets and explicitly tag derived channel, bank, and region assumptions.', 'complete'],
     ['02', 'Scale digital models', 'Extend traces, address mapping, NoC traffic, controller composition, ECC, refresh, and repair to 64 channels.', 'complete'],
-    ['03', 'Run physical and multiphysics proxies', 'Sweep public-PDK routing plus eight-tier thermal, link, power-delivery, and package geometry studies.', 'active'],
-    ['04', 'Authorize foundry entry', 'Proceed only after measured T0 gates pass and qualified 2 nm, SRAM, PHY, bond, and signoff inputs exist.', 'blocked'],
+    ['03', 'Run physical and multiphysics proxies', 'Sweep public-PDK routing plus eight-tier thermal, link, power-delivery, and package geometry studies.', 'complete'],
+    ['04', 'Prepare foundry-entry authorization', 'Use the secure handoff workbench; promotion remains blocked until measured T0 gates and qualified foundry inputs exist.', 'active'],
   ];
 
   return (
@@ -547,6 +570,75 @@ function T1ScaleUpView({ config, evaluation, campaign, physical }: {
       </section>
 
       <section className="gate-note"><strong>Open-source boundary</strong><p>The product, models, RTL, public-PDK research flows, and first-order multiphysics studies remain open source. Qualified 2 nm implementation, production SRAM/PHY IP, hybrid-bond process data, and foundry signoff cannot be truthfully replaced by public proxies.</p></section>
+    </div>
+  );
+}
+
+function FoundryReadinessView({ readiness }: {
+  readiness: ReturnType<typeof evaluateFoundryReadiness>;
+}) {
+  const policies = [
+    ['Measured evidence first', 'No promotion while any T0 gate lacks reviewed, measured passing evidence.'],
+    ['Immutable execution', 'Reject unsigned manifests, unpinned tools, unhashed inputs, or undeclared checks.'],
+    ['Deny export by default', 'Raw PDK, IP, package, netlist, layout, credential, and signoff artifacts remain inside the enclave.'],
+    ['Human release authority', 'Agents may prepare, execute, summarize, and flag; only named human approvers may authorize tapeout.'],
+    ['Time-bounded waivers', 'Every exception records its owner, rationale, scope, compensating control, and expiry.'],
+  ];
+  const roles = [
+    ['Platform engineering', 'Own the open manifest schema, policy engine, evidence graph, and reproducible orchestration.'],
+    ['Security + legal', 'Authorize identities, secrets, licenses, data residency, retention, exports, and incident response.'],
+    ['Foundry + IP owners', 'Qualify and mount restricted PDK, SRAM, PHY, package, and signoff inputs inside the enclave.'],
+    ['Domain leads', 'Review timing, power, physical verification, reliability, DFT, package, and thermal evidence.'],
+    ['Release board', 'Resolve blockers and waivers, then make the final fabrication-spend decision.'],
+  ];
+
+  return (
+    <div className="foundry-layout">
+      <section className="panel foundry-hero">
+        <div className="foundry-decision"><span>Fabrication decision</span><strong>{readiness.decision}</strong><small>Policy evaluation is automatic; final authorization always remains human.</small></div>
+        <div className="foundry-hero-copy">
+          <p className="eyebrow accent">Foundry handoff contract prepared</p>
+          <h3>Keep the platform open. Keep qualified process data contained.</h3>
+          <p>The open-source product can specify, orchestrate, audit, and visualize a restricted signoff job. Licensed PDK, IP, package, and manufacturing data is never bundled here and must be consumed only in an authorized environment.</p>
+          <div className="readiness-tags"><span className="good">Open control contract ready</span><span className="good">Deny-by-default export</span><span className="pending">{readiness.verifiedT0Gates}/{readiness.requiredT0Gates} measured T0 gates</span><span className="pending">{readiness.readyInputs}/{readiness.totalInputs} qualified inputs</span></div>
+        </div>
+        <div className="foundry-prepared"><span>Platform preparation</span><strong>{readiness.platformPreparedPercent}%</strong><small>Counts implemented and planned control-plane work only. It is not foundry readiness.</small></div>
+      </section>
+
+      <section className="panel foundry-boundary-panel" id="foundry-boundary">
+        <PanelTitle label="Trust-boundary data flow" meta="One-way, allowlisted evidence return" />
+        <div className="foundry-flow">
+          {readiness.boundary.map((stage, index) => <article key={stage.id} className={stage.zone}><div className="foundry-flow-head"><b>{String(index + 1).padStart(2, '0')}</b><span>{stage.zone}</span></div><h3>{stage.title}</h3><dl><div><dt>Accepts</dt><dd>{stage.accepts}</dd></div><div><dt>Emits</dt><dd>{stage.emits}</dd></div></dl>{index < readiness.boundary.length - 1 && <i aria-hidden="true">→</i>}</article>)}
+        </div>
+        <div className="foundry-boundary-rule"><strong>Boundary invariant</strong><p>No proprietary source artifact crosses back into the open control plane. Only explicitly approved metrics, sanitized findings, hashes, provenance, and human decisions may return.</p></div>
+      </section>
+
+      <section className="panel foundry-input-panel" id="foundry-inputs">
+        <PanelTitle label="Qualified input matrix" meta={`${readiness.readyInputs} ready · ${readiness.plannedInputs} planned · ${readiness.absentInputs} absent`} />
+        <div className="foundry-input-table">
+          <div className="foundry-input-row head"><span>Domain / input</span><span>Sensitivity</span><span>Status</span><span>Owner</span><span>Required artifact and export rule</span></div>
+          {readiness.inputs.map((input) => <div className="foundry-input-row" key={input.id}><span><strong>{input.title}</strong><small>{input.domain}</small></span><span className={`foundry-chip ${input.sensitivity}`}>{input.sensitivity}</span><span className={`foundry-chip ${input.status}`}>{input.status}</span><span>{input.owner}</span><span><b>{input.requiredArtifact}</b><small>{input.exportPolicy}</small></span></div>)}
+        </div>
+      </section>
+
+      <section className="panel foundry-approval-panel" id="foundry-approvals">
+        <PanelTitle label="Human approval chain" meta="No agent may self-promote a release" />
+        <div className="foundry-approvals">
+          {readiness.approvals.map((approval, index) => <article key={approval.id} className={approval.status}><b>{String(index + 1).padStart(2, '0')}</b><div><div><h3>{approval.title}</h3><span>{approval.status}</span></div><p>{approval.exitEvidence}</p><small>Accountable owner · {approval.owner}</small></div></article>)}
+        </div>
+      </section>
+
+      <section className="panel foundry-policy-panel" id="foundry-policy">
+        <PanelTitle label="Automatic release policy" meta="Every rule is fail closed" />
+        <div className="foundry-policy-list">{policies.map(([title, detail], index) => <article key={title}><b>{String(index + 1).padStart(2, '0')}</b><div><h3>{title}</h3><p>{detail}</p></div></article>)}</div>
+      </section>
+
+      <section className="panel foundry-role-panel" id="foundry-roles">
+        <PanelTitle label="Responsibility map" meta="Named ownership for every irreversible decision" />
+        <div className="foundry-role-grid">{roles.map(([role, responsibility]) => <article key={role}><h3>{role}</h3><p>{responsibility}</p></article>)}</div>
+      </section>
+
+      <section className="gate-note foundry-hold-note"><strong>Current decision · HOLD</strong><p>{readiness.blockers.join(' ')} The next authorized action is to complete the isolated runner design and obtain real T0 and foundry evidence—not to infer a pass from public proxies.</p></section>
     </div>
   );
 }
@@ -854,11 +946,35 @@ function GuideControlPanel({ level, setLevel, navigate }: {
           <div className="guide-topic-list">{topics.map(([label, id], index) => <button key={id} onClick={() => jump(id)}><b>{String(index + 1).padStart(2, '0')}</b><span>{label}</span><i>→</i></button>)}</div>
         </ControlGroup>
         <ControlGroup title="Start working">
-          <div className="guide-start-list"><button onClick={() => navigate('readiness')}>T0 readiness <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button><button onClick={() => navigate('t1')}>T1 scale-up <span>→</span></button></div>
+          <div className="guide-start-list"><button onClick={() => navigate('readiness')}>T0 readiness <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button><button onClick={() => navigate('t1')}>T1 scale-up <span>→</span></button><button onClick={() => navigate('foundry')}>Foundry readiness <span>→</span></button></div>
         </ControlGroup>
         <section className="route-risk low"><span>Guide principle</span><strong>Evidence first</strong><p>Use every chart with its evidence class, limitations, and next replacement artifact.</p></section>
       </div>
       <div className="control-footer"><button className="primary-button wide" onClick={() => navigate('readiness')}>Begin with readiness</button><p>Your selected guide level changes explanations, not engineering results.</p></div>
+    </aside>
+  );
+}
+
+function FoundryControlPanel({ readiness, navigate }: {
+  readiness: ReturnType<typeof evaluateFoundryReadiness>;
+  navigate: (view: View) => void;
+}) {
+  return (
+    <aside className="control-rail foundry-control-rail">
+      <div className="control-head"><div><p className="eyebrow">Release controls</p><h2>Foundry entry</h2></div><span className="control-hold">HOLD</span></div>
+      <div className="control-scroll">
+        <ControlGroup title="Decision inputs">
+          <div className="t1-output-list"><span>Measured T0 gates <b>{readiness.verifiedT0Gates}/{readiness.requiredT0Gates}</b></span><span>Qualified inputs <b>{readiness.readyInputs}/{readiness.totalInputs}</b></span><span>Planned inputs <b>{readiness.plannedInputs}</b></span><span>Absent inputs <b>{readiness.absentInputs}</b></span><span>Restricted inputs <b>{readiness.restrictedInputs}</b></span></div>
+        </ControlGroup>
+        <ControlGroup title="Execution lanes">
+          <div className="foundry-lane-list"><div><b>01</b><span>Open lane<small>Plans, manifests, public proxies</small></span></div><div><b>02</b><span>Restricted lane<small>Qualified PDK, IP, package, signoff</small></span></div><div><b>03</b><span>Evidence return<small>Allowlisted metrics, hashes, decisions</small></span></div></div>
+        </ControlGroup>
+        <ControlGroup title="Review workspaces">
+          <div className="guide-start-list"><button onClick={() => navigate('gates')}>T0 evidence gates <span>→</span></button><button onClick={() => navigate('t1')}>T1 scale-up evidence <span>→</span></button><button onClick={() => navigate('guide')}>Foundry guide path <span>→</span></button></div>
+        </ControlGroup>
+        <section className="route-risk high"><span>Fabrication policy</span><strong>{readiness.decision}</strong><p>{readiness.blockers[0]}</p></section>
+      </div>
+      <div className="control-footer"><button className="primary-button wide" onClick={() => navigate('gates')}>Review blocking gates</button><p>This workspace defines a handoff contract. It does not ingest proprietary data or approve tapeout.</p></div>
     </aside>
   );
 }

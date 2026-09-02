@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0.0",
+  "program": "AIMEM-X1 T1",
+  "purpose": "Define the contract between the open-source design control plane and a future authorized foundry execution enclave.",
+  "current_decision": "hold",
+  "boundary": {
+    "open_zone": [
+      "architecture and RTL revisions",
+      "public-PDK proxy evidence",
+      "canonical job manifest schema",
+      "review purpose and required checks"
+    ],
+    "restricted_zone": [
+      "qualified 2 nm PDK and rule decks",
+      "production SRAM compiler and macro views",
+      "production PHY and I/O models",
+      "hybrid-bond and package process data",
+      "signoff decks and raw implementation artifacts",
+      "manufacturing and test collateral"
+    ],
+    "allowed_return": [
+      "allowlisted metrics",
+      "sanitized violation summaries",
+      "artifact and report hashes",
+      "tool and input provenance",
+      "human approval and waiver records"
+    ],
+    "prohibited_return": [
+      "raw PDK files",
+      "licensed IP source or generated views",
+      "unredacted layouts or netlists",
+      "credentials, license tokens, or enclave secrets"
+    ]
+  },
+  "execution_contract": {
+    "manifest": "immutable and cryptographically signed",
+    "runner": "ephemeral, least-privilege, network-denied by default",
+    "inputs": "content-addressed and mounted only inside the restricted zone",
+    "outputs": "deny by default; only explicitly allowlisted evidence may cross the boundary",
+    "audit": "append-only events for identity, approval, tool version, input hash, result hash, and export decision",
+    "agent_authority": "agents may prepare, run, summarize, and flag; agents may not approve tapeout or override policy"
+  },
+  "required_approvals": [
+    "architecture baseline",
+    "measured T0 gate closure",
+    "qualified input intake",
+    "security and legal authorization",
+    "signoff plan review",
+    "tapeout authorization"
+  ],
+  "release_policy": [
+    "No fabrication promotion while any T0 gate lacks measured passing evidence.",
+    "No execution with unsigned manifests, unpinned tools, or unhashed inputs.",
+    "No raw restricted artifact may leave the enclave.",
+    "No AI agent may grant final approval or spend authorization.",
+    "Every waiver requires an owner, rationale, scope, and expiry date."
+  ],
+  "open_source_boundary": "The platform, schemas, orchestration, open models, RTL, public-PDK proxies, and evidence policy remain open source. Proprietary foundry inputs are referenced by hash and consumed only inside an authorized restricted environment; they are never bundled with this repository."
+}
