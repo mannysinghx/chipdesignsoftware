@@ -5,7 +5,7 @@ const spec = JSON.parse(await readFile(new URL('../design/spec/aimem-t0.json', i
 const completion = JSON.parse(await readFile(new URL('../design/spec/t0-completion.json', import.meta.url), 'utf8'));
 
 assert.equal(spec.id, 'aimem-x1-t0');
-assert.equal(spec.revision, '0.3.0');
+assert.equal(spec.revision, '0.4.0');
 assert.equal(spec.status, 'modeled');
 assert.equal(spec.dram.tiers, 4);
 assert.equal(spec.dram.channels * spec.dram.channel_width_bits, spec.interface.payload_lanes);
@@ -19,7 +19,9 @@ assert.equal(new Set(spec.decision_gates.map((gate) => gate.id)).size, spec.deci
 assert.ok(spec.open_source_evidence.rtl.includes('16-channel top-level composition'));
 assert.ok(spec.open_source_evidence.rtl.includes('SECDED ECC datapath'));
 assert.equal(spec.open_source_evidence.formal.length, 2);
-assert.equal(completion.complete_when.length, 7);
+assert.ok(spec.open_source_evidence.correlation.includes('pinned Ramulator2 HBM3 proxy'));
+assert.ok(spec.open_source_evidence.physical.includes('2,447-cell Sky130 mapped proxy'));
+assert.equal(completion.complete_when.length, 9);
 assert.equal(completion.external_silicon_gates.length, 5);
 assert.match(completion.policy, /unverified/);
 

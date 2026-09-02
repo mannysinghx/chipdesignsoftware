@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0",
+  "simulator": "Ramulator2 2.1",
+  "ramulator_commit": "0c4eaeb00d88e668d8b5a0cbdd7d6276be921a41",
+  "compatibility_overlay": "fmt 11.2.0 + dependent-template disambiguation for Apple Clang 21",
+  "dram_proxy": "HBM3_4Gb @ 6400 Mb/s, one representative 32-bit channel",
+  "scope": "Cycle-accurate public-memory proxy; not AIMEM silicon signoff",
+  "requests_per_workload": 4096,
+  "results": [
+    {
+      "id": "dense-stream",
+      "requests": 4096,
+      "controller_ticks": 30308,
+      "average_read_latency_ticks": 400.891144,
+      "read_requests": 3327,
+      "write_requests": 769,
+      "row_hits": 459,
+      "row_misses": 364,
+      "row_conflicts": 3120,
+      "row_hit_percent": 11.640882576718235,
+      "throughput_requests_per_tick": 0.13514583608288241
+    },
+    {
+      "id": "bank-random",
+      "requests": 4096,
+      "controller_ticks": 41709,
+      "average_read_latency_ticks": 610.735901,
+      "read_requests": 2643,
+      "write_requests": 1453,
+      "row_hits": 102,
+      "row_misses": 440,
+      "row_conflicts": 3522,
+      "row_hit_percent": 2.5098425196850394,
+      "throughput_requests_per_tick": 0.09820422450789998
+    },
+    {
+      "id": "kv-decode",
+      "requests": 4096,
+      "controller_ticks": 16705,
+      "average_read_latency_ticks": 196.98291,
+      "read_requests": 3968,
+      "write_requests": 128,
+      "row_hits": 2725,
+      "row_misses": 154,
+      "row_conflicts": 1177,
+      "row_hit_percent": 67.18441814595661,
+      "throughput_requests_per_tick": 0.24519604908709966
+    },
+    {
+      "id": "sparse-gather",
+      "requests": 4096,
+      "controller_ticks": 25715,
+      "average_read_latency_ticks": 295.056061,
+      "read_requests": 3903,
+      "write_requests": 193,
+      "row_hits": 1461,
+      "row_misses": 134,
+      "row_conflicts": 2455,
+      "row_hit_percent": 36.074074074074076,
+      "throughput_requests_per_tick": 0.15928446432043555
+    }
+  ]
+}

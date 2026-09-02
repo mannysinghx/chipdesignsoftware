@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "design": "aimem_t0_channel",
+  "stage": "public-PDK synthesis proxy",
+  "clock": {
+    "port": "clk",
+    "period_ns": 1.25,
+    "frequency_mhz": 800,
+    "uncertainty_ns": 0.1
+  },
+  "platform": {
+    "name": "sky130hd",
+    "source": "The-OpenROAD-Project/OpenROAD-flow-scripts",
+    "commit": "774ff7546d041ecad757c52b9608e7ca7d66ef93",
+    "corner": "tt_025C_1v80"
+  },
+  "inputs": [
+    "rtl/aimem_secded_64.sv",
+    "rtl/aimem_t0_channel.sv",
+    "design/physical/aimem-t0-channel.sdc"
+  ],
+  "required_next_outputs": [
+    "placed DEF",
+    "clock-tree report",
+    "routed DEF",
+    "SPEF",
+    "post-route setup and hold reports",
+    "DRC and LVS reports"
+  ],
+  "limitations": [
+    "Sky130 is a public proxy and is not the intended production node.",
+    "The present lane maps standard cells only; macros, PHY, package and hybrid bonds are excluded.",
+    "A mapped-cell estimate does not constitute placement, routing or timing closure."
+  ]
+}

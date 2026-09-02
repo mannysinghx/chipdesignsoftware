@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "status": "correlated-with-calibration-gap",
+  "simulator": "Ramulator2 2.1",
+  "ramulator_commit": "0c4eaeb00d88e668d8b5a0cbdd7d6276be921a41",
+  "proxy": "HBM3_4Gb @ 6400 Mb/s, one representative 32-bit channel",
+  "hbm_tick_ns": 0.3125,
+  "latency_rank_spearman": 0.9999999999999998,
+  "row_hit_mean_absolute_error_pp": 1.5249886559068537,
+  "mean_latency_scale_factor": 5.316082048803846,
+  "finding": "Workload latency ordering agrees, but the internal cycle model is optimistic in absolute latency and must be calibrated before signoff use.",
+  "limitations": [
+    "The public HBM3 proxy is one representative 32-bit channel; AIMEM uses a different 16-channel physical concept.",
+    "Host traffic reduction from sparse gather is an architectural value metric, not a Ramulator throughput metric.",
+    "Correlation does not upgrade any silicon-required gate."
+  ],
+  "results": [
+    {
+      "id": "dense-stream",
+      "name": "Dense stream",
+      "internal_average_latency_ns": 23.88188288762019,
+      "ramulator_average_read_latency_ns": 125.2784825,
+      "latency_scale_factor": 5.245753992242439,
+      "internal_row_hit_percent": 14.9169921875,
+      "ramulator_row_hit_percent": 11.640882576718235,
+      "row_hit_delta_pp": -3.2761096107817647,
+      "ramulator_requests_per_tick": 0.13514583608288241,
+      "ramulator_classification_coverage_percent": 96.2646484375
+    },
+    {
+      "id": "bank-random",
+      "name": "Banked random",
+      "internal_average_latency_ns": 27.11369441105769,
+      "ramulator_average_read_latency_ns": 190.8549690625,
+      "latency_scale_factor": 7.039061743819914,
+      "internal_row_hit_percent": 3.41796875,
+      "ramulator_row_hit_percent": 2.5098425196850394,
+      "row_hit_delta_pp": -0.9081262303149606,
+      "ramulator_requests_per_tick": 0.09820422450789998,
+      "ramulator_classification_coverage_percent": 99.21875
+    },
+    {
+      "id": "kv-decode",
+      "name": "KV decode",
+      "internal_average_latency_ns": 14.26250751201923,
+      "ramulator_average_read_latency_ns": 61.557159375,
+      "latency_scale_factor": 4.316012406873395,
+      "internal_row_hit_percent": 65.4052734375,
+      "ramulator_row_hit_percent": 67.18441814595661,
+      "row_hit_delta_pp": 1.779144708456613,
+      "ramulator_requests_per_tick": 0.24519604908709966,
+      "ramulator_classification_coverage_percent": 99.0234375
+    },
+    {
+      "id": "sparse-gather",
+      "name": "Sparse gather",
+      "internal_average_latency_ns": 19.771634615384613,
+      "ramulator_average_read_latency_ns": 92.2050190625,
+      "latency_scale_factor": 4.663500052279636,
+      "internal_row_hit_percent": 35.9375,
+      "ramulator_row_hit_percent": 36.074074074074076,
+      "row_hit_delta_pp": 0.13657407407407618,
+      "ramulator_requests_per_tick": 0.15928446432043555,
+      "ramulator_classification_coverage_percent": 98.876953125
+    }
+  ]
+}

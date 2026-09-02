@@ -1,13 +1,15 @@
 {
   "schema_version": "1.0",
   "milestone": "AIMEM-X1 T0 open-source engineering readiness",
-  "definition": "A reproducible architecture, workload, RTL-slice, formal-safety, synthesis, power, thermal and evidence workflow using only open-source technology.",
+  "definition": "A reproducible architecture, workload, external memory correlation, RTL-slice, formal-safety, public-PDK synthesis, power, thermal and evidence workflow using only open-source technology.",
   "complete_when": [
     "Architecture arithmetic and decision gates are versioned and executable",
     "Deterministic workload campaigns emit bandwidth, latency, queue and refresh metrics",
+    "Workload behavior is correlated against a pinned official open-source memory simulator",
     "A 16-channel controller composition parses and synthesizes in open-source tooling",
     "Bounded safety properties cover refresh priority and controller progress",
     "Power, thermal, reliability and physical proxies are tied to the same configuration",
+    "One complete channel maps to public-PDK standard cells with a versioned physical handoff contract",
     "Every result states its evidence class and limitations",
     "The product exports a reproducible evidence snapshot"
   ],

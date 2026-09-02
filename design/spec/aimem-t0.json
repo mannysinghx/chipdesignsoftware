@@ -2,7 +2,7 @@
   "$schema": "./aimem-t0.schema.json",
   "id": "aimem-x1-t0",
   "name": "AIMEM-X1 T0 Pathfinder",
-  "revision": "0.3.0",
+  "revision": "0.4.0",
   "status": "modeled",
   "scale_relative_to_x1": 0.125,
   "dram": {
@@ -62,10 +62,11 @@
     "rtl": ["SystemVerilog channel controller", "16-channel top-level composition", "SECDED ECC datapath", "sparse-gather address engine", "two-spare lane repair mapper"],
     "formal": ["32-cycle bounded controller-progress and refresh-priority proof", "72-position symbolic SECDED single-bit correction proof"],
     "fault_campaign": ["360 single-bit corrections", "2,556 double-bit detections", "lane repair and gather reference cases"],
-    "synthesis": ["YoWASP Yosys generic synthesis"],
-    "physical": ["analytical area and timing proxy; no PDK mapping"],
+    "synthesis": ["YoWASP Yosys generic synthesis", "Sky130 standard-cell mapping for one complete channel"],
+    "correlation": ["pinned Ramulator2 HBM3 proxy", "four deterministic workload traces", "latency-rank and row-locality comparison"],
+    "physical": ["2,447-cell Sky130 mapped proxy", "pre-placement cell-area report", "versioned SDC and OpenROAD handoff contract"],
     "thermal": ["compact steady-state power-to-temperature proxy"],
-    "artifacts": ["evidence/rtl-synthesis.json", "evidence/t0-evidence.json", "evidence/manifest.json"]
+    "artifacts": ["evidence/rtl-synthesis.json", "evidence/physical-synthesis.json", "evidence/ramulator2-raw.json", "evidence/ramulator-correlation.json", "evidence/t0-evidence.json", "evidence/manifest.json"]
   },
   "decision_gates": [
     { "id": "T0-BW-RAW", "metric": "raw_bandwidth_tbps", "operator": ">", "target": 1.0, "evidence": "silicon" },

@@ -117,12 +117,12 @@ export function evaluateT0Campaign(config: T0Config): T0Campaign {
 
   const domains: T0Domain[] = [
     { id: 'architecture', name: 'Architecture contract', maturity: 'verified-proxy', completionPercent: 100, evidence: 'Versioned schema, arithmetic checks, deterministic parameter model', nextGate: 'Calibrate against measured silicon' },
-    { id: 'workloads', name: 'Workload campaign', maturity: 'verified-proxy', completionPercent: 100, evidence: 'Four seeded cycle-level traffic profiles with latency and queue metrics', nextGate: 'Cross-check against Ramulator and production traces' },
+    { id: 'workloads', name: 'Workload campaign', maturity: 'verified-proxy', completionPercent: 100, evidence: 'Four seeded traffic profiles correlated with pinned Ramulator2 HBM3', nextGate: 'Calibrate absolute latency and ingest production traces' },
     { id: 'rtl', name: 'Digital RTL slice', maturity: 'implemented', completionPercent: 86, evidence: '16-channel controller with SECDED, sparse gather and two-spare lane repair', nextGate: 'Long randomized regressions and complete memory datapath integration' },
     { id: 'formal', name: 'Formal safety', maturity: 'partial', completionPercent: 58, evidence: 'Bounded controller safety plus 72-position symbolic SECDED correction', nextGate: 'Unbounded liveness, double-fault and full protocol proofs' },
-    { id: 'physical', name: 'Physical design', maturity: 'partial', completionPercent: 28, evidence: 'Open-source RTL synthesis plus analytical area/timing proxy', nextGate: 'OpenROAD placement, CTS, extraction and timing closure with a public PDK' },
+    { id: 'physical', name: 'Physical design', maturity: 'partial', completionPercent: 46, evidence: '2,447-cell Sky130 mapping, 26,766.9 µm² pre-place area and versioned SDC/handoff', nextGate: 'OpenROAD placement, CTS, routing, extraction and timing closure' },
     { id: 'multiphysics', name: 'PHY/package/thermal', maturity: 'partial', completionPercent: 34, evidence: 'Link-risk, power and compact thermal models', nextGate: 'openEMS, Elmer and package-geometry correlation' },
-    { id: 'release', name: 'Evidence and release', maturity: 'implemented', completionPercent: 90, evidence: 'Machine-readable gates, fault campaigns, tests and hashed evidence bundle', nextGate: 'Independent reproduction and signed release approval' },
+    { id: 'release', name: 'Evidence and release', maturity: 'implemented', completionPercent: 92, evidence: 'Machine-readable gates, correlation, physical proxy, tests and hashed evidence bundle', nextGate: 'Independent reproduction and signed release approval' },
     { id: 'silicon', name: 'Foundry and silicon', maturity: 'external', completionPercent: 0, evidence: 'No private PDK, test vehicle or measured silicon', nextGate: 'Foundry engagement, tapeout, bring-up and model calibration' },
   ];
 
@@ -172,9 +172,9 @@ export function evaluateT0Campaign(config: T0Config): T0Campaign {
     overallProgramReadinessPercent,
     siliconEvidencePercent: 0,
     blockers: [
-      'Cycle model requires correlation against Ramulator and production workload traces.',
+      'Ramulator2 confirms workload ordering but shows a 5.32× mean absolute-latency calibration gap; production traces are still required.',
       'RTL slice requires full datapath integration and independent verification closure.',
-      'Physical proxy requires public-PDK OpenROAD closure before it is physical evidence.',
+      'Sky130 cell mapping is complete, but placement, CTS, routing, extraction and post-route timing remain open.',
       'PHY, hybrid-bond, package and thermal assumptions require high-fidelity simulation and test vehicles.',
       'Final bandwidth, energy, repair and reliability gates require fabricated T0 silicon.',
     ],

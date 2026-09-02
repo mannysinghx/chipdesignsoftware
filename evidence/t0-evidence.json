@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "milestone": "AIMEM-X1 T0 open-source engineering readiness",
-  "revision": "0.3.0",
+  "revision": "0.4.0",
   "evidence_policy": "Proxy and formal evidence never upgrades a silicon-required gate.",
   "baseline": {
     "channels": 16,
@@ -243,8 +243,8 @@
         "name": "Workload campaign",
         "maturity": "verified-proxy",
         "completionPercent": 100,
-        "evidence": "Four seeded cycle-level traffic profiles with latency and queue metrics",
-        "nextGate": "Cross-check against Ramulator and production traces"
+        "evidence": "Four seeded traffic profiles correlated with pinned Ramulator2 HBM3",
+        "nextGate": "Calibrate absolute latency and ingest production traces"
       },
       {
         "id": "rtl",
@@ -266,9 +266,9 @@
         "id": "physical",
         "name": "Physical design",
         "maturity": "partial",
-        "completionPercent": 28,
-        "evidence": "Open-source RTL synthesis plus analytical area/timing proxy",
-        "nextGate": "OpenROAD placement, CTS, extraction and timing closure with a public PDK"
+        "completionPercent": 46,
+        "evidence": "2,447-cell Sky130 mapping, 26,766.9 µm² pre-place area and versioned SDC/handoff",
+        "nextGate": "OpenROAD placement, CTS, routing, extraction and timing closure"
       },
       {
         "id": "multiphysics",
@@ -282,8 +282,8 @@
         "id": "release",
         "name": "Evidence and release",
         "maturity": "implemented",
-        "completionPercent": 90,
-        "evidence": "Machine-readable gates, fault campaigns, tests and hashed evidence bundle",
+        "completionPercent": 92,
+        "evidence": "Machine-readable gates, correlation, physical proxy, tests and hashed evidence bundle",
         "nextGate": "Independent reproduction and signed release approval"
       },
       {
@@ -295,13 +295,13 @@
         "nextGate": "Foundry engagement, tapeout, bring-up and model calibration"
       }
     ],
-    "openSourceReadinessPercent": 70.85714285714286,
-    "overallProgramReadinessPercent": 62,
+    "openSourceReadinessPercent": 73.71428571428571,
+    "overallProgramReadinessPercent": 64.5,
     "siliconEvidencePercent": 0,
     "blockers": [
-      "Cycle model requires correlation against Ramulator and production workload traces.",
+      "Ramulator2 confirms workload ordering but shows a 5.32× mean absolute-latency calibration gap; production traces are still required.",
       "RTL slice requires full datapath integration and independent verification closure.",
-      "Physical proxy requires public-PDK OpenROAD closure before it is physical evidence.",
+      "Sky130 cell mapping is complete, but placement, CTS, routing, extraction and post-route timing remain open.",
       "PHY, hybrid-bond, package and thermal assumptions require high-fidelity simulation and test vehicles.",
       "Final bandwidth, energy, repair and reliability gates require fabricated T0 silicon."
     ]
@@ -329,6 +329,157 @@
       "Generic cells only; no foundry liberty mapping",
       "Bounded assertions are not an unbounded liveness proof",
       "Gather sequencing and lane repair still require long randomized RTL campaigns"
+    ]
+  },
+  "physical": {
+    "schema_version": "1.0",
+    "status": "passed",
+    "tool": "YoWASP Yosys 0.65.176-dev.1145",
+    "top": "aimem_t0_channel",
+    "platform": "OpenROAD sky130hd public platform",
+    "platform_commit": "774ff7546d041ecad757c52b9608e7ca7d66ef93",
+    "liberty_corner": "sky130_fd_sc_hd__tt_025C_1v80",
+    "clock_target_mhz": 800,
+    "mapped_cells": 2447,
+    "metadata_cells_ignored": 2,
+    "sequential_cells": 520,
+    "chip_area_um2": 26766.9216,
+    "cell_histogram": {
+      "sky130_fd_sc_hd__nor2_1": 409,
+      "sky130_fd_sc_hd__xnor2_1": 284,
+      "sky130_fd_sc_hd__dfxtp_1": 264,
+      "sky130_fd_sc_hd__edfxtp_1": 256,
+      "sky130_fd_sc_hd__o21ai_0": 241,
+      "sky130_fd_sc_hd__and3_1": 233,
+      "sky130_fd_sc_hd__nand2_1": 90,
+      "sky130_fd_sc_hd__xor2_1": 80,
+      "sky130_fd_sc_hd__mux4_2": 80,
+      "sky130_fd_sc_hd__lpflow_isobufsrc_1": 62,
+      "sky130_fd_sc_hd__xnor3_1": 55,
+      "sky130_fd_sc_hd__a21oi_1": 47,
+      "sky130_fd_sc_hd__o21a_1": 40,
+      "sky130_fd_sc_hd__and2_0": 39,
+      "sky130_fd_sc_hd__nand3_1": 31,
+      "sky130_fd_sc_hd__a31oi_1": 28,
+      "sky130_fd_sc_hd__nor3_1": 26,
+      "sky130_fd_sc_hd__nand4_1": 18,
+      "sky130_fd_sc_hd__clkinv_1": 12,
+      "sky130_fd_sc_hd__o2bb2ai_1": 12,
+      "sky130_fd_sc_hd__nand2b_1": 12,
+      "sky130_fd_sc_hd__o22ai_1": 11,
+      "sky130_fd_sc_hd__a21boi_0": 11,
+      "sky130_fd_sc_hd__a221oi_1": 10,
+      "sky130_fd_sc_hd__a222oi_1": 9,
+      "sky130_fd_sc_hd__nor4_1": 8,
+      "sky130_fd_sc_hd__o311ai_0": 8,
+      "sky130_fd_sc_hd__lpflow_inputiso1p_1": 7,
+      "sky130_fd_sc_hd__a311oi_1": 7,
+      "sky130_fd_sc_hd__a211o_1": 4,
+      "sky130_fd_sc_hd__a22oi_1": 4,
+      "sky130_fd_sc_hd__o32a_1": 4,
+      "sky130_fd_sc_hd__o211ai_1": 3,
+      "sky130_fd_sc_hd__a2bb2oi_1": 3,
+      "sky130_fd_sc_hd__or3_1": 3,
+      "sky130_fd_sc_hd__o2111ai_1": 3,
+      "sky130_fd_sc_hd__o31ai_1": 3,
+      "sky130_fd_sc_hd__a22o_1": 3,
+      "sky130_fd_sc_hd__a211oi_1": 3,
+      "sky130_fd_sc_hd__xor3_1": 2,
+      "sky130_fd_sc_hd__o31a_1": 2,
+      "sky130_fd_sc_hd__nor4b_1": 2,
+      "sky130_fd_sc_hd__a2111oi_0": 2,
+      "sky130_fd_sc_hd__nor3b_1": 2,
+      "sky130_fd_sc_hd__o21bai_1": 2,
+      "sky130_fd_sc_hd__a21o_1": 2,
+      "sky130_fd_sc_hd__or4b_1": 1,
+      "sky130_fd_sc_hd__a41oi_1": 1,
+      "sky130_fd_sc_hd__a32oi_1": 1,
+      "sky130_fd_sc_hd__a41o_1": 1,
+      "sky130_fd_sc_hd__o41ai_1": 1,
+      "sky130_fd_sc_hd__a311o_1": 1,
+      "sky130_fd_sc_hd__nand4b_1": 1,
+      "sky130_fd_sc_hd__or4_1": 1,
+      "sky130_fd_sc_hd__mux2i_1": 1,
+      "sky130_fd_sc_hd__mux2_1": 1
+    },
+    "checks": [
+      "One complete AIMEM T0 channel elaborated",
+      "Sequential cells mapped with dfflibmap",
+      "Combinational logic mapped with ABC against public Sky130 liberty",
+      "No generic cells remain in the mapped netlist",
+      "OpenROAD handoff constraints and output contract are versioned"
+    ],
+    "limitations": [
+      "Mapped-cell area is pre-placement and excludes routing, clock-tree, filler, tap and power-grid overhead.",
+      "ABC target delay is a synthesis objective, not post-route timing evidence.",
+      "Sky130 is an open proxy platform, not the AIMEM production process."
+    ]
+  },
+  "correlation": {
+    "schema_version": "1.0",
+    "status": "correlated-with-calibration-gap",
+    "simulator": "Ramulator2 2.1",
+    "ramulator_commit": "0c4eaeb00d88e668d8b5a0cbdd7d6276be921a41",
+    "proxy": "HBM3_4Gb @ 6400 Mb/s, one representative 32-bit channel",
+    "hbm_tick_ns": 0.3125,
+    "latency_rank_spearman": 0.9999999999999998,
+    "row_hit_mean_absolute_error_pp": 1.5249886559068537,
+    "mean_latency_scale_factor": 5.316082048803846,
+    "finding": "Workload latency ordering agrees, but the internal cycle model is optimistic in absolute latency and must be calibrated before signoff use.",
+    "limitations": [
+      "The public HBM3 proxy is one representative 32-bit channel; AIMEM uses a different 16-channel physical concept.",
+      "Host traffic reduction from sparse gather is an architectural value metric, not a Ramulator throughput metric.",
+      "Correlation does not upgrade any silicon-required gate."
+    ],
+    "results": [
+      {
+        "id": "dense-stream",
+        "name": "Dense stream",
+        "internal_average_latency_ns": 23.88188288762019,
+        "ramulator_average_read_latency_ns": 125.2784825,
+        "latency_scale_factor": 5.245753992242439,
+        "internal_row_hit_percent": 14.9169921875,
+        "ramulator_row_hit_percent": 11.640882576718235,
+        "row_hit_delta_pp": -3.2761096107817647,
+        "ramulator_requests_per_tick": 0.13514583608288241,
+        "ramulator_classification_coverage_percent": 96.2646484375
+      },
+      {
+        "id": "bank-random",
+        "name": "Banked random",
+        "internal_average_latency_ns": 27.11369441105769,
+        "ramulator_average_read_latency_ns": 190.8549690625,
+        "latency_scale_factor": 7.039061743819914,
+        "internal_row_hit_percent": 3.41796875,
+        "ramulator_row_hit_percent": 2.5098425196850394,
+        "row_hit_delta_pp": -0.9081262303149606,
+        "ramulator_requests_per_tick": 0.09820422450789998,
+        "ramulator_classification_coverage_percent": 99.21875
+      },
+      {
+        "id": "kv-decode",
+        "name": "KV decode",
+        "internal_average_latency_ns": 14.26250751201923,
+        "ramulator_average_read_latency_ns": 61.557159375,
+        "latency_scale_factor": 4.316012406873395,
+        "internal_row_hit_percent": 65.4052734375,
+        "ramulator_row_hit_percent": 67.18441814595661,
+        "row_hit_delta_pp": 1.779144708456613,
+        "ramulator_requests_per_tick": 0.24519604908709966,
+        "ramulator_classification_coverage_percent": 99.0234375
+      },
+      {
+        "id": "sparse-gather",
+        "name": "Sparse gather",
+        "internal_average_latency_ns": 19.771634615384613,
+        "ramulator_average_read_latency_ns": 92.2050190625,
+        "latency_scale_factor": 4.663500052279636,
+        "internal_row_hit_percent": 35.9375,
+        "ramulator_row_hit_percent": 36.074074074074076,
+        "row_hit_delta_pp": 0.13657407407407618,
+        "ramulator_requests_per_tick": 0.15928446432043555,
+        "ramulator_classification_coverage_percent": 98.876953125
+      }
     ]
   },
   "ranked_sweep": [
@@ -439,6 +590,11 @@
       "lib/t0-model.ts",
       "lib/t0-campaign.ts",
       "lib/t0-reliability.ts",
+      "tools/ramulator2/run_correlation.py",
+      "tools/ramulator2/bootstrap.sh",
+      "tools/physical/bootstrap-sky130.sh",
+      "design/physical/aimem-t0-channel.sdc",
+      "design/physical/openroad-handoff.json",
       "rtl/aimem_secded_64.sv",
       "rtl/aimem_sparse_gather.sv",
       "rtl/aimem_lane_repair.sv",

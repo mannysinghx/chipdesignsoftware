@@ -9,11 +9,15 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .cache",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
     "validate:spec": "node scripts/validate-spec.mjs",
     "verify:rtl": "node --experimental-wasm-exnref scripts/verify-rtl.mjs",
-    "evidence": "npm run validate:spec && npm test && npm run verify:rtl && node --experimental-strip-types scripts/generate-evidence.mjs"
+    "bootstrap:ramulator": "bash tools/ramulator2/bootstrap.sh",
+    "correlate:ramulator": "PYTHONPATH=.cache/ramulator2/python python3 tools/ramulator2/run_correlation.py && node --experimental-strip-types scripts/generate-correlation.mjs",
+    "bootstrap:physical": "bash tools/physical/bootstrap-sky130.sh",
+    "verify:physical": "node --experimental-wasm-exnref scripts/verify-physical.mjs",
+    "evidence": "npm run validate:spec && npm test && npm run verify:rtl && npm run verify:physical && node --experimental-strip-types scripts/generate-correlation.mjs && node --experimental-strip-types scripts/generate-evidence.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

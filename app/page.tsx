@@ -3,14 +3,17 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { evaluateT0Campaign, type T0Campaign } from '@/lib/t0-campaign';
 import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep, type GateStatus, type T0Config } from '@/lib/t0-model';
+import correlation from '@/evidence/ramulator-correlation.json';
+import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'readiness' | 'architecture' | 'workloads' | 'explore' | 'gates';
+type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
 const views: Array<{ id: View; label: string }> = [
   { id: 'readiness', label: 'Readiness' },
   { id: 'architecture', label: 'Architecture' },
   { id: 'workloads', label: 'Workloads' },
+  { id: 'correlation', label: 'Correlation' },
   { id: 'explore', label: 'Experiment' },
   { id: 'gates', label: 'Gates' },
 ];
@@ -108,7 +111,7 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> Spec 0.3.0 · evidence linked</span>
+          <span className="baseline-status"><i /> Spec 0.4.0 · correlated</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
@@ -148,12 +151,12 @@ export default function Home() {
         <section className="main-stage">
           <div className="stage-header">
             <div>
-              <p className="eyebrow">{view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
-              <h2>{view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p className="eyebrow">{view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
+              <h2>{view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
+              <p>{view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${runStatus}`}>{runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.2'}</span>
+              <span className={`fidelity-pill ${runStatus}`}>{runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
               <button className="primary-button" onClick={startSweep}>{runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
@@ -169,13 +172,14 @@ export default function Home() {
           {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
           {view === 'workloads' && <WorkloadsView campaign={campaign} />}
+          {view === 'correlation' && <CorrelationView />}
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>Spec: aimem-t0.json · evidence rev 0.3.0</span>
-            <span>Fidelity: analytical + RTL/formal proxy · not silicon evidence</span>
+            <span>Spec: aimem-t0.json · evidence rev 0.4.0</span>
+            <span>Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence</span>
           </footer>
         </section>
 
@@ -373,12 +377,12 @@ function ReadinessView({ campaign }: { campaign: T0Campaign }) {
         </section>
 
         <section className="panel proxy-panel">
-          <PanelTitle label="Physical-design proxy" meta="Generic OSS synthesis · no PDK mapping" />
+          <PanelTitle label="Physical-design proxy" meta="Sky130 mapped · pre-placement only" />
           <div className="physical-metrics">
-            <div><span>Total proxy area</span><strong>{campaign.physicalProxy.totalAreaMm2.toFixed(1)}<small>mm²</small></strong></div>
-            <div><span>Estimated Fmax</span><strong>{campaign.physicalProxy.estimatedFmaxMhz.toFixed(0)}<small>MHz</small></strong></div>
-            <div><span>Timing margin</span><strong className={campaign.physicalProxy.timingMarginPs >= 0 ? 'pass-text' : 'watch-text'}>{campaign.physicalProxy.timingMarginPs.toFixed(0)}<small>ps</small></strong></div>
-            <div><span>Spare lanes</span><strong>{campaign.reliability.spareLanes}<small>lanes</small></strong></div>
+            <div><span>Mapped cells</span><strong>{physicalEvidence.mapped_cells.toLocaleString()}<small>cells</small></strong></div>
+            <div><span>Cell area</span><strong>{(physicalEvidence.chip_area_um2 / 1000).toFixed(1)}<small>kµm²</small></strong></div>
+            <div><span>Sequential cells</span><strong>{physicalEvidence.sequential_cells}<small>cells</small></strong></div>
+            <div><span>Synthesis target</span><strong>{physicalEvidence.clock_target_mhz}<small>MHz</small></strong></div>
           </div>
         </section>
       </div>
@@ -432,7 +436,51 @@ function WorkloadsView({ campaign }: { campaign: T0Campaign }) {
         ))}
       </div>
 
-      <section className="gate-note"><strong>Campaign fidelity</strong><p>This deterministic request-level model is reproducible and useful for architecture decisions. It still requires correlation with Ramulator, RTL simulation, extracted timing, and measured silicon.</p></section>
+      <section className="gate-note"><strong>Campaign fidelity</strong><p>This deterministic request-level model is reproducible and useful for architecture decisions. Ramulator2 correlation is linked; absolute-latency calibration, RTL simulation, extracted timing, and measured silicon remain open.</p></section>
+    </div>
+  );
+}
+
+function CorrelationView() {
+  return (
+    <div className="correlation-layout">
+      <section className="panel correlation-hero">
+        <div><span>Latency rank agreement</span><strong>{correlation.latency_rank_spearman.toFixed(2)}</strong><small>Spearman ρ · four workloads</small></div>
+        <div><span>Row-locality error</span><strong>{correlation.row_hit_mean_absolute_error_pp.toFixed(2)}<em>pp</em></strong><small>Mean absolute error</small></div>
+        <div className="calibration-gap"><span>Latency calibration gap</span><strong>{correlation.mean_latency_scale_factor.toFixed(2)}<em>×</em></strong><small>Ramulator2 / internal mean</small></div>
+        <p>{correlation.finding}</p>
+      </section>
+
+      <section className="panel correlation-table-panel">
+        <PanelTitle label="Workload-by-workload comparison" meta="HBM3 6.4 Gb/s · representative 32-bit channel" />
+        <div className="correlation-table">
+          <div className="correlation-row correlation-head"><span>Workload</span><span>Internal latency</span><span>Ramulator2 latency</span><span>Scale gap</span><span>Internal row hits</span><span>Ramulator2 row hits</span><span>Δ row hits</span></div>
+          {correlation.results.map((result) => (
+            <div className="correlation-row" key={result.id}>
+              <span><strong>{result.name}</strong><small>{result.ramulator_classification_coverage_percent.toFixed(1)}% requests classified</small></span>
+              <span>{result.internal_average_latency_ns.toFixed(1)} ns</span>
+              <span>{result.ramulator_average_read_latency_ns.toFixed(1)} ns</span>
+              <span className="watch-text">{result.latency_scale_factor.toFixed(2)}×</span>
+              <span>{result.internal_row_hit_percent.toFixed(1)}%</span>
+              <span>{result.ramulator_row_hit_percent.toFixed(1)}%</span>
+              <span className={Math.abs(result.row_hit_delta_pp) < 2 ? 'pass-text' : 'watch-text'}>{result.row_hit_delta_pp > 0 ? '+' : ''}{result.row_hit_delta_pp.toFixed(1)} pp</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="correlation-notes">
+        <section className="panel evidence-contract">
+          <PanelTitle label="Reproducibility contract" meta="Official open-source simulator" />
+          <dl><div><dt>Simulator</dt><dd>{correlation.simulator}</dd></div><div><dt>Pinned commit</dt><dd>{correlation.ramulator_commit.slice(0, 12)}</dd></div><div><dt>Memory proxy</dt><dd>{correlation.proxy}</dd></div><div><dt>Evidence class</dt><dd>Cycle-accurate public proxy</dd></div></dl>
+        </section>
+        <section className="panel calibration-panel">
+          <PanelTitle label="Calibration decision" meta="Ordering accepted · scale rejected" />
+          <div className="calibration-status"><span className="good">Accept</span><p>Relative workload ordering and row-locality behavior.</p></div>
+          <div className="calibration-status"><span className="watch">Rework</span><p>Absolute latency constants and downstream bandwidth assumptions.</p></div>
+          <div className="calibration-status"><span className="pending">Hold</span><p>Silicon gates; no proxy can upgrade them.</p></div>
+        </section>
+      </div>
     </div>
   );
 }

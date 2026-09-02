@@ -4,6 +4,8 @@ import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep } from '../lib/t0-model.ts';
 import { evaluateT0Campaign } from '../lib/t0-campaign.ts';
 
 const rtl = JSON.parse(await readFile('evidence/rtl-synthesis.json', 'utf8'));
+const physical = JSON.parse(await readFile('evidence/physical-synthesis.json', 'utf8'));
+const correlation = JSON.parse(await readFile('evidence/ramulator-correlation.json', 'utf8'));
 const architecture = evaluateT0(DEFAULT_T0_CONFIG);
 const campaign = evaluateT0Campaign(DEFAULT_T0_CONFIG);
 const rankedSweep = runT0Sweep(DEFAULT_T0_CONFIG)
@@ -20,12 +22,14 @@ const rankedSweep = runT0Sweep(DEFAULT_T0_CONFIG)
 const bundle = {
   schema_version: '1.0',
   milestone: 'AIMEM-X1 T0 open-source engineering readiness',
-  revision: '0.3.0',
+  revision: '0.4.0',
   evidence_policy: 'Proxy and formal evidence never upgrades a silicon-required gate.',
   baseline: DEFAULT_T0_CONFIG,
   architecture,
   campaign,
   rtl,
+  physical,
+  correlation,
   ranked_sweep: rankedSweep,
   provenance: {
     deterministic: true,
@@ -37,6 +41,11 @@ const bundle = {
       'lib/t0-model.ts',
       'lib/t0-campaign.ts',
       'lib/t0-reliability.ts',
+      'tools/ramulator2/run_correlation.py',
+      'tools/ramulator2/bootstrap.sh',
+      'tools/physical/bootstrap-sky130.sh',
+      'design/physical/aimem-t0-channel.sdc',
+      'design/physical/openroad-handoff.json',
       'rtl/aimem_secded_64.sv',
       'rtl/aimem_sparse_gather.sv',
       'rtl/aimem_lane_repair.sv',
