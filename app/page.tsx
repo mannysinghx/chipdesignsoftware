@@ -272,6 +272,13 @@ function ExploreView({ config, evaluation, sweep, runStatus, runProgress, startS
     const scoreB = b.evaluation.streamingBandwidthTbps - b.evaluation.phyPowerWatts * 0.05;
     return scoreB - scoreA;
   });
+  const chartTicks = [...new Map(sweep.map((point) => [point.config.laneRateGbps, point])).values()]
+    .sort((a, b) => a.config.laneRateGbps - b.config.laneRateGbps)
+    .map((point) => ({
+      laneRate: point.config.laneRateGbps,
+      bandwidth: point.evaluation.rawBandwidthTbps,
+      position: Math.max(3, Math.min(97, ((point.evaluation.rawBandwidthTbps - 0.45) / 1.15) * 100)),
+    }));
   const workloads = [
     { name: 'Dense stream', value: evaluation.streamingBandwidthTbps, detail: `${config.streamingEfficiencyPercent}% bus efficiency`, color: 'mint' },
     { name: 'Banked random', value: evaluation.randomBandwidthTbps, detail: `${config.randomEfficiencyPercent}% banked efficiency`, color: 'amber' },
@@ -292,18 +299,31 @@ function ExploreView({ config, evaluation, sweep, runStatus, runProgress, startS
           </div>
         ) : (
           <div className="pareto-wrap">
-            <div className="plot-label y">Streaming efficiency</div>
-            <div className="pareto-plot">
-              <div className="grid-lines" />
-              {sweep.map((point, index) => {
-                const x = ((point.evaluation.rawBandwidthTbps - 0.45) / 1.15) * 100;
-                const y = ((point.config.streamingEfficiencyPercent - 72) / 24) * 100;
-                const size = 8 + point.config.sramMib / 4;
-                return <button key={index} className={`plot-dot sram-${point.config.sramMib}`} style={{ left: `${Math.max(3, Math.min(97, x))}%`, bottom: `${Math.max(4, Math.min(95, y))}%`, width: size, height: size }} title={`${point.config.laneRateGbps} Gb/s · ${point.config.sramMib} MB · ${point.evaluation.rawBandwidthTbps.toFixed(3)} TB/s`} />;
-              })}
+            <div className="chart-summary"><strong>Higher is better</strong><span>Compare efficiency vertically and raw bandwidth horizontally.</span></div>
+            <div className="pareto-chart">
+              <div className="y-axis-title">Streaming efficiency (%)</div>
+              <div className="y-axis-ticks" aria-hidden="true"><span>96%</span><span>88%</span><span>80%</span><span>72%</span></div>
+              <div className="plot-stack">
+                <div className="plot-lane-labels" aria-label="Lane rate by candidate group">
+                  {chartTicks.map((tick) => <span key={tick.laneRate} style={{ left: `${tick.position}%` }}>{tick.laneRate} Gb/s</span>)}
+                </div>
+                <div className="pareto-plot">
+                  <div className="grid-lines" />
+                  {sweep.map((point, index) => {
+                    const x = ((point.evaluation.rawBandwidthTbps - 0.45) / 1.15) * 100;
+                    const y = ((point.config.streamingEfficiencyPercent - 72) / 24) * 100;
+                    const size = 8 + point.config.sramMib / 4;
+                    const label = `${point.config.laneRateGbps} Gb/s, ${point.config.sramMib} MB SRAM, ${point.config.streamingEfficiencyPercent}% efficiency, ${point.evaluation.rawBandwidthTbps.toFixed(3)} TB/s`;
+                    return <span key={index} tabIndex={0} aria-label={label} data-label={label} className={`plot-dot sram-${point.config.sramMib}`} style={{ left: `${Math.max(3, Math.min(97, x))}%`, bottom: `${Math.max(4, Math.min(95, y))}%`, width: size, height: size }} />;
+                  })}
+                </div>
+                <div className="x-axis-ticks" aria-hidden="true">
+                  {chartTicks.map((tick) => <span key={tick.laneRate} style={{ left: `${tick.position}%` }}>{tick.bandwidth.toFixed(3)}</span>)}
+                </div>
+                <div className="x-axis-title">Raw bandwidth (TB/s)</div>
+              </div>
             </div>
-            <div className="plot-axis"><span>0.5</span><span>Raw bandwidth (TB/s)</span><span>1.6</span></div>
-            <div className="plot-legend"><span><i className="sram-8" />8 MB</span><span><i className="sram-16" />16 MB</span><span><i className="sram-32" />32 MB</span></div>
+            <div className="plot-legend"><strong>SRAM capacity</strong><span><i className="sram-8" />8 MB</span><span><i className="sram-16" />16 MB</span><span><i className="sram-32" />32 MB</span><em>Hover or focus a point for exact values</em></div>
           </div>
         )}
       </section>
