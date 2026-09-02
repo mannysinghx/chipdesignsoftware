@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { evaluateT0Campaign, type T0Campaign } from '@/lib/t0-campaign';
 import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep, type GateStatus, type T0Config } from '@/lib/t0-model';
+import { DEFAULT_T1_CONFIG, evaluateT1, type T1Config } from '@/lib/t1-model';
 import correlation from '@/evidence/ramulator-correlation.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates';
+type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 't1';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
 const views: Array<{ id: View; label: string }> = [
@@ -16,6 +17,7 @@ const views: Array<{ id: View; label: string }> = [
   { id: 'correlation', label: 'Correlation' },
   { id: 'explore', label: 'Experiment' },
   { id: 'gates', label: 'Gates' },
+  { id: 't1', label: 'T1 scale-up' },
 ];
 
 const hierarchy = [
@@ -28,17 +30,30 @@ const hierarchy = [
   { id: 'banks', label: 'Bank fabric', meta: '512 banks' },
 ];
 
+const t1Hierarchy = [
+  { id: 't1-system', label: 'T1 engineering sample', meta: '8-high · 32–64 GB' },
+  { id: 't1-stack', label: 'Eight-tier stack', meta: '2× T0 height' },
+  { id: 't1-base', label: '2 nm-class base die', meta: 'foundry lane' },
+  { id: 't1-noc', label: 'NoC regions', meta: '8 derived regions' },
+  { id: 't1-channels', label: 'Physical channels', meta: '64 × 64-bit' },
+  { id: 't1-pseudo', label: 'Pseudochannels', meta: '128 × 32-bit' },
+  { id: 't1-banks', label: 'Bank fabric', meta: '2,048 derived banks' },
+];
+
 export default function Home() {
   const [config, setConfig] = useState<T0Config>(DEFAULT_T0_CONFIG);
-  const [view, setView] = useState<View>('readiness');
+  const [view, setView] = useState<View>('t1');
   const [selectedNode, setSelectedNode] = useState('system');
   const [selectedTier, setSelectedTier] = useState(3);
   const [runProgress, setRunProgress] = useState(0);
   const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'complete'>('idle');
   const [sweep, setSweep] = useState<SweepPoint[]>([]);
+  const [t1Config, setT1Config] = useState<T1Config>(DEFAULT_T1_CONFIG);
   const timer = useRef<number | null>(null);
   const evaluation = useMemo(() => evaluateT0(config), [config]);
   const campaign = useMemo(() => evaluateT0Campaign(config), [config]);
+  const t1Evaluation = useMemo(() => evaluateT1(t1Config, evaluation.gates), [t1Config, evaluation.gates]);
+  const activeHierarchy = view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current);
@@ -80,6 +95,7 @@ export default function Home() {
       config,
       evaluation,
       campaign,
+      t1: view === 't1' ? { config: t1Config, evaluation: t1Evaluation, evidence_class: 'draft analytical scale-up baseline' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -100,7 +116,7 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>T0 Pathfinder</h1>
+            <h1>{view === 't1' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
@@ -119,10 +135,10 @@ export default function Home() {
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
-            <div className="section-heading"><span>Design hierarchy</span><b>7</b></div>
+            <div className="section-heading"><span>{view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
             <div className="hierarchy-list">
-              {hierarchy.map((item, index) => (
-                <button key={item.id} className={selectedNode === item.id ? 'selected' : ''} onClick={() => { setSelectedNode(item.id); setView('architecture'); }}>
+              {activeHierarchy.map((item, index) => (
+                <button key={item.id} className={(view === 't1' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => { if (view !== 't1') { setSelectedNode(item.id); setView('architecture'); } }}>
                   <span className="tree-line" style={{ '--tree-depth': index === 0 ? 0 : 1 } as CSSProperties}><i /></span>
                   <span className="node-copy"><strong>{item.label}</strong><small>{item.meta}</small></span>
                 </button>
@@ -131,7 +147,7 @@ export default function Home() {
           </section>
 
           <section className="rail-section evidence-summary">
-            <div className="section-heading"><span>Open-source readiness</span><b>{campaign.openSourceReadinessPercent.toFixed(0)}%</b></div>
+            <div className="section-heading"><span>{view === 't1' ? 'T1 entry verification' : 'Open-source readiness'}</span><b>{view === 't1' ? `${t1Evaluation.verifiedT0Gates}/12` : `${campaign.openSourceReadinessPercent.toFixed(0)}%`}</b></div>
             <div className="evidence-bar" aria-label={`${passCount} analytical gates pass, ${failCount} fail`}>
               <i className="pass" style={{ width: `${(passCount / 12) * 100}%` }} />
               <i className="provisional" style={{ width: `${(provisionalCount / 12) * 100}%` }} />
@@ -141,33 +157,43 @@ export default function Home() {
           </section>
 
           <section className="assistant-card">
-            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>T0 program agent</p><small>Evidence-aware guidance</small></div></div>
-            <p className="assistant-tag watch">Open-source milestone implemented; silicon remains gated</p>
-            <p className="assistant-detail">{campaign.blockers[0]}</p>
-            <button onClick={() => setView('readiness')}>Review readiness <span>→</span></button>
+            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
+            <p className="assistant-tag watch">{view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
+            <p className="assistant-detail">{view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
+            <button onClick={() => setView(view === 't1' ? 'gates' : 'readiness')}>{view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
           </section>
         </aside>
 
         <section className="main-stage">
           <div className="stage-header">
             <div>
-              <p className="eyebrow">{view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
-              <h2>{view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p className="eyebrow">{view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
+              <h2>{view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
+              <p>{view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${runStatus}`}>{runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
-              <button className="primary-button" onClick={startSweep}>{runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
+              <span className={`fidelity-pill ${view === 't1' ? 'running' : runStatus}`}>{view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
+              <button className="primary-button" onClick={view === 't1' ? () => setView('gates') : startSweep}>{view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
 
-          <div className="metric-strip">
-            <Metric label="Raw bandwidth" value={evaluation.rawBandwidthTbps.toFixed(3)} unit="TB/s" accent />
-            <Metric label="Dense stream" value={campaign.workloads[0].usefulBandwidthTbps.toFixed(3)} unit="TB/s" />
-            <Metric label="Total power proxy" value={campaign.power.totalWatts.toFixed(1)} unit="W" />
-            <Metric label="Thermal hotspot" value={campaign.thermal.hotspotC.toFixed(1)} unit="°C" />
-            <Metric label="OSS readiness" value={campaign.openSourceReadinessPercent.toFixed(0)} unit="%" />
-          </div>
+          {view === 't1' ? (
+            <div className="metric-strip">
+              <Metric label="Raw bandwidth" value={t1Evaluation.rawBandwidthTbps.toFixed(3)} unit="TB/s" accent />
+              <Metric label="Payload lanes" value={t1Config.payloadLanes.toLocaleString()} unit="lanes" />
+              <Metric label="DRAM tiers" value={String(t1Config.dramTiers)} unit="high" />
+              <Metric label="Base-die SRAM" value={String(t1Config.sramMib)} unit="MB" />
+              <Metric label="Verified T0 gates" value={String(t1Evaluation.verifiedT0Gates)} unit="/12" />
+            </div>
+          ) : (
+            <div className="metric-strip">
+              <Metric label="Raw bandwidth" value={evaluation.rawBandwidthTbps.toFixed(3)} unit="TB/s" accent />
+              <Metric label="Dense stream" value={campaign.workloads[0].usefulBandwidthTbps.toFixed(3)} unit="TB/s" />
+              <Metric label="Total power proxy" value={campaign.power.totalWatts.toFixed(1)} unit="W" />
+              <Metric label="Thermal hotspot" value={campaign.thermal.hotspotC.toFixed(1)} unit="°C" />
+              <Metric label="OSS readiness" value={campaign.openSourceReadinessPercent.toFixed(0)} unit="%" />
+            </div>
+          )}
 
           {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
@@ -175,15 +201,16 @@ export default function Home() {
           {view === 'correlation' && <CorrelationView />}
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
+          {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>Spec: aimem-t0.json · evidence rev 0.4.0</span>
-            <span>Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence</span>
+            <span>{view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
+            <span>{view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
           </footer>
         </section>
 
-        <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />
+        {view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
@@ -255,6 +282,85 @@ function ArchitectureView({ config, evaluation, selectedTier, setSelectedTier, s
           <ThroughputBar label="Random proxy" value={evaluation.randomBandwidthTbps} max={1.6} color="amber" />
         </section>
       </div>
+    </div>
+  );
+}
+
+function T1ScaleUpView({ config, evaluation }: {
+  config: T1Config;
+  evaluation: ReturnType<typeof evaluateT1>;
+}) {
+  const scaleDeltas = [
+    ['Stack height', '4 → 8', '2× tiers'],
+    ['Payload interface', '1,024 → 4,096', '4× lanes'],
+    ['Physical channels', '16 → 64', '4× channels'],
+    ['Bank fabric', '512 → 2,048', '4× banks · derived'],
+    ['Base-die SRAM', '16 → 64 MB', '4× capacity'],
+    ['Nominal bandwidth', '1.024 → 4.096', '4× TB/s'],
+  ];
+  const sequence = [
+    ['01', 'Freeze the T1 contract', 'Version all source-defined targets and explicitly tag derived channel, bank, and region assumptions.', 'active'],
+    ['02', 'Scale digital models', 'Extend traces, address mapping, NoC traffic, controller composition, ECC, refresh, and repair to 64 channels.', 'next'],
+    ['03', 'Run physical and multiphysics proxies', 'Sweep public-PDK routing plus eight-tier thermal, link, power-delivery, and package geometry studies.', 'next'],
+    ['04', 'Authorize foundry entry', 'Proceed only after measured T0 gates pass and qualified 2 nm, SRAM, PHY, bond, and signoff inputs exist.', 'blocked'],
+  ];
+
+  return (
+    <div className="t1-layout">
+      <section className="panel t1-hero">
+        <div className="t1-stack-visual" aria-label="Eight-tier T1 stack over an intelligent base die">
+          {Array.from({ length: config.dramTiers }).map((_, index) => <i key={index} style={{ '--tier-index': index } as CSSProperties} />)}
+          <span>64 MB intelligent base die</span>
+        </div>
+        <div className="t1-hero-copy">
+          <p className="eyebrow accent">T1 baseline opened</p>
+          <h3>Scale the pathfinder toward a production-style engineering sample.</h3>
+          <p>The open-source lane can begin architecture, RTL, routing-proxy, link, and thermal work now. A physical 2 nm commitment remains gated on measured T0 silicon and qualified foundry inputs.</p>
+          <div className="readiness-tags"><span className="good">{config.dramTiers}-high stack</span><span className="good">{config.payloadLanes.toLocaleString()} lanes</span><span className="good">{config.capacityGib} GB target</span><span className="pending">Foundry entry: hold</span></div>
+        </div>
+        <div className="t1-decision"><span>Entry decision</span><strong>{evaluation.entryDecision}</strong><small>{evaluation.verifiedT0Gates}/12 T0 gates have measured passing evidence</small></div>
+      </section>
+
+      <section className="panel t1-scale-panel">
+        <PanelTitle label="T0 → T1 scale delta" meta="Source targets plus explicitly marked derivations" />
+        <div className="t1-scale-grid">{scaleDeltas.map(([label, value, note]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>)}</div>
+      </section>
+
+      <section className="panel t1-entry-panel">
+        <PanelTitle label="T1 entry audit" meta="Proxy evidence cannot satisfy a measured gate" />
+        <div className="t1-entry-summary">
+          <div><strong>{evaluation.verifiedT0Gates}</strong><span>verified</span></div>
+          <div><strong>{evaluation.provisionalT0Gates}</strong><span>provisional</span></div>
+          <div><strong>{evaluation.blockedT0Gates}</strong><span>unverified / failed</span></div>
+        </div>
+        <div className="t1-entry-bar" aria-label={`${evaluation.verifiedT0Gates} verified, ${evaluation.provisionalT0Gates} provisional, ${evaluation.blockedT0Gates} blocked T0 gates`}>
+          <i className="verified" style={{ width: `${(evaluation.verifiedT0Gates / 12) * 100}%` }} />
+          <i className="provisional" style={{ width: `${(evaluation.provisionalT0Gates / 12) * 100}%` }} />
+          <i className="blocked" style={{ width: `${(evaluation.blockedT0Gates / 12) * 100}%` }} />
+        </div>
+        <p>Digital scale-up work is authorized as research. Tapeout, package commitment, and claims of T1 readiness are not.</p>
+      </section>
+
+      <section className="panel t1-proof-panel">
+        <PanelTitle label="T1 proof programs" meta="Four source-defined outcomes" />
+        <div className="t1-proof-grid">
+          {evaluation.proofPrograms.map((program) => (
+            <article key={program.id}>
+              <div className="t1-proof-head"><span>{program.id}</span><b className={program.status}>{program.status.replaceAll('-', ' ')}</b></div>
+              <h3>{program.title}</h3>
+              <p>{program.objective}</p>
+              <dl><div><dt>Open-source stack</dt><dd>{program.openSourceStack}</dd></div><div><dt>Exit evidence</dt><dd>{program.exitGate}</dd></div></dl>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel t1-sequence-panel">
+        <PanelTitle label="Execution sequence" meta="Evidence before irreversible spend" />
+        <div className="t1-sequence">{sequence.map(([number, title, detail, status]) => <article key={number} className={status}><b>{number}</b><div><h3>{title}</h3><p>{detail}</p></div><span>{status}</span></article>)}</div>
+      </section>
+
+      <section className="gate-note"><strong>Open-source boundary</strong><p>The product, models, RTL, public-PDK research flows, and first-order multiphysics studies remain open source. Qualified 2 nm implementation, production SRAM/PHY IP, hybrid-bond process data, and foundry signoff cannot be truthfully replaced by public proxies.</p></section>
     </div>
   );
 }
@@ -531,6 +637,33 @@ function GatesView({ gates }: { gates: ReturnType<typeof evaluateT0>['gates'] })
       ))}
       <section className="gate-note"><strong>Evidence policy</strong><p>Analytical results can expose risk and guide experiments. They cannot mark formal, RTL, physical, or silicon gates as verified.</p></section>
     </div>
+  );
+}
+
+function T1ControlPanel({ config, updateConfig, evaluation }: {
+  config: T1Config;
+  updateConfig: (config: T1Config) => void;
+  evaluation: ReturnType<typeof evaluateT1>;
+}) {
+  return (
+    <aside className="control-rail">
+      <div className="control-head"><div><p className="eyebrow">Scale-up variables</p><h2>T1 baseline</h2></div><button onClick={() => updateConfig(DEFAULT_T1_CONFIG)}>Reset</button></div>
+      <div className="control-scroll">
+        <ControlGroup title="Source-defined modes">
+          <SegmentedControl label="Capacity target" value={config.capacityGib} options={[32, 64]} unit="GB" onChange={(value) => updateConfig({ ...config, capacityGib: value as 32 | 64 })} />
+          <SegmentedControl label="Lane rate" value={config.laneRateGbps} options={[8, 12]} unit="Gb/s" onChange={(value) => updateConfig({ ...config, laneRateGbps: value as 8 | 12 })} />
+          <RangeControl label="PHY energy assumption" value={config.assumedPhyEnergyPjPerBit} min={0.1} max={0.3} step={0.01} unit="pJ/bit" onChange={(value) => updateConfig({ ...config, assumedPhyEnergyPjPerBit: value })} />
+        </ControlGroup>
+        <ControlGroup title="Fixed architecture">
+          <div className="t1-fixed-list"><span><b>8</b> DRAM tiers</span><span><b>4,096</b> payload lanes</span><span><b>64</b> physical channels</span><span><b>128</b> pseudochannels</span><span><b>2,048</b> derived banks</span><span><b>64 MB</b> SRAM</span></div>
+        </ControlGroup>
+        <ControlGroup title="Live analytical outputs">
+          <div className="t1-output-list"><span>Raw bandwidth <b>{evaluation.rawBandwidthTbps.toFixed(3)} TB/s</b></span><span>Interface power proxy <b>{evaluation.interfacePowerProxyWatts.toFixed(2)} W</b></span><span>SRAM / region <b>{evaluation.sramPerRegionMib.toFixed(0)} MB</b></span></div>
+        </ControlGroup>
+        <section className="route-risk high"><span>T1 physical entry</span><strong>{evaluation.entryDecision}</strong><p>Measured T0 gates, qualified 2 nm inputs, and package evidence are mandatory before commitment.</p></section>
+      </div>
+      <div className="control-footer"><p>All values are local analytical planning data; no foundry or silicon evidence is implied.</p></div>
+    </aside>
   );
 }
 

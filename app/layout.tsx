@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
-const title = 'AIMEM Design Studio — T0 Pathfinder';
+const title = 'AIMEM Design Studio — T1 Pathfinder';
 const description =
-  'Evidence-driven architecture, workload, RTL, formal, physical, and thermal exploration for the AIMEM-X1 1,024-lane T0 pathfinder.';
+  'Evidence-gated planning for the AIMEM-X1 8-high, 4,096-lane T1 engineering sample, grounded in open-source architecture, RTL, physical, package, and thermal workflows.';
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -39,7 +39,7 @@ export async function generateMetadata(): Promise<Metadata> {
       type: 'website',
       title,
       description,
-      images: [{ url: socialImage, width: 1200, height: 630, alt: title }],
+      images: [{ url: socialImage, width: 1731, height: 909, alt: title }],
     },
     twitter: {
       card: 'summary_large_image',

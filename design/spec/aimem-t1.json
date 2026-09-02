@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "id": "AIMEM-X1-T1",
+  "title": "AIMEM-X1 T1 engineering sample",
+  "status": "draft-baseline",
+  "source": "AIMEM-X1 HyperBond AI Memory Architecture.md#91",
+  "parameters": {
+    "dram_tiers": 8,
+    "payload_lanes": 4096,
+    "capacity_gib": [32, 64],
+    "sram_mib": 64,
+    "base_die_node_class_nm": 2,
+    "nominal_lane_rate_gbps": 8,
+    "experimental_lane_rate_gbps": 12,
+    "nominal_raw_bandwidth_tbps": 4.096,
+    "experimental_raw_bandwidth_tbps": 6.144
+  },
+  "derived_assumptions": {
+    "channel_width_bits": 64,
+    "channels": 64,
+    "pseudochannels_per_channel": 2,
+    "pseudochannels": 128,
+    "banks_per_pseudochannel": 16,
+    "banks": 2048,
+    "noc_regions": 8
+  },
+  "proof_objectives": [
+    "large-scale routing",
+    "2 nm implementation",
+    "eight-tier thermal behavior",
+    "production-style package"
+  ],
+  "entry_policy": "T1 physical implementation remains on hold until every T0 silicon gate has measured passing evidence.",
+  "open_source_boundary": "Architecture, RTL, public-PDK proxies, and first-order multiphysics studies may be open source. Qualified 2 nm implementation, memory macros, hybrid-bond process data, and signoff require the restricted foundry lane."
+}
