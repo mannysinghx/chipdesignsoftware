@@ -9,7 +9,8 @@ import { evaluateT1PhysicalProxy, type T1PhysicalProxy } from '@/lib/t1-physical
 import correlation from '@/evidence/ramulator-correlation.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 't1';
+type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 't1' | 'guide';
+type UserLevel = 'beginner' | 'practitioner' | 'expert';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
 const views: Array<{ id: View; label: string }> = [
@@ -20,6 +21,7 @@ const views: Array<{ id: View; label: string }> = [
   { id: 'explore', label: 'Experiment' },
   { id: 'gates', label: 'Gates' },
   { id: 't1', label: 'T1 scale-up' },
+  { id: 'guide', label: 'User guide' },
 ];
 
 const hierarchy = [
@@ -42,6 +44,16 @@ const t1Hierarchy = [
   { id: 't1-banks', label: 'Bank fabric', meta: '2,048 derived banks' },
 ];
 
+const guideHierarchy = [
+  { id: 'guide-start', label: 'Start here', meta: 'Choose your level' },
+  { id: 'guide-workflow', label: 'End-to-end workflow', meta: '8 steps' },
+  { id: 'guide-views', label: 'Platform views', meta: '7 workspaces' },
+  { id: 'guide-roles', label: 'Role-based paths', meta: '6 disciplines' },
+  { id: 'guide-evidence', label: 'Evidence language', meta: '4 statuses' },
+  { id: 'guide-recipes', label: 'Practical recipes', meta: '4 walkthroughs' },
+  { id: 'guide-help', label: 'Help & troubleshooting', meta: 'Common issues' },
+];
+
 export default function Home() {
   const [config, setConfig] = useState<T0Config>(DEFAULT_T0_CONFIG);
   const [view, setView] = useState<View>('t1');
@@ -51,13 +63,14 @@ export default function Home() {
   const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'complete'>('idle');
   const [sweep, setSweep] = useState<SweepPoint[]>([]);
   const [t1Config, setT1Config] = useState<T1Config>(DEFAULT_T1_CONFIG);
+  const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
   const timer = useRef<number | null>(null);
   const evaluation = useMemo(() => evaluateT0(config), [config]);
   const campaign = useMemo(() => evaluateT0Campaign(config), [config]);
   const t1Evaluation = useMemo(() => evaluateT1(t1Config, evaluation.gates), [t1Config, evaluation.gates]);
   const t1Campaign = useMemo(() => evaluateT1DigitalCampaign(t1Config), [t1Config]);
   const t1Physical = useMemo(() => evaluateT1PhysicalProxy(t1Config), [t1Config]);
-  const activeHierarchy = view === 't1' ? t1Hierarchy : hierarchy;
+  const activeHierarchy = view === 'guide' ? guideHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current);
@@ -120,18 +133,18 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>{view === 't1' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
+            <h1>{view === 'guide' ? 'Platform Guide' : view === 't1' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
         <nav className="view-tabs" aria-label="Workspace views">
           {views.map((item) => (
-            <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>{item.label}</button>
+            <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => { setView(item.id); if (item.id === 'guide') setSelectedNode('guide-start'); }}>{item.label}</button>
           ))}
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> Spec 0.4.0 · correlated</span>
+          <span className="baseline-status"><i /> {view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
@@ -139,10 +152,18 @@ export default function Home() {
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
-            <div className="section-heading"><span>{view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
+            <div className="section-heading"><span>{view === 'guide' ? 'Guide contents' : view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
             <div className="hierarchy-list">
               {activeHierarchy.map((item, index) => (
-                <button key={item.id} className={(view === 't1' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => { if (view !== 't1') { setSelectedNode(item.id); setView('architecture'); } }}>
+                <button key={item.id} className={(view === 't1' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => {
+                  if (view === 'guide') {
+                    setSelectedNode(item.id);
+                    document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  } else if (view !== 't1') {
+                    setSelectedNode(item.id);
+                    setView('architecture');
+                  }
+                }}>
                   <span className="tree-line" style={{ '--tree-depth': index === 0 ? 0 : 1 } as CSSProperties}><i /></span>
                   <span className="node-copy"><strong>{item.label}</strong><small>{item.meta}</small></span>
                 </button>
@@ -151,37 +172,40 @@ export default function Home() {
           </section>
 
           <section className="rail-section evidence-summary">
-            <div className="section-heading"><span>{view === 't1' ? 'T1 entry verification' : 'Open-source readiness'}</span><b>{view === 't1' ? `${t1Evaluation.verifiedT0Gates}/12` : `${campaign.openSourceReadinessPercent.toFixed(0)}%`}</b></div>
-            <div className="evidence-bar" aria-label={`${passCount} analytical gates pass, ${failCount} fail`}>
-              <i className="pass" style={{ width: `${(passCount / 12) * 100}%` }} />
-              <i className="provisional" style={{ width: `${(provisionalCount / 12) * 100}%` }} />
-              <i className="fail" style={{ width: `${(failCount / 12) * 100}%` }} />
-            </div>
-            <div className="evidence-legend"><span><i className="dot provisional" />{provisionalCount} proxy</span><span><i className="dot fail" />{failCount} fail</span><span><i className="dot pending" />{12 - passCount - provisionalCount - failCount} external</span></div>
+            <div className="section-heading"><span>{view === 'guide' ? 'Guide coverage' : view === 't1' ? 'T1 entry verification' : 'Open-source readiness'}</span><b>{view === 'guide' ? 'E2E' : view === 't1' ? `${t1Evaluation.verifiedT0Gates}/12` : `${campaign.openSourceReadinessPercent.toFixed(0)}%`}</b></div>
+            {view === 'guide' ? <><div className="evidence-bar" aria-label="End-to-end guide coverage complete"><i className="pass" style={{ width: '100%' }} /></div><div className="evidence-legend"><span><i className="dot pass" />Beginner</span><span><i className="dot provisional" />Practitioner</span><span><i className="dot pending" />Expert</span></div></> : <><div className="evidence-bar" aria-label={`${passCount} analytical gates pass, ${failCount} fail`}><i className="pass" style={{ width: `${(passCount / 12) * 100}%` }} /><i className="provisional" style={{ width: `${(provisionalCount / 12) * 100}%` }} /><i className="fail" style={{ width: `${(failCount / 12) * 100}%` }} /></div><div className="evidence-legend"><span><i className="dot provisional" />{provisionalCount} proxy</span><span><i className="dot fail" />{failCount} fail</span><span><i className="dot pending" />{12 - passCount - provisionalCount - failCount} external</span></div></>}
           </section>
 
           <section className="assistant-card">
-            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
-            <p className="assistant-tag watch">{view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
-            <p className="assistant-detail">{view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
-            <button onClick={() => setView(view === 't1' ? 'gates' : 'readiness')}>{view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
+            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 'guide' ? 'Embedded guide' : view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
+            <p className="assistant-tag watch">{view === 'guide' ? 'Start with the guided workflow; every result links to its evidence class' : view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
+            <p className="assistant-detail">{view === 'guide' ? 'Choose a level, follow the eight-step flow, then use the role paths and recipes for deeper work.' : view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
+            <button onClick={() => setView(view === 'guide' ? 'readiness' : view === 't1' ? 'gates' : 'readiness')}>{view === 'guide' ? 'Open first workspace' : view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
           </section>
         </aside>
 
         <section className="main-stage">
           <div className="stage-header">
             <div>
-              <p className="eyebrow">{view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
-              <h2>{view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p className="eyebrow">{view === 'guide' ? 'Embedded learning center' : view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
+              <h2>{view === 'guide' ? 'End-to-end user guide' : view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
+              <p>{view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${view === 't1' ? 'running' : runStatus}`}>{view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
-              <button className="primary-button" onClick={view === 't1' ? () => setView('gates') : startSweep}>{view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
+              <span className={`fidelity-pill ${view === 'guide' || view === 't1' ? 'running' : runStatus}`}>{view === 'guide' ? `${userLevel} path` : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
+              <button className="primary-button" onClick={view === 'guide' ? () => setView('readiness') : view === 't1' ? () => setView('gates') : startSweep}>{view === 'guide' ? 'Start guided workflow' : view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
 
-          {view === 't1' ? (
+          {view === 'guide' ? (
+            <div className="metric-strip">
+              <Metric label="Experience levels" value="3" unit="paths" accent />
+              <Metric label="Workflow steps" value="8" unit="steps" />
+              <Metric label="Platform views" value="7" unit="views" />
+              <Metric label="Role tracks" value="6" unit="roles" />
+              <Metric label="Evidence states" value="4" unit="states" />
+            </div>
+          ) : view === 't1' ? (
             <div className="metric-strip">
               <Metric label="Raw bandwidth" value={t1Evaluation.rawBandwidthTbps.toFixed(3)} unit="TB/s" accent />
               <Metric label="Payload lanes" value={t1Config.payloadLanes.toLocaleString()} unit="lanes" />
@@ -206,15 +230,16 @@ export default function Home() {
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
           {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} />}
+          {view === 'guide' && <GuideView level={userLevel} setLevel={setUserLevel} navigate={setView} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>{view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
-            <span>{view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
+            <span>{view === 'guide' ? 'Guide: embedded · contextual · role-aware' : view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
+            <span>{view === 'guide' ? 'Use the evidence labels before making any engineering decision' : view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
           </footer>
         </section>
 
-        {view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
+        {view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
@@ -286,6 +311,102 @@ function ArchitectureView({ config, evaluation, selectedTier, setSelectedTier, s
           <ThroughputBar label="Random proxy" value={evaluation.randomBandwidthTbps} max={1.6} color="amber" />
         </section>
       </div>
+    </div>
+  );
+}
+
+function GuideView({ level, setLevel, navigate }: {
+  level: UserLevel;
+  setLevel: (level: UserLevel) => void;
+  navigate: (view: View) => void;
+}) {
+  const levelContent = {
+    beginner: { label: 'Beginner', time: '15-minute orientation', goal: 'Understand what the platform shows, change a safe parameter, and distinguish a model from proof.', detail: 'No chip-design or EDA background is required. Technical terms are explained where they first appear.' },
+    practitioner: { label: 'Practitioner', time: '45-minute working session', goal: 'Run a reproducible comparison, inspect workload and gate evidence, and export a reviewable snapshot.', detail: 'Best for architects, performance engineers, RTL/verification engineers, and technical product staff.' },
+    expert: { label: 'Expert', time: 'Evidence-review workflow', goal: 'Challenge assumptions, trace proxy fidelity, define replacement artifacts, and prepare cross-domain handoffs.', detail: 'Best for domain leads reviewing architecture, PPA, verification, package, thermal, or foundry readiness.' },
+  } as const;
+  const currentLevel = levelContent[level];
+  const workflow: Array<{ number: string; title: string; view: View | null; action: string; output: string; stop: string }> = [
+    { number: '01', title: 'Read the readiness summary', view: 'readiness', action: 'Start with the completion contract, domain maturity cards, reliability results, and blockers.', output: 'A shared understanding of what is implemented, provisional, external, or missing.', stop: 'Do not interpret open-source readiness as measured silicon readiness.' },
+    { number: '02', title: 'Inspect the architecture', view: 'architecture', action: 'Select hierarchy nodes and DRAM tiers; review channels, pseudochannels, banks, SRAM, NoC regions, and useful-delivery proxies.', output: 'A concrete mental model of the current T0 organization and calculated bandwidth.', stop: 'Dimensions shown as concepts or assumptions still require physical evidence.' },
+    { number: '03', title: 'Review workload behavior', view: 'workloads', action: 'Compare dense stream, banked random, KV decode, and sparse gather using identical seeded request counts.', output: 'Bandwidth, latency, row-locality, queueing, refresh, and host-traffic-reduction evidence.', stop: 'Request-level projections are not RTL timing or measured application performance.' },
+    { number: '04', title: 'Check independent correlation', view: 'correlation', action: 'Compare the internal model with pinned Ramulator2 results and read the accept/rework/hold decision.', output: 'A transparent view of relative agreement and the remaining absolute-latency calibration gap.', stop: 'Never hide a scale mismatch because workload ordering agrees.' },
+    { number: '05', title: 'Run a design-space experiment', view: 'explore', action: 'Adjust T0 controls, run the 12-point lane-rate/SRAM sweep, inspect the chart, and compare ranked candidates.', output: 'A reproducible candidate comparison with bandwidth, power, and proxy-gate context.', stop: 'Treat a favorable point as a hypothesis until higher-fidelity evidence replaces it.' },
+    { number: '06', title: 'Audit decision gates', view: 'gates', action: 'Read each target, current observation, evidence type, and status before recommending promotion.', output: 'A requirement-by-requirement decision record and explicit list of missing proof.', stop: 'An agent explanation can never upgrade a gate without its named artifact.' },
+    { number: '07', title: 'Explore the T1 scale-up', view: 't1', action: 'Sweep capacity, lane rate, PHY energy, bond pitch, route length, cooling, and activity; inspect digital and multiphysics proxies.', output: 'A bounded 8-high, 4,096-lane T1 research plan with solver handoffs.', stop: 'Foundry entry stays on hold until measured T0 and qualified process/package evidence exists.' },
+    { number: '08', title: 'Export and review', view: null, action: 'Use Export evidence in the header after setting the desired configuration. Store the JSON with the review decision and source revision.', output: 'A portable snapshot of configuration, calculations, campaign results, evidence class, and timestamp.', stop: 'The export records the current model state; it is not a signed release or signoff certificate.' },
+  ];
+  const workspaceCards: Array<{ view: View; title: string; purpose: string; firstQuestion: string }> = [
+    { view: 'readiness', title: 'Readiness', purpose: 'Program-level evidence and blockers', firstQuestion: 'What is actually complete, and what still depends on external proof?' },
+    { view: 'architecture', title: 'Architecture', purpose: 'T0 hierarchy and organization', firstQuestion: 'How do lanes, channels, banks, tiers, SRAM, and NoC regions connect?' },
+    { view: 'workloads', title: 'Workloads', purpose: 'Deterministic traffic behavior', firstQuestion: 'Which access patterns benefit, stall, or create queue pressure?' },
+    { view: 'correlation', title: 'Correlation', purpose: 'Independent-model comparison', firstQuestion: 'Where does Ramulator2 agree, and where must the internal model be recalibrated?' },
+    { view: 'explore', title: 'Experiment', purpose: 'T0 parameter sweep and ranking', firstQuestion: 'Which candidate trades bandwidth, SRAM, PHY power, and risk most effectively?' },
+    { view: 'gates', title: 'Gates', purpose: 'Requirement-level decision audit', firstQuestion: 'What evidence is required before a result can be called passing?' },
+    { view: 't1', title: 'T1 scale-up', purpose: 'Next-milestone digital and physical proxies', firstQuestion: 'What breaks when the stack, lanes, SRAM, routing, and thermal load scale up?' },
+  ];
+  const roles = [
+    ['New user / executive', 'Readiness → Gates → T1', 'Focus on decision state, blockers, evidence class, and irreversible-spend boundaries.'],
+    ['System architect', 'Architecture → Workloads → Experiment → Gates', 'Challenge organization, address mapping, efficiency assumptions, and rejected alternatives.'],
+    ['Performance engineer', 'Workloads → Correlation → Experiment', 'Compare seeded workloads, inspect latency/locality gaps, and preserve input lineage.'],
+    ['RTL / verification engineer', 'Readiness → Gates → Architecture', 'Use gate IDs and next artifacts to drive controller, ECC, repair, refresh, and liveness work.'],
+    ['Physical / package / thermal engineer', 'T1 → Readiness → Gates', 'Replace analytical indicators with OpenROAD, openEMS, Elmer, and OpenFOAM artifacts.'],
+    ['Program or release lead', 'Readiness → Gates → Export', 'Require reproducibility, review blockers, record waivers, and prevent unsupported promotion.'],
+  ];
+  const evidenceStates = [
+    ['Pass', 'The named verification method and required artifact satisfy the gate. Use only when the evidence contract is met.'],
+    ['Provisional', 'A useful analytical, cycle, RTL, formal, or physical proxy exists, but higher-fidelity replacement evidence is still required.'],
+    ['Fail', 'The current observation misses the target. Change the design or the approved requirement—never relabel the result.'],
+    ['Unverified', 'The required evidence does not exist yet. Absence of a failure is not evidence of success.'],
+  ];
+  const recipes = [
+    { title: 'Validate the T0 nominal baseline', level: 'Beginner', steps: ['Open Architecture and confirm 16 × 64-bit = 1,024 lanes.', 'Confirm 8 Gb/s produces 1.024 TB/s raw bandwidth.', 'Open Gates and verify the bandwidth result is provisional—not measured.', 'Export the snapshot and record the review purpose.'] },
+    { title: 'Compare a T0 bandwidth variant', level: 'Practitioner', steps: ['Open Experiment.', 'Change lane rate, SRAM, route length, or PHY energy in the right rail.', 'Run the 12-point sweep and inspect exact chart values.', 'Compare the ranked candidates and review any failed or high-risk indicators.'] },
+    { title: 'Stress the T1 cooling concept', level: 'Practitioner', steps: ['Open T1 scale-up.', 'Raise active workload and cooling resistance.', 'Compare hotspot and margin against the 85°C provisional limit.', 'Capture the configuration and define the Elmer/OpenFOAM artifact needed to replace the proxy.'] },
+    { title: 'Prepare an expert evidence review', level: 'Expert', steps: ['Start at Readiness and list incomplete domains.', 'Use Correlation and Gates to identify model-calibration and proof gaps.', 'Use T1 solver handoffs to assign replacement artifacts and owners.', 'Export the evidence snapshot; attach decisions, waivers, expiry, and independent-review status outside the current prototype.'] },
+  ];
+
+  return (
+    <div className="guide-layout">
+      <section className="panel guide-hero" id="guide-start">
+        <div><p className="eyebrow accent">Choose your learning path</p><h3>From first orientation to evidence-review discipline.</h3><p>This guide explains what to click, what each result means, what it does not prove, and how to move a design decision from assumption to reproducible evidence.</p></div>
+        <div className="guide-level-switch" role="group" aria-label="User experience level">{(Object.keys(levelContent) as UserLevel[]).map((item) => <button key={item} className={level === item ? 'active' : ''} onClick={() => setLevel(item)} aria-pressed={level === item}><strong>{levelContent[item].label}</strong><span>{levelContent[item].time}</span></button>)}</div>
+        <div className="guide-level-summary"><span>Current path</span><strong>{currentLevel.label}</strong><p>{currentLevel.goal}</p><small>{currentLevel.detail}</small></div>
+      </section>
+
+      <section className="panel guide-workflow-panel" id="guide-workflow">
+        <PanelTitle label="End-to-end operating workflow" meta={`${currentLevel.label} path · eight steps`} />
+        <div className="guide-workflow">{workflow.map((step) => <article key={step.number}><b>{step.number}</b><div><h3>{step.title}</h3><p>{step.action}</p><dl><div><dt>Expected output</dt><dd>{step.output}</dd></div><div><dt>Evidence stop</dt><dd>{step.stop}</dd></div></dl></div>{step.view ? <button onClick={() => navigate(step.view)}>Open {step.view === 'explore' ? 'experiment' : step.view}<span>→</span></button> : <span className="guide-header-hint">Header action</span>}</article>)}</div>
+      </section>
+
+      <section className="panel guide-views-panel" id="guide-views">
+        <PanelTitle label="Platform view map" meta="Where to go and why" />
+        <div className="guide-view-grid">{workspaceCards.map((card, index) => <article key={card.view}><div><b>{String(index + 1).padStart(2, '0')}</b><span>{card.purpose}</span></div><h3>{card.title}</h3><p>{card.firstQuestion}</p><button onClick={() => navigate(card.view)}>Open workspace <span>→</span></button></article>)}</div>
+      </section>
+
+      <section className="panel guide-roles-panel" id="guide-roles">
+        <PanelTitle label="Role-based learning paths" meta="Use the shortest path for your responsibility" />
+        <div className="guide-role-grid">{roles.map(([role, path, focus]) => <article key={role}><h3>{role}</h3><span>{path}</span><p>{focus}</p></article>)}</div>
+      </section>
+
+      <section className="panel guide-evidence-panel" id="guide-evidence">
+        <PanelTitle label="How to read evidence status" meta="The most important platform vocabulary" />
+        <div className="guide-evidence-grid">{evidenceStates.map(([state, meaning]) => <article key={state} className={state.toLowerCase()}><span>{state}</span><p>{meaning}</p></article>)}</div>
+        <div className="guide-rule"><strong>Core rule</strong><p>Models guide decisions; named artifacts justify decisions. AI-generated explanations, attractive charts, and successful software execution cannot substitute for missing RTL, formal, extracted, package, foundry, or silicon evidence.</p></div>
+      </section>
+
+      <section className="panel guide-recipes-panel" id="guide-recipes">
+        <PanelTitle label="Practical walkthroughs" meta="Repeatable tasks for common goals" />
+        <div className="guide-recipe-grid">{recipes.map((recipe) => <article key={recipe.title}><div><span>{recipe.level}</span><b>{recipe.steps.length} steps</b></div><h3>{recipe.title}</h3><ol>{recipe.steps.map((step) => <li key={step}>{step}</li>)}</ol></article>)}</div>
+      </section>
+
+      <section className="panel guide-help-panel" id="guide-help">
+        <PanelTitle label="Help, accessibility, and troubleshooting" meta="Answers remain inside the product" />
+        <div className="guide-help-grid">
+          <div><h3>Controls and navigation</h3><p>Top tabs change workspaces. The left rail selects hierarchy or guide topics. The right rail changes the active model. Segmented buttons choose fixed modes; sliders update calculated results immediately. Reset restores the approved baseline.</p><p>Keyboard users can tab through controls and chart points. On smaller screens, top tabs and wide evidence tables scroll horizontally.</p></div>
+          <div className="guide-faq"><details open><summary>Why did a metric change but a gate remain provisional?</summary><p>A recalculated value is still the same evidence class. The gate changes only when its required higher-fidelity artifact exists and satisfies the target.</p></details><details><summary>Why can useful gather bandwidth exceed physical bandwidth?</summary><p>The useful-delivery figure includes avoided host traffic. It is an application-level proxy, not extra physical interface bandwidth.</p></details><details><summary>Can this platform tape out a 2 nm chip using only open source?</summary><p>No. It can manage open architecture, RTL, public-PDK proxies, and first-order multiphysics work. Qualified 2 nm PDKs, production memory/PHY IP, hybrid-bond data, and signoff remain in the foundry lane.</p></details><details><summary>What should I export for a review?</summary><p>Set the intended configuration, export the evidence JSON, and record the design revision, review purpose, decision, owners, missing artifacts, and waiver expiry in your controlled review process.</p></details></div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -702,6 +823,43 @@ function GatesView({ gates }: { gates: ReturnType<typeof evaluateT0>['gates'] })
       ))}
       <section className="gate-note"><strong>Evidence policy</strong><p>Analytical results can expose risk and guide experiments. They cannot mark formal, RTL, physical, or silicon gates as verified.</p></section>
     </div>
+  );
+}
+
+function GuideControlPanel({ level, setLevel, navigate }: {
+  level: UserLevel;
+  setLevel: (level: UserLevel) => void;
+  navigate: (view: View) => void;
+}) {
+  const topics = [
+    ['Start here', 'guide-start'],
+    ['Workflow', 'guide-workflow'],
+    ['Views', 'guide-views'],
+    ['Roles', 'guide-roles'],
+    ['Evidence', 'guide-evidence'],
+    ['Recipes', 'guide-recipes'],
+    ['Help', 'guide-help'],
+  ];
+  const jump = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  return (
+    <aside className="control-rail guide-control-rail">
+      <div className="control-head"><div><p className="eyebrow">Learning controls</p><h2>User guide</h2></div><button onClick={() => jump('guide-start')}>Top</button></div>
+      <div className="control-scroll">
+        <ControlGroup title="Experience level">
+          <div className="guide-control-levels">{(['beginner', 'practitioner', 'expert'] as UserLevel[]).map((item) => <button key={item} className={level === item ? 'active' : ''} onClick={() => setLevel(item)} aria-pressed={level === item}>{item}</button>)}</div>
+        </ControlGroup>
+        <ControlGroup title="Guide topics">
+          <div className="guide-topic-list">{topics.map(([label, id], index) => <button key={id} onClick={() => jump(id)}><b>{String(index + 1).padStart(2, '0')}</b><span>{label}</span><i>→</i></button>)}</div>
+        </ControlGroup>
+        <ControlGroup title="Start working">
+          <div className="guide-start-list"><button onClick={() => navigate('readiness')}>T0 readiness <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button><button onClick={() => navigate('t1')}>T1 scale-up <span>→</span></button></div>
+        </ControlGroup>
+        <section className="route-risk low"><span>Guide principle</span><strong>Evidence first</strong><p>Use every chart with its evidence class, limitations, and next replacement artifact.</p></section>
+      </div>
+      <div className="control-footer"><button className="primary-button wide" onClick={() => navigate('readiness')}>Begin with readiness</button><p>Your selected guide level changes explanations, not engineering results.</p></div>
+    </aside>
   );
 }
 
