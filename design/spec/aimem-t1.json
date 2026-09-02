@@ -39,6 +39,19 @@
     "lane_rate_modes_gbps": [8, 12],
     "evidence_class": "deterministic request-level scale proxy"
   },
+  "physical_multiphysics_proxy": {
+    "status": "implemented-analytical-proxy",
+    "coupled_domains": ["interface power", "controller/NoC power", "SRAM power", "DRAM power", "routing congestion", "package skew", "IR drop", "eight-region thermal state", "cooling resistance"],
+    "baseline_assumptions": {
+      "activity_percent": 75,
+      "bond_pitch_um": 3,
+      "package_route_length_mm": 12,
+      "cooling_resistance_k_per_w": 0.65,
+      "ambient_c": 35
+    },
+    "next_open_source_handoffs": ["Yosys/OpenROAD/OpenSTA/KLayout", "FreeCAD/Gmsh/openEMS/scikit-rf", "Gmsh/Elmer", "OpenFOAM"],
+    "evidence_class": "coupled analytical proxy; not extracted layout, field simulation, qualified process data, or silicon evidence"
+  },
   "entry_policy": "T1 physical implementation remains on hold until every T0 silicon gate has measured passing evidence.",
   "open_source_boundary": "Architecture, RTL, public-PDK proxies, and first-order multiphysics studies may be open source. Qualified 2 nm implementation, memory macros, hybrid-bond process data, and signoff require the restricted foundry lane."
 }

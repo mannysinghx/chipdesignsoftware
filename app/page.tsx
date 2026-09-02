@@ -5,6 +5,7 @@ import { evaluateT0Campaign, type T0Campaign } from '@/lib/t0-campaign';
 import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep, type GateStatus, type T0Config } from '@/lib/t0-model';
 import { evaluateT1DigitalCampaign, type T1DigitalCampaign } from '@/lib/t1-campaign';
 import { DEFAULT_T1_CONFIG, evaluateT1, type T1Config } from '@/lib/t1-model';
+import { evaluateT1PhysicalProxy, type T1PhysicalProxy } from '@/lib/t1-physical';
 import correlation from '@/evidence/ramulator-correlation.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
@@ -55,6 +56,7 @@ export default function Home() {
   const campaign = useMemo(() => evaluateT0Campaign(config), [config]);
   const t1Evaluation = useMemo(() => evaluateT1(t1Config, evaluation.gates), [t1Config, evaluation.gates]);
   const t1Campaign = useMemo(() => evaluateT1DigitalCampaign(t1Config), [t1Config]);
+  const t1Physical = useMemo(() => evaluateT1PhysicalProxy(t1Config), [t1Config]);
   const activeHierarchy = view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
@@ -97,7 +99,7 @@ export default function Home() {
       config,
       evaluation,
       campaign,
-      t1: view === 't1' ? { config: t1Config, evaluation: t1Evaluation, campaign: t1Campaign, evidence_class: 'deterministic request-level scale proxy' } : undefined,
+      t1: view === 't1' ? { config: t1Config, evaluation: t1Evaluation, campaign: t1Campaign, physical: t1Physical, evidence_class: 'deterministic digital and coupled analytical physical proxy' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -203,7 +205,7 @@ export default function Home() {
           {view === 'correlation' && <CorrelationView />}
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
-          {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} campaign={t1Campaign} />}
+          {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
@@ -212,7 +214,7 @@ export default function Home() {
           </footer>
         </section>
 
-        {view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
+        {view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
@@ -288,10 +290,11 @@ function ArchitectureView({ config, evaluation, selectedTier, setSelectedTier, s
   );
 }
 
-function T1ScaleUpView({ config, evaluation, campaign }: {
+function T1ScaleUpView({ config, evaluation, campaign, physical }: {
   config: T1Config;
   evaluation: ReturnType<typeof evaluateT1>;
   campaign: T1DigitalCampaign;
+  physical: T1PhysicalProxy;
 }) {
   const scaleDeltas = [
     ['Stack height', '4 → 8', '2× tiers'],
@@ -303,8 +306,8 @@ function T1ScaleUpView({ config, evaluation, campaign }: {
   ];
   const sequence = [
     ['01', 'Freeze the T1 contract', 'Version all source-defined targets and explicitly tag derived channel, bank, and region assumptions.', 'complete'],
-    ['02', 'Scale digital models', 'Extend traces, address mapping, NoC traffic, controller composition, ECC, refresh, and repair to 64 channels.', 'active'],
-    ['03', 'Run physical and multiphysics proxies', 'Sweep public-PDK routing plus eight-tier thermal, link, power-delivery, and package geometry studies.', 'next'],
+    ['02', 'Scale digital models', 'Extend traces, address mapping, NoC traffic, controller composition, ECC, refresh, and repair to 64 channels.', 'complete'],
+    ['03', 'Run physical and multiphysics proxies', 'Sweep public-PDK routing plus eight-tier thermal, link, power-delivery, and package geometry studies.', 'active'],
     ['04', 'Authorize foundry entry', 'Proceed only after measured T0 gates pass and qualified 2 nm, SRAM, PHY, bond, and signoff inputs exist.', 'blocked'],
   ];
 
@@ -368,6 +371,40 @@ function T1ScaleUpView({ config, evaluation, campaign }: {
           <div className="t1-limitations"><strong>Model limits</strong>{campaign.modelContract.limitations.map((limitation) => <span key={limitation}>{limitation}</span>)}</div>
         </section>
       </div>
+
+      <section className="panel t1-physical-panel">
+        <PanelTitle label="Coupled physical + multiphysics proxy" meta={`${config.activityPercent}% activity · ${config.coolingResistanceKPerW.toFixed(2)} K/W cooling assumption`} />
+        <div className="t1-physical-metrics">
+          <div><span>Total active power</span><strong>{physical.power.totalPowerWatts.toFixed(1)}<small>W proxy</small></strong></div>
+          <div><span>Stack hotspot</span><strong>{physical.thermal.hotspotC.toFixed(1)}<small>°C</small></strong></div>
+          <div><span>Thermal margin</span><strong>{physical.thermal.marginC.toFixed(1)}<small>°C to 85°C</small></strong></div>
+          <div><span>Routing congestion</span><strong>{physical.routing.congestionPercent.toFixed(0)}<small>% index</small></strong></div>
+          <div><span>Package skew</span><strong>{physical.package.skewPs.toFixed(1)}<small>ps proxy</small></strong></div>
+          <div><span>IR-drop indicator</span><strong>{physical.package.irDropProxyMv.toFixed(1)}<small>mV proxy</small></strong></div>
+        </div>
+        <div className="t1-risk-strip"><span className={physical.routing.risk}>Routing · {physical.routing.risk}</span><span className={physical.thermal.risk}>Thermal · {physical.thermal.risk}</span><span className={physical.package.risk}>Package · {physical.package.risk}</span><p>{physical.evidenceClass}; no extracted parasitics or field-solver result is claimed.</p></div>
+      </section>
+
+      <div className="t1-physics-detail">
+        <section className="panel t1-region-physics">
+          <PanelTitle label="Regional coupled state" meta="Load → congestion → temperature" />
+          <div className="t1-region-grid">{physical.regions.map((region) => <article key={region.id}><div><strong>{region.id}</strong><span>{region.temperatureC.toFixed(1)}°C</span></div><div className="t1-region-bars"><i style={{ width: `${region.loadPercent}%` }} /><i style={{ width: `${region.congestionPercent}%` }} /></div><small>{region.loadPercent.toFixed(0)}% activity · {region.congestionPercent.toFixed(0)}% congestion</small></article>)}</div>
+          <div className="t1-physics-legend"><span><i />Activity</span><span><i />Congestion</span></div>
+        </section>
+
+        <section className="panel t1-cooling-panel">
+          <PanelTitle label="Cooling sensitivity" meta="Parametric resistance sweep" />
+          <div className="t1-cooling-chart">
+            {physical.coolingSweep.map((point) => <div key={point.resistanceKPerW}><span>{point.resistanceKPerW.toFixed(2)} K/W</span><div><i style={{ width: `${Math.min(100, Math.max(0, ((point.hotspotC - 45) / 50) * 100))}%` }} /></div><strong>{point.hotspotC.toFixed(1)}°C</strong></div>)}
+          </div>
+          <div className="t1-cooling-threshold"><i /><span>85°C provisional architecture limit</span></div>
+        </section>
+      </div>
+
+      <section className="panel t1-handoff-panel">
+        <PanelTitle label="Open-source solver handoffs" meta="Next artifacts required to replace analytical proxies" />
+        <div className="t1-handoff-grid">{physical.solverHandoffs.map((handoff, index) => <article key={handoff.stage}><b>{String(index + 1).padStart(2, '0')}</b><div><h3>{handoff.stage}</h3><span>{handoff.tools}</span><p>{handoff.nextArtifact}</p></div></article>)}</div>
+      </section>
 
       <section className="panel t1-proof-panel">
         <PanelTitle label="T1 proof programs" meta="Four source-defined outcomes" />
@@ -668,11 +705,12 @@ function GatesView({ gates }: { gates: ReturnType<typeof evaluateT0>['gates'] })
   );
 }
 
-function T1ControlPanel({ config, updateConfig, evaluation, campaign }: {
+function T1ControlPanel({ config, updateConfig, evaluation, campaign, physical }: {
   config: T1Config;
   updateConfig: (config: T1Config) => void;
   evaluation: ReturnType<typeof evaluateT1>;
   campaign: T1DigitalCampaign;
+  physical: T1PhysicalProxy;
 }) {
   return (
     <aside className="control-rail">
@@ -686,10 +724,16 @@ function T1ControlPanel({ config, updateConfig, evaluation, campaign }: {
         <ControlGroup title="Fixed architecture">
           <div className="t1-fixed-list"><span><b>8</b> DRAM tiers</span><span><b>4,096</b> payload lanes</span><span><b>64</b> physical channels</span><span><b>128</b> pseudochannels</span><span><b>2,048</b> derived banks</span><span><b>64 MB</b> SRAM</span></div>
         </ControlGroup>
-        <ControlGroup title="Live analytical outputs">
-          <div className="t1-output-list"><span>Raw bandwidth <b>{evaluation.rawBandwidthTbps.toFixed(3)} TB/s</b></span><span>Dense stream proxy <b>{campaign.workloads[0].usefulBandwidthTbps.toFixed(3)} TB/s</b></span><span>Interface power proxy <b>{evaluation.interfacePowerProxyWatts.toFixed(2)} W</b></span><span>SRAM / region <b>{evaluation.sramPerRegionMib.toFixed(0)} MB</b></span></div>
+        <ControlGroup title="Physical proxy assumptions">
+          <SegmentedControl label="Bond pitch" value={config.bondPitchUm} options={[2, 3, 5]} unit="µm" onChange={(value) => updateConfig({ ...config, bondPitchUm: value as 2 | 3 | 5 })} />
+          <RangeControl label="Package route length" value={config.packageRouteLengthMm} min={5} max={20} step={1} unit="mm" onChange={(value) => updateConfig({ ...config, packageRouteLengthMm: value })} />
+          <RangeControl label="Cooling resistance" value={config.coolingResistanceKPerW} min={0.35} max={1.2} step={0.05} unit="K/W" onChange={(value) => updateConfig({ ...config, coolingResistanceKPerW: value })} />
+          <RangeControl label="Active workload" value={config.activityPercent} min={40} max={100} step={5} unit="%" onChange={(value) => updateConfig({ ...config, activityPercent: value })} />
         </ControlGroup>
-        <section className="route-risk high"><span>T1 physical entry</span><strong>{evaluation.entryDecision}</strong><p>Measured T0 gates, qualified 2 nm inputs, and package evidence are mandatory before commitment.</p></section>
+        <ControlGroup title="Live analytical outputs">
+          <div className="t1-output-list"><span>Raw bandwidth <b>{evaluation.rawBandwidthTbps.toFixed(3)} TB/s</b></span><span>Dense stream proxy <b>{campaign.workloads[0].usefulBandwidthTbps.toFixed(3)} TB/s</b></span><span>Total active power <b>{physical.power.totalPowerWatts.toFixed(1)} W</b></span><span>Stack hotspot <b>{physical.thermal.hotspotC.toFixed(1)}°C</b></span><span>Routing congestion <b>{physical.routing.congestionPercent.toFixed(0)}%</b></span><span>SRAM / region <b>{evaluation.sramPerRegionMib.toFixed(0)} MB</b></span></div>
+        </ControlGroup>
+        <section className={`route-risk ${physical.thermal.risk === 'high' || physical.routing.risk === 'high' || physical.package.risk === 'high' ? 'high' : 'watch'}`}><span>T1 proxy risk</span><strong>{physical.routing.risk} / {physical.thermal.risk} / {physical.package.risk}</strong><p>Routing, thermal, and package indicators respectively. Foundry entry remains {evaluation.entryDecision}.</p></section>
       </div>
       <div className="control-footer"><p>All values are local analytical planning data; no foundry or silicon evidence is implied.</p></div>
     </aside>

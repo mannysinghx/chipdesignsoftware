@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "milestone": "AIMEM-X1 T1",
+  "configuration": {
+    "lane_rate_gbps": 8,
+    "payload_lanes": 4096,
+    "dram_tiers": 8,
+    "capacity_gib": 32,
+    "sram_mib": 64,
+    "activity_percent": 75,
+    "bond_pitch_um": 3,
+    "package_route_length_mm": 12,
+    "cooling_resistance_k_per_w": 0.65
+  },
+  "baseline_results": {
+    "total_active_power_w_proxy": 37.51128,
+    "routing_congestion_percent_index": 72.6,
+    "package_skew_ps_proxy": 7.2,
+    "ir_drop_mv_proxy": 33.9547376,
+    "stack_hotspot_c_proxy": 62.3649822,
+    "thermal_margin_to_85c": 22.6350178
+  },
+  "required_replacement_artifacts": [
+    "OpenROAD placed-and-routed proxy with congestion, timing and SPEF",
+    "openEMS/scikit-rf package channel study with S-parameters and skew",
+    "Elmer mesh-converged transient thermal and structural fields",
+    "OpenFOAM cooling result for selected cold-plate geometry"
+  ],
+  "evidence_class": "analytical handoff only",
+  "limitations": "No extracted parasitics, field-solver result, qualified 2 nm rule deck, production macro, package material calibration, or silicon measurement is included."
+}

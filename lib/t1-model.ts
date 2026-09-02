@@ -10,6 +10,10 @@ export type T1Config = {
   capacityGib: 32 | 64;
   laneRateGbps: 8 | 12;
   assumedPhyEnergyPjPerBit: number;
+  packageRouteLengthMm: number;
+  bondPitchUm: 2 | 3 | 5;
+  coolingResistanceKPerW: number;
+  activityPercent: number;
 };
 
 export type T1ProofProgram = {
@@ -31,6 +35,10 @@ export const DEFAULT_T1_CONFIG: T1Config = {
   capacityGib: 32,
   laneRateGbps: 8,
   assumedPhyEnergyPjPerBit: 0.18,
+  packageRouteLengthMm: 12,
+  bondPitchUm: 3,
+  coolingResistanceKPerW: 0.65,
+  activityPercent: 75,
 };
 
 export function evaluateT1(config: T1Config, t0Gates: GateResult[]) {
