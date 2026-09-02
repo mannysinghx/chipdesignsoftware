@@ -30,6 +30,15 @@
     "eight-tier thermal behavior",
     "production-style package"
   ],
+  "digital_scale_campaign": {
+    "status": "implemented-proxy",
+    "workloads": ["dense-stream", "bank-random", "kv-decode", "sparse-gather"],
+    "requests_per_workload": 4096,
+    "fabric_regions": 8,
+    "channels_per_region": 8,
+    "lane_rate_modes_gbps": [8, 12],
+    "evidence_class": "deterministic request-level scale proxy"
+  },
   "entry_policy": "T1 physical implementation remains on hold until every T0 silicon gate has measured passing evidence.",
   "open_source_boundary": "Architecture, RTL, public-PDK proxies, and first-order multiphysics studies may be open source. Qualified 2 nm implementation, memory macros, hybrid-bond process data, and signoff require the restricted foundry lane."
 }

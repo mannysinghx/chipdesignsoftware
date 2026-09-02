@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { evaluateT0Campaign, type T0Campaign } from '@/lib/t0-campaign';
 import { DEFAULT_T0_CONFIG, evaluateT0, runT0Sweep, type GateStatus, type T0Config } from '@/lib/t0-model';
+import { evaluateT1DigitalCampaign, type T1DigitalCampaign } from '@/lib/t1-campaign';
 import { DEFAULT_T1_CONFIG, evaluateT1, type T1Config } from '@/lib/t1-model';
 import correlation from '@/evidence/ramulator-correlation.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
@@ -53,6 +54,7 @@ export default function Home() {
   const evaluation = useMemo(() => evaluateT0(config), [config]);
   const campaign = useMemo(() => evaluateT0Campaign(config), [config]);
   const t1Evaluation = useMemo(() => evaluateT1(t1Config, evaluation.gates), [t1Config, evaluation.gates]);
+  const t1Campaign = useMemo(() => evaluateT1DigitalCampaign(t1Config), [t1Config]);
   const activeHierarchy = view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
@@ -95,7 +97,7 @@ export default function Home() {
       config,
       evaluation,
       campaign,
-      t1: view === 't1' ? { config: t1Config, evaluation: t1Evaluation, evidence_class: 'draft analytical scale-up baseline' } : undefined,
+      t1: view === 't1' ? { config: t1Config, evaluation: t1Evaluation, campaign: t1Campaign, evidence_class: 'deterministic request-level scale proxy' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -201,7 +203,7 @@ export default function Home() {
           {view === 'correlation' && <CorrelationView />}
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
-          {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} />}
+          {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} campaign={t1Campaign} />}
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
@@ -210,7 +212,7 @@ export default function Home() {
           </footer>
         </section>
 
-        {view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
+        {view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
@@ -286,9 +288,10 @@ function ArchitectureView({ config, evaluation, selectedTier, setSelectedTier, s
   );
 }
 
-function T1ScaleUpView({ config, evaluation }: {
+function T1ScaleUpView({ config, evaluation, campaign }: {
   config: T1Config;
   evaluation: ReturnType<typeof evaluateT1>;
+  campaign: T1DigitalCampaign;
 }) {
   const scaleDeltas = [
     ['Stack height', '4 → 8', '2× tiers'],
@@ -299,8 +302,8 @@ function T1ScaleUpView({ config, evaluation }: {
     ['Nominal bandwidth', '1.024 → 4.096', '4× TB/s'],
   ];
   const sequence = [
-    ['01', 'Freeze the T1 contract', 'Version all source-defined targets and explicitly tag derived channel, bank, and region assumptions.', 'active'],
-    ['02', 'Scale digital models', 'Extend traces, address mapping, NoC traffic, controller composition, ECC, refresh, and repair to 64 channels.', 'next'],
+    ['01', 'Freeze the T1 contract', 'Version all source-defined targets and explicitly tag derived channel, bank, and region assumptions.', 'complete'],
+    ['02', 'Scale digital models', 'Extend traces, address mapping, NoC traffic, controller composition, ECC, refresh, and repair to 64 channels.', 'active'],
     ['03', 'Run physical and multiphysics proxies', 'Sweep public-PDK routing plus eight-tier thermal, link, power-delivery, and package geometry studies.', 'next'],
     ['04', 'Authorize foundry entry', 'Proceed only after measured T0 gates pass and qualified 2 nm, SRAM, PHY, bond, and signoff inputs exist.', 'blocked'],
   ];
@@ -313,7 +316,7 @@ function T1ScaleUpView({ config, evaluation }: {
           <span>64 MB intelligent base die</span>
         </div>
         <div className="t1-hero-copy">
-          <p className="eyebrow accent">T1 baseline opened</p>
+          <p className="eyebrow accent">T1 digital scale campaign active</p>
           <h3>Scale the pathfinder toward a production-style engineering sample.</h3>
           <p>The open-source lane can begin architecture, RTL, routing-proxy, link, and thermal work now. A physical 2 nm commitment remains gated on measured T0 silicon and qualified foundry inputs.</p>
           <div className="readiness-tags"><span className="good">{config.dramTiers}-high stack</span><span className="good">{config.payloadLanes.toLocaleString()} lanes</span><span className="good">{config.capacityGib} GB target</span><span className="pending">Foundry entry: hold</span></div>
@@ -340,6 +343,31 @@ function T1ScaleUpView({ config, evaluation }: {
         </div>
         <p>Digital scale-up work is authorized as research. Tapeout, package commitment, and claims of T1 readiness are not.</p>
       </section>
+
+      <section className="panel t1-campaign-panel">
+        <PanelTitle label="T1 deterministic workload campaign" meta={`${(campaign.workloads.length * campaign.modelContract.requestCount).toLocaleString()} seeded requests · 64-channel proxy`} />
+        <div className="t1-campaign-table">
+          <div className="t1-campaign-row head"><span>Workload</span><span>Useful BW</span><span>Utilization</span><span>Avg latency</span><span>P99 latency</span><span>Row hits</span><span>Requests</span></div>
+          {campaign.workloads.map((workload) => <div className="t1-campaign-row" key={workload.id}><span><strong>{workload.name}</strong><small>{workload.description}</small></span><span>{workload.usefulBandwidthTbps.toFixed(3)} TB/s</span><span>{workload.utilizationPercent.toFixed(1)}%</span><span>{workload.averageLatencyNs.toFixed(1)} ns</span><span>{workload.p99LatencyNs.toFixed(1)} ns</span><span>{workload.rowHitPercent.toFixed(1)}%</span><span>{workload.requests.toLocaleString()}</span></div>)}
+        </div>
+        <div className="t1-campaign-note"><span>Evidence class</span><strong>{campaign.modelContract.evidenceClass}</strong><p>Deterministic and reproducible; not packet-level NoC, extracted timing, or silicon-calibrated latency.</p></div>
+      </section>
+
+      <div className="t1-digital-grid">
+        <section className="panel t1-fabric-panel">
+          <PanelTitle label="Eight-region fabric load" meta={`${campaign.fabric.channelsPerRegion} channels · ${campaign.fabric.banksPerRegion} banks per region`} />
+          <div className="t1-fabric-map">{campaign.fabric.regionLoadsPercent.map((load, region) => <article key={region}><div><span>R{region}</span><b>{load.toFixed(1)}%</b></div><div className="t1-fabric-meter"><i style={{ width: `${load}%` }} /></div><small>{campaign.fabric.channelsPerRegion} channels · {campaign.fabric.pseudochannelsPerRegion} pseudochannels</small></article>)}</div>
+        </section>
+
+        <section className="panel t1-mode-panel">
+          <PanelTitle label="Lane-rate sensitivity" meta="Same 4,096-lane interface" />
+          <div className="t1-mode-table">
+            <div className="t1-mode-row head"><span>Mode</span><span>Raw</span><span>Stream proxy</span><span>Random proxy</span><span>PHY proxy</span></div>
+            {campaign.modes.map((mode) => <div className={`t1-mode-row ${mode.laneRateGbps === config.laneRateGbps ? 'selected' : ''}`} key={mode.laneRateGbps}><span><strong>{mode.laneRateGbps} Gb/s</strong><small>{mode.routingClass.replace('-', ' ')}</small></span><span>{mode.rawBandwidthTbps.toFixed(3)}</span><span>{mode.streamingBandwidthTbps.toFixed(3)}</span><span>{mode.randomBandwidthTbps.toFixed(3)}</span><span>{mode.interfacePowerProxyWatts.toFixed(2)} W</span></div>)}
+          </div>
+          <div className="t1-limitations"><strong>Model limits</strong>{campaign.modelContract.limitations.map((limitation) => <span key={limitation}>{limitation}</span>)}</div>
+        </section>
+      </div>
 
       <section className="panel t1-proof-panel">
         <PanelTitle label="T1 proof programs" meta="Four source-defined outcomes" />
@@ -640,10 +668,11 @@ function GatesView({ gates }: { gates: ReturnType<typeof evaluateT0>['gates'] })
   );
 }
 
-function T1ControlPanel({ config, updateConfig, evaluation }: {
+function T1ControlPanel({ config, updateConfig, evaluation, campaign }: {
   config: T1Config;
   updateConfig: (config: T1Config) => void;
   evaluation: ReturnType<typeof evaluateT1>;
+  campaign: T1DigitalCampaign;
 }) {
   return (
     <aside className="control-rail">
@@ -658,7 +687,7 @@ function T1ControlPanel({ config, updateConfig, evaluation }: {
           <div className="t1-fixed-list"><span><b>8</b> DRAM tiers</span><span><b>4,096</b> payload lanes</span><span><b>64</b> physical channels</span><span><b>128</b> pseudochannels</span><span><b>2,048</b> derived banks</span><span><b>64 MB</b> SRAM</span></div>
         </ControlGroup>
         <ControlGroup title="Live analytical outputs">
-          <div className="t1-output-list"><span>Raw bandwidth <b>{evaluation.rawBandwidthTbps.toFixed(3)} TB/s</b></span><span>Interface power proxy <b>{evaluation.interfacePowerProxyWatts.toFixed(2)} W</b></span><span>SRAM / region <b>{evaluation.sramPerRegionMib.toFixed(0)} MB</b></span></div>
+          <div className="t1-output-list"><span>Raw bandwidth <b>{evaluation.rawBandwidthTbps.toFixed(3)} TB/s</b></span><span>Dense stream proxy <b>{campaign.workloads[0].usefulBandwidthTbps.toFixed(3)} TB/s</b></span><span>Interface power proxy <b>{evaluation.interfacePowerProxyWatts.toFixed(2)} W</b></span><span>SRAM / region <b>{evaluation.sramPerRegionMib.toFixed(0)} MB</b></span></div>
         </ControlGroup>
         <section className="route-risk high"><span>T1 physical entry</span><strong>{evaluation.entryDecision}</strong><p>Measured T0 gates, qualified 2 nm inputs, and package evidence are mandatory before commitment.</p></section>
       </div>
