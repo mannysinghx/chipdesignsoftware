@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
-const title = 'AIMEM Design Studio — Production X1';
+const title = 'AIMEM Design Studio — Agent Mission Control';
 const description =
-  'Evidence-gated, real-time system planning for the 16-high, 8,192-lane AIMEM-X1 production architecture and its eight-stack accelerator package.';
+  'Governed, evidence-aware AI-agent orchestration for end-to-end open-source chip design from requirements through production release boundaries.';
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -29,7 +29,7 @@ export async function generateMetadata(): Promise<Metadata> {
     ? forwardedProtocol
     : safeHost.startsWith('localhost') ? 'http' : 'https';
   const origin = `${protocol}://${safeHost}`;
-  const socialImage = `${origin}/og-x1.png`;
+  const socialImage = `${origin}/og-agents.png`;
 
   return {
     metadataBase: new URL(origin),

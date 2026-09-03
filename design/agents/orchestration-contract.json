@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0.0",
+  "name": "AIMEM Design Studio Agent Orchestration Contract",
+  "status": "open-source-control-plane-prototype",
+  "missions": ["t0-closure", "t1-qualification", "x1-production"],
+  "automation_boundary": {
+    "allowed": [
+      "requirements normalization",
+      "architecture calculation and consistency checks",
+      "workload and performance modeling",
+      "RTL generation, lint, simulation, and generic synthesis",
+      "bounded formal verification",
+      "public-PDK physical implementation proxies",
+      "open-source package and multiphysics studies",
+      "evidence assembly, provenance, and policy evaluation"
+    ],
+    "mandatory_stop": [
+      "measured silicon validation",
+      "restricted foundry execution without an approved signed manifest",
+      "fabrication release or irreversible spend authorization"
+    ]
+  },
+  "recommended_open_source_runtime": {
+    "agent_graph": "LangGraph",
+    "durable_workflow": "Temporal",
+    "local_model_serving": "vLLM",
+    "model_gateway": "LiteLLM",
+    "event_backbone": "NATS JetStream",
+    "system_of_record": "PostgreSQL",
+    "artifact_storage": "MinIO",
+    "policy": "OPA/Rego",
+    "provenance": "in-toto + Sigstore",
+    "observability": "OpenTelemetry + Prometheus + Grafana + Loki + Tempo"
+  },
+  "artifact_contract": {
+    "required_fields": ["artifact_id", "mission_id", "task_id", "git_revision", "tool_identity", "input_hashes", "output_hash", "evidence_class", "limitations", "owner", "timestamp", "signature"],
+    "storage": "content-addressed and immutable after review",
+    "promotion": "denied when an artifact, signature, owner, evidence class, or required dependency is missing"
+  },
+  "agent_authority": {
+    "may": ["plan", "execute approved tools", "compare", "summarize", "recommend", "flag", "prepare evidence"],
+    "may_not": ["invent missing evidence", "upgrade evidence class", "exfiltrate restricted data", "approve a waiver", "authorize tapeout", "commit irreversible spend"]
+  }
+}
