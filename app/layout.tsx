@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
-const title = 'AIMEM Design Studio — T1 Pathfinder';
+const title = 'AIMEM Design Studio — Production X1';
 const description =
-  'Evidence-gated planning for the AIMEM-X1 8-high, 4,096-lane T1 engineering sample, grounded in open-source architecture, RTL, physical, package, and thermal workflows.';
+  'Evidence-gated, real-time system planning for the 16-high, 8,192-lane AIMEM-X1 production architecture and its eight-stack accelerator package.';
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -29,7 +29,7 @@ export async function generateMetadata(): Promise<Metadata> {
     ? forwardedProtocol
     : safeHost.startsWith('localhost') ? 'http' : 'https';
   const origin = `${protocol}://${safeHost}`;
-  const socialImage = `${origin}/og.png`;
+  const socialImage = `${origin}/og-x1.png`;
 
   return {
     metadataBase: new URL(origin),

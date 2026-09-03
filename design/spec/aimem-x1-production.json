@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "program": "AIMEM-X1 Production Target",
+  "status": "architecture-planning-only",
+  "promotion_decision": "hold",
+  "stack": {
+    "dram_tiers": 16,
+    "capacity_gib_options": [64, 128],
+    "payload_lanes": 8192,
+    "physical_channels": 128,
+    "channel_width_bits": 64,
+    "pseudochannels": 256,
+    "banks": 4096,
+    "subarrays": 524288,
+    "base_die_sram_mib": 128,
+    "noc_regions": 16,
+    "base_die_class": "2 nm-class nanosheet/GAA",
+    "architectural_floorplan_mm": [12, 12]
+  },
+  "performance_states": [
+    { "id": "P0", "name": "deep-idle", "lane_rate_gbps": 0, "notes": "PHY off; DRAM self-refresh." },
+    { "id": "P1", "name": "idle", "lane_rate_gbps": 0, "notes": "PHY trained; clocks gated." },
+    { "id": "P2", "name": "eco", "lane_rate_gbps": 4, "raw_bandwidth_tbps": 4.096 },
+    { "id": "P3", "name": "nominal", "lane_rate_gbps": 8, "raw_bandwidth_tbps": 8.192, "stack_power_target_watts": 45 },
+    { "id": "P4", "name": "performance", "lane_rate_gbps": 10, "raw_bandwidth_tbps": 10.24 },
+    { "id": "P5", "name": "turbo", "lane_rate_gbps": 12, "raw_bandwidth_tbps": 12.288, "maximum_stack_power_envelope_watts": 65 }
+  ],
+  "eight_stack_system": {
+    "maximum_capacity_gib": 1024,
+    "nominal_raw_bandwidth_tbps": 65.536,
+    "experimental_raw_bandwidth_tbps": 98.304,
+    "payload_lanes": 65536,
+    "architecture": "distributed memory ports around an active-interposer-connected accelerator"
+  },
+  "base_die_area_budget_mm2": {
+    "sram": 43,
+    "phy": 29,
+    "controller_and_noc": 18,
+    "ai_memory_engines": 12,
+    "ecc_and_ras": 8,
+    "pmu_dft_security": 6,
+    "power_clock_bonding_keepout": 28,
+    "total": 144
+  },
+  "required_t1_exit_evidence": [
+    "large-scale routing",
+    "2 nm implementation",
+    "eight-tier thermal stack",
+    "production-style package"
+  ],
+  "evidence_policy": "All displayed system results are deterministic architectural calculations or explicitly labeled planning proxies. Production authorization requires measured T1 and qualified foundry evidence plus human approval."
+}
