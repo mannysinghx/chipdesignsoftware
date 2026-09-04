@@ -14,7 +14,8 @@ import { evaluatePhysicalImplementation, type PhysicalReviewScope } from '@/lib/
 import Chip3DExplorer, { type CircuitPhysicsMetrics, type TwinMetrics } from '@/app/components/Chip3DExplorer';
 import { TWIN_BUILD_STEPS, TWIN_HIERARCHY, TWIN_OVERLAYS, twinStageCounts, twinStageProgress, type TwinOverlay } from '@/lib/design-twin';
 import { DEFAULT_INTERCONNECT_INPUTS, evaluateCircuitTopology, evaluateInterconnectPhysics } from '@/lib/interconnect-physics';
-import { AIMEM_REFERENCE_MACROS, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS } from '@/lib/reference-microchip';
+import { AIMEM_REFERENCE_MACROS, BASE_DIE_FLOORPLAN, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS, X1_BASE_DIE_AREA_BUDGET_MM2 } from '@/lib/reference-microchip';
+import { PACKAGE_GEOMETRY, STACK_PLACEMENTS, evaluateConnectorChain } from '@/lib/package-connectors';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
@@ -150,6 +151,7 @@ export default function Home() {
   const physicalImplementation = useMemo(() => evaluatePhysicalImplementation(physicalScope, physicalUtilization, physicalEvidence), [physicalScope, physicalUtilization]);
   const circuitPhysics = useMemo(() => evaluateInterconnectPhysics({ ...DEFAULT_INTERCONNECT_INPUTS, laneRateGbps: x1Evaluation.state.laneRateGbps, payloadLaneCount: x1Evaluation.totalPayloadLanes }), [x1Evaluation.state.laneRateGbps, x1Evaluation.totalPayloadLanes]);
   const circuitTopology = useMemo(() => evaluateCircuitTopology(x1Config.stackCount, x1Config.dramTiers), [x1Config.stackCount, x1Config.dramTiers]);
+  const connectorChain = useMemo(() => evaluateConnectorChain(x1Config.stackCount, x1Config.dramTiers), [x1Config.stackCount, x1Config.dramTiers]);
   const activeHierarchy = view === 'twin' ? TWIN_HIERARCHY : view === 'guide' ? guideHierarchy : view === 'physical' ? physicalHierarchy : view === 'digital' ? digitalHierarchy : view === 'agents' ? agentHierarchy : view === 'x1' ? x1Hierarchy : view === 'foundry' ? foundryHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
@@ -230,7 +232,7 @@ export default function Home() {
       agent_mission: view === 'agents' ? { mission: agentMission, run_status: agentRunStatus, evaluation: agentEvaluation, evidence_class: 'deterministic open-source orchestration replay' } : undefined,
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
       physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
-      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
+      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, package_connector_chain: connectorChain, package_geometry: PACKAGE_GEOMETRY, stack_placements: STACK_PLACEMENTS, base_die_floorplan: BASE_DIE_FLOORPLAN, base_die_area_budget_mm2: X1_BASE_DIE_AREA_BUDGET_MM2, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -391,7 +393,7 @@ export default function Home() {
             </div>
           )}
 
-          {view === 'twin' && <TwinView overlay={twinOverlay} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} physics={circuitPhysics} topology={circuitTopology} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
+          {view === 'twin' && <TwinView overlay={twinOverlay} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} physics={circuitPhysics} topology={circuitTopology} connectors={connectorChain} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
           {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
           {view === 'workloads' && <WorkloadsView campaign={campaign} />}
@@ -419,13 +421,14 @@ export default function Home() {
   );
 }
 
-function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology }: {
+function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology, connectors }: {
   overlay: TwinOverlay;
   stepIndex: number;
   setStepIndex: (index: number) => void;
   metrics: TwinMetrics;
   physics: CircuitPhysicsMetrics;
   topology: ReturnType<typeof evaluateCircuitTopology>;
+  connectors: ReturnType<typeof evaluateConnectorChain>;
 }) {
   const step = TWIN_BUILD_STEPS[stepIndex];
   return (
@@ -452,7 +455,11 @@ function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology
           <div><span>Payload lanes</span><strong>{topology.payloadLanes.toLocaleString()}</strong><small>{metrics.payloadLanesPerStack.toLocaleString()} per stack</small></div>
           <div><span>Protected conductors</span><strong>{topology.protectedConductors.toLocaleString()}</strong><small>data + ECC + spares</small></div>
           <div><span>Vertical interfaces</span><strong>{topology.hybridBondInterfaces}</strong><small>base/tier + tier/tier</small></div>
-          <div><span>Visible circuit samples</span><strong>3,361</strong><small>bundles represent full counts</small></div>
+          <div><span>Rendered connector samples</span><strong>{connectors.renderedSamples.toLocaleString()}</strong><small>{connectors.renderedLevels} of {connectors.levels.length} connector levels rendered</small></div>
+        </div>
+        <div className="connector-chain-heading"><strong>Physical connector chain · board to top DRAM tier</strong><span>reference pitches are public HBM-class packaging conventions · vertical scale {PACKAGE_GEOMETRY.verticalExaggeration}</span></div>
+        <div className="connector-chain">
+          {connectors.levels.map((level) => <article key={level.id} className={`${level.rendered ? '' : 'unrendered'} ${level.evidence}`}><span>{level.order}</span><div><strong>{level.label}</strong><small>{level.from} → {level.to}</small><p>{level.technology} · {level.referencePitch}</p><b>{level.rendered ? `${level.sampled.toLocaleString()} rendered` : 'not rendered'} · {level.evidence}</b></div></article>)}
         </div>
       </section>
 
