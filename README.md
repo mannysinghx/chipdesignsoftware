@@ -49,6 +49,15 @@ Open http://localhost:3000.
 | `npm run bootstrap:ramulator` · `npm run correlate:ramulator` | Fetches Ramulator2 and regenerates the correlation evidence. |
 | `npm run evidence` | Full evidence pipeline: spec validation, tests, RTL, physical, correlation, and evidence summary. |
 
+## Deployment
+
+Two build paths share the same source:
+
+| Target | Command | Notes |
+| --- | --- | --- |
+| Vercel | `next build` (set in `vercel.json`) | Standard Next.js output in `.next/`; Tailwind runs through `postcss.config.mjs`. Import the GitHub repo in Vercel with the repository root as the project root and no overrides. |
+| Cloudflare Workers / Sites | `npm run build` (`vinext build`) | Vite + vinext output in `dist/` with the Cloudflare worker entry from `vite.config.ts`. |
+
 ## Repository layout
 
 ```

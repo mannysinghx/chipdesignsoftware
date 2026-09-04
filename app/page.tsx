@@ -730,7 +730,7 @@ function GuideView({ level, setLevel, navigate }: {
 
       <section className="panel guide-workflow-panel" id="guide-workflow">
         <PanelTitle label="End-to-end operating workflow" meta={`${currentLevel.label} path · fourteen steps`} />
-        <div className="guide-workflow">{workflow.map((step) => <article key={step.number}><b>{step.number}</b><div><h3>{step.title}</h3><p>{step.action}</p><dl><div><dt>Expected output</dt><dd>{step.output}</dd></div><div><dt>Evidence stop</dt><dd>{step.stop}</dd></div></dl></div>{step.view ? <button onClick={() => navigate(step.view)}>Open {step.view === 'explore' ? 'experiment' : step.view}<span>→</span></button> : <span className="guide-header-hint">Header action</span>}</article>)}</div>
+        <div className="guide-workflow">{workflow.map((step) => <article key={step.number}><b>{step.number}</b><div><h3>{step.title}</h3><p>{step.action}</p><dl><div><dt>Expected output</dt><dd>{step.output}</dd></div><div><dt>Evidence stop</dt><dd>{step.stop}</dd></div></dl></div>{step.view ? <button onClick={() => { if (step.view) navigate(step.view); }}>Open {step.view === 'explore' ? 'experiment' : step.view}<span>→</span></button> : <span className="guide-header-hint">Header action</span>}</article>)}</div>
       </section>
 
       <section className="panel guide-views-panel" id="guide-views">
@@ -1602,7 +1602,7 @@ function X1ControlPanel({ config, updateConfig, evaluation, navigate }: {
           <RangeControl label="Accelerator fabric" value={config.acceleratorFabricTbps} min={16} max={100} step={2} unit="TB/s" onChange={(value) => updateConfig({ ...config, acceleratorFabricTbps: value })} />
         </ControlGroup>
         <ControlGroup title="Package distribution">
-          <RangeControl label="Interposer route layers" value={config.interposerRoutingLayers} min={6} max={16} step={1} onChange={(value) => updateConfig({ ...config, interposerRoutingLayers: value })} />
+          <RangeControl label="Interposer route layers" value={config.interposerRoutingLayers} min={6} max={16} step={1} unit="" onChange={(value) => updateConfig({ ...config, interposerRoutingLayers: value })} />
           <SegmentedControl label="Distributed compute ports" value={config.distributedComputePorts} options={[8, 16, 24, 32]} onChange={(value) => updateConfig({ ...config, distributedComputePorts: value })} />
         </ControlGroup>
         <ControlGroup title="Live system outputs"><div className="t1-output-list"><span>Raw / stack <b>{evaluation.rawBandwidthPerStackTbps.toFixed(3)} TB/s</b></span><span>Aggregate raw <b>{evaluation.aggregateRawBandwidthTbps.toFixed(3)} TB/s</b></span><span>Delivered proxy <b>{evaluation.deliveredBandwidthTbps.toFixed(1)} TB/s</b></span><span>Memory-system power <b>{evaluation.memorySystemPowerWatts.toFixed(0)} W</b></span><span>Payload lanes <b>{evaluation.totalPayloadLanes.toLocaleString()}</b></span><span>Routing pressure <b>{evaluation.routingPressurePercent.toFixed(0)}%</b></span></div></ControlGroup>
