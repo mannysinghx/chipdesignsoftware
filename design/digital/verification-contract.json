@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "milestone": "AIMEM-X1 T0 digital implementation",
+  "top": "aimem_t0_top",
+  "open_source_toolchain": {
+    "rtl_elaboration_and_synthesis": "YoWASP Yosys",
+    "bounded_formal": "Yosys SAT",
+    "planned_simulation": "Verilator + cocotb",
+    "planned_waveforms": "GTKWave",
+    "planned_coverage": "Verilator coverage + custom functional coverage"
+  },
+  "implemented_modules": [
+    "aimem_t0_top",
+    "aimem_t0_channel",
+    "aimem_secded_64",
+    "aimem_sparse_gather",
+    "aimem_lane_repair"
+  ],
+  "current_pass_evidence": [
+    "SystemVerilog parse",
+    "sixteen-channel hierarchy elaboration",
+    "generic synthesis",
+    "32-cycle controller safety proof",
+    "72-position symbolic SECDED single-bit correction proof"
+  ],
+  "closure_requirements": [
+    {
+      "id": "DV-REGRESSION",
+      "artifact": "seeded Verilator and cocotb regression bundle",
+      "minimum_contents": ["command protocol", "refresh priority", "ECC faults", "gather backpressure", "lane repair", "waveforms", "failure triage", "artifact hashes"]
+    },
+    {
+      "id": "DV-DATAPATH",
+      "artifact": "complete controller datapath integration",
+      "minimum_contents": ["read/write storage behavior", "queues", "arbitration", "completion ordering", "end-to-end assertions"]
+    },
+    {
+      "id": "DV-CLOSURE",
+      "artifact": "independent digital closure review",
+      "minimum_contents": ["coverage report", "CDC/RDC report", "lint waivers", "unbounded or justified bounded properties", "review signatures"]
+    }
+  ],
+  "evidence_policy": "A planning scope may increase target depth but cannot change a check to pass. Only a reproduced artifact satisfying its declared contract may upgrade evidence.",
+  "release_policy": "Generic synthesis and bounded proofs are necessary but insufficient for digital release. The milestone remains HOLD until all closure requirements pass independent review."
+}
