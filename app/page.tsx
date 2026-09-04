@@ -10,11 +10,12 @@ import { evaluateFoundryReadiness } from '@/lib/foundry-readiness';
 import { DEFAULT_X1_CONFIG, evaluateX1, X1_STATE_TABLE, type X1Config, type X1PerformanceState } from '@/lib/x1-model';
 import { AGENT_MISSIONS, AGENT_RUNTIME_STACK, evaluateAgentMission, type AgentMission, type AgentRunStatus } from '@/lib/agent-orchestration';
 import { DIGITAL_MODULES, evaluateDigitalImplementation, type DigitalReviewScope } from '@/lib/digital-implementation';
+import { evaluatePhysicalImplementation, type PhysicalReviewScope } from '@/lib/physical-implementation';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide';
+type View = 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide';
 type UserLevel = 'beginner' | 'practitioner' | 'expert';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
@@ -26,6 +27,7 @@ const views: Array<{ id: View; label: string }> = [
   { id: 'explore', label: 'Experiment' },
   { id: 'gates', label: 'Gates' },
   { id: 'digital', label: 'RTL + verification' },
+  { id: 'physical', label: 'Physical implementation' },
   { id: 't1', label: 'T1 scale-up' },
   { id: 'foundry', label: 'Foundry readiness' },
   { id: 'x1', label: 'Production X1' },
@@ -55,11 +57,11 @@ const t1Hierarchy = [
 
 const guideHierarchy = [
   { id: 'guide-start', label: 'Start here', meta: 'Choose your level' },
-  { id: 'guide-workflow', label: 'End-to-end workflow', meta: '12 steps' },
-  { id: 'guide-views', label: 'Platform views', meta: '11 workspaces' },
+  { id: 'guide-workflow', label: 'End-to-end workflow', meta: '13 steps' },
+  { id: 'guide-views', label: 'Platform views', meta: '12 workspaces' },
   { id: 'guide-roles', label: 'Role-based paths', meta: '6 disciplines' },
   { id: 'guide-evidence', label: 'Evidence language', meta: '4 statuses' },
-  { id: 'guide-recipes', label: 'Practical recipes', meta: '7 walkthroughs' },
+  { id: 'guide-recipes', label: 'Practical recipes', meta: '8 walkthroughs' },
   { id: 'guide-help', label: 'Help & troubleshooting', meta: 'Common issues' },
 ];
 
@@ -99,9 +101,18 @@ const digitalHierarchy = [
   { id: 'digital-closure', label: 'Closure backlog', meta: '3 gaps' },
 ];
 
+const physicalHierarchy = [
+  { id: 'physical-overview', label: 'Physical overview', meta: 'public-PDK proxy' },
+  { id: 'physical-flow', label: 'Implementation flow', meta: '11 stages' },
+  { id: 'physical-floorplan', label: 'Floorplan explorer', meta: 'live planning' },
+  { id: 'physical-cells', label: 'Cell composition', meta: '2,447 mapped' },
+  { id: 'physical-constraints', label: 'Timing contract', meta: '800 MHz target' },
+  { id: 'physical-handoff', label: 'Signoff handoff', meta: '6 required outputs' },
+];
+
 export default function Home() {
   const [config, setConfig] = useState<T0Config>(DEFAULT_T0_CONFIG);
-  const [view, setView] = useState<View>('digital');
+  const [view, setView] = useState<View>('physical');
   const [selectedNode, setSelectedNode] = useState('system');
   const [selectedTier, setSelectedTier] = useState(3);
   const [runProgress, setRunProgress] = useState(0);
@@ -114,6 +125,9 @@ export default function Home() {
   const [agentRunStatus, setAgentRunStatus] = useState<AgentRunStatus>('idle');
   const [digitalScope, setDigitalScope] = useState<DigitalReviewScope>('current');
   const [selectedDigitalModule, setSelectedDigitalModule] = useState('channel');
+  const [physicalScope, setPhysicalScope] = useState<PhysicalReviewScope>('mapped');
+  const [physicalUtilization, setPhysicalUtilization] = useState(55);
+  const [selectedPhysicalStage, setSelectedPhysicalStage] = useState('mapping');
   const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
   const timer = useRef<number | null>(null);
   const agentTimer = useRef<number | null>(null);
@@ -126,7 +140,8 @@ export default function Home() {
   const x1Evaluation = useMemo(() => evaluateX1(x1Config), [x1Config]);
   const agentEvaluation = useMemo(() => evaluateAgentMission(agentMission, agentCompleted, agentRunStatus), [agentMission, agentCompleted, agentRunStatus]);
   const digitalEvaluation = useMemo(() => evaluateDigitalImplementation(digitalScope, rtlEvidence), [digitalScope]);
-  const activeHierarchy = view === 'guide' ? guideHierarchy : view === 'digital' ? digitalHierarchy : view === 'agents' ? agentHierarchy : view === 'x1' ? x1Hierarchy : view === 'foundry' ? foundryHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
+  const physicalImplementation = useMemo(() => evaluatePhysicalImplementation(physicalScope, physicalUtilization, physicalEvidence), [physicalScope, physicalUtilization]);
+  const activeHierarchy = view === 'guide' ? guideHierarchy : view === 'physical' ? physicalHierarchy : view === 'digital' ? digitalHierarchy : view === 'agents' ? agentHierarchy : view === 'x1' ? x1Hierarchy : view === 'foundry' ? foundryHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current);
@@ -194,7 +209,7 @@ export default function Home() {
   const exportSnapshot = () => {
     const snapshot = {
       schema_version: '1.0',
-      product: view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
+      product: view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
       fidelity: 'multi-domain-open-source-proxy',
       generated_at: new Date().toISOString(),
       config,
@@ -205,11 +220,12 @@ export default function Home() {
       production_x1: view === 'x1' ? { config: x1Config, evaluation: x1Evaluation, evidence_class: 'source-derived architecture plus deterministic system-planning proxies' } : undefined,
       agent_mission: view === 'agents' ? { mission: agentMission, run_status: agentRunStatus, evaluation: agentEvaluation, evidence_class: 'deterministic open-source orchestration replay' } : undefined,
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
+      physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
+    anchor.download = view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -225,7 +241,7 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>{view === 'guide' ? 'Platform Guide' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
+            <h1>{view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
@@ -236,7 +252,7 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> {view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
+          <span className="baseline-status"><i /> {view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
@@ -244,11 +260,11 @@ export default function Home() {
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
-            <div className="section-heading"><span>{view === 'guide' ? 'Guide contents' : view === 'digital' ? 'Digital evidence flow' : view === 'agents' ? 'Agent control plane' : view === 'x1' ? 'Production hierarchy' : view === 'foundry' ? 'Foundry-entry contract' : view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
+            <div className="section-heading"><span>{view === 'guide' ? 'Guide contents' : view === 'physical' ? 'Physical evidence flow' : view === 'digital' ? 'Digital evidence flow' : view === 'agents' ? 'Agent control plane' : view === 'x1' ? 'Production hierarchy' : view === 'foundry' ? 'Foundry-entry contract' : view === 't1' ? 'T1 derived hierarchy' : 'Design hierarchy'}</span><b>{activeHierarchy.length}</b></div>
             <div className="hierarchy-list">
               {activeHierarchy.map((item, index) => (
-                <button key={item.id} className={(view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' || view === 'digital' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => {
-                  if (view === 'guide' || view === 'foundry' || view === 'x1' || view === 'agents' || view === 'digital') {
+                <button key={item.id} className={(view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' || view === 'digital' || view === 'physical' ? index === 0 : selectedNode === item.id) ? 'selected' : ''} onClick={() => {
+                  if (view === 'guide' || view === 'foundry' || view === 'x1' || view === 'agents' || view === 'digital' || view === 'physical') {
                     setSelectedNode(item.id);
                     document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   } else if (view !== 't1') {
@@ -269,33 +285,41 @@ export default function Home() {
           </section>
 
           <section className="assistant-card">
-            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 'guide' ? 'Embedded guide' : view === 'digital' ? 'RTL verification agent' : view === 'agents' ? 'Mission supervisor' : view === 'x1' ? 'Production systems agent' : view === 'foundry' ? 'Foundry entry agent' : view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
-            <p className="assistant-tag watch">{view === 'guide' ? 'Start with the guided workflow; every result links to its evidence class' : view === 'digital' ? 'Executed synthesis and bounded proof pass; complete datapath and randomized RTL closure remain open' : view === 'agents' ? 'Automation may prepare evidence; physical and human boundaries always stop the run' : view === 'x1' ? 'Production architecture may be explored; promotion remains blocked on T1 proof' : view === 'foundry' ? 'Foundry entry remains on hold; the secure handoff contract is prepared' : view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
-            <p className="assistant-detail">{view === 'guide' ? 'Choose a level, follow the twelve-step flow, then use the role paths and recipes for deeper work.' : view === 'digital' ? digitalEvaluation.nextArtifact : view === 'agents' ? agentEvaluation.currentNode.stopRule : view === 'x1' ? `Current system bottleneck: ${x1Evaluation.bottleneck}. Zero of four T1 qualification gates have measured evidence.` : view === 'foundry' ? foundryReadiness.blockers[0] : view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
-            <button onClick={() => setView(view === 'guide' ? 'readiness' : view === 'digital' ? 'agents' : view === 'agents' ? 'foundry' : view === 'x1' ? 't1' : view === 'foundry' || view === 't1' ? 'gates' : 'readiness')}>{view === 'guide' ? 'Open first workspace' : view === 'digital' ? 'Return to agent mission' : view === 'agents' ? 'Review trust boundary' : view === 'x1' ? 'Review T1 evidence' : view === 'foundry' || view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
+            <div className="assistant-head"><span className="agent-glyph">A</span><div><p>{view === 'guide' ? 'Embedded guide' : view === 'physical' ? 'Physical implementation agent' : view === 'digital' ? 'RTL verification agent' : view === 'agents' ? 'Mission supervisor' : view === 'x1' ? 'Production systems agent' : view === 'foundry' ? 'Foundry entry agent' : view === 't1' ? 'T1 scale-up agent' : 'T0 program agent'}</p><small>Evidence-aware guidance</small></div></div>
+            <p className="assistant-tag watch">{view === 'guide' ? 'Start with the guided workflow; every result links to its evidence class' : view === 'physical' ? 'Public-PDK cell mapping passes; place, route, extraction, timing, DRC/LVS, and production signoff remain open' : view === 'digital' ? 'Executed synthesis and bounded proof pass; complete datapath and randomized RTL closure remain open' : view === 'agents' ? 'Automation may prepare evidence; physical and human boundaries always stop the run' : view === 'x1' ? 'Production architecture may be explored; promotion remains blocked on T1 proof' : view === 'foundry' ? 'Foundry entry remains on hold; the secure handoff contract is prepared' : view === 't1' ? 'Digital planning may proceed; physical entry remains on hold' : 'Open-source milestone implemented; silicon remains gated'}</p>
+            <p className="assistant-detail">{view === 'guide' ? 'Choose a level, follow the thirteen-step flow, then use the role paths and recipes for deeper work.' : view === 'physical' ? physicalImplementation.nextArtifact : view === 'digital' ? digitalEvaluation.nextArtifact : view === 'agents' ? agentEvaluation.currentNode.stopRule : view === 'x1' ? `Current system bottleneck: ${x1Evaluation.bottleneck}. Zero of four T1 qualification gates have measured evidence.` : view === 'foundry' ? foundryReadiness.blockers[0] : view === 't1' ? 'Close measured T0 gates before committing a 2 nm implementation or production-style package.' : campaign.blockers[0]}</p>
+            <button onClick={() => setView(view === 'guide' ? 'readiness' : view === 'physical' ? 'digital' : view === 'digital' ? 'agents' : view === 'agents' ? 'foundry' : view === 'x1' ? 't1' : view === 'foundry' || view === 't1' ? 'gates' : 'readiness')}>{view === 'guide' ? 'Open first workspace' : view === 'physical' ? 'Review RTL source' : view === 'digital' ? 'Return to agent mission' : view === 'agents' ? 'Review trust boundary' : view === 'x1' ? 'Review T1 evidence' : view === 'foundry' || view === 't1' ? 'Audit T0 gates' : 'Review readiness'} <span>→</span></button>
           </section>
         </aside>
 
         <section className="main-stage">
           <div className="stage-header">
             <div>
-              <p className="eyebrow">{view === 'guide' ? 'Embedded learning center' : view === 'digital' ? 'Open-source execution evidence' : view === 'agents' ? 'Evidence-aware orchestration' : view === 'x1' ? 'Final architecture target' : view === 'foundry' ? 'Restricted-lane control plane' : view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
-              <h2>{view === 'guide' ? 'End-to-end user guide' : view === 'digital' ? 'RTL & verification lab' : view === 'agents' ? 'AI Agent Mission Control' : view === 'x1' ? 'Production X1 system planner' : view === 'foundry' ? 'T1 foundry-entry readiness' : view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 'digital' ? 'Inspect the real T0 RTL hierarchy, controller flow, bounded formal properties, synthesis metrics, verification status, and the exact artifacts still required for digital closure.' : view === 'agents' ? 'Coordinate requirements, architecture, performance, RTL, formal, physical, multiphysics, and evidence agents—then stop safely at silicon, foundry, and human approval boundaries.' : view === 'x1' ? 'Explore the source-defined 16-high, 8,192-lane production stack and its eight-stack accelerator system while preserving the T1 evidence gate.' : view === 'foundry' ? 'Prepare a secure, auditable path from the open-source control plane into a future authorized foundry enclave—without moving proprietary inputs into this platform.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p className="eyebrow">{view === 'guide' ? 'Embedded learning center' : view === 'physical' ? 'Public-PDK implementation evidence' : view === 'digital' ? 'Open-source execution evidence' : view === 'agents' ? 'Evidence-aware orchestration' : view === 'x1' ? 'Final architecture target' : view === 'foundry' ? 'Restricted-lane control plane' : view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
+              <h2>{view === 'guide' ? 'End-to-end user guide' : view === 'physical' ? 'Physical implementation lab' : view === 'digital' ? 'RTL & verification lab' : view === 'agents' ? 'AI Agent Mission Control' : view === 'x1' ? 'Production X1 system planner' : view === 'foundry' ? 'T1 foundry-entry readiness' : view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
+              <p>{view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 'physical' ? 'Trace the public-PDK flow from mapped cells and timing constraints through floorplanning, placement, clocking, routing, extraction, physical verification, and the restricted production boundary.' : view === 'digital' ? 'Inspect the real T0 RTL hierarchy, controller flow, bounded formal properties, synthesis metrics, verification status, and the exact artifacts still required for digital closure.' : view === 'agents' ? 'Coordinate requirements, architecture, performance, RTL, formal, physical, multiphysics, and evidence agents—then stop safely at silicon, foundry, and human approval boundaries.' : view === 'x1' ? 'Explore the source-defined 16-high, 8,192-lane production stack and its eight-stack accelerator system while preserving the T1 evidence gate.' : view === 'foundry' ? 'Prepare a secure, auditable path from the open-source control plane into a future authorized foundry enclave—without moving proprietary inputs into this platform.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${view === 'guide' || view === 'digital' || view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' ? 'running' : runStatus}`}>{view === 'guide' ? `${userLevel} path` : view === 'digital' ? `${digitalScope} · ${rtlEvidence.status}` : view === 'agents' ? `${agentRunStatus} · ${agentEvaluation.progressPercent}%` : view === 'x1' ? `${x1Evaluation.state.id} · production hold` : view === 'foundry' ? 'Policy enforced · hold' : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
-              <button className="primary-button" onClick={view === 'guide' ? () => setView('readiness') : view === 'digital' ? () => setDigitalScope(digitalScope === 'current' ? 'regression' : digitalScope === 'regression' ? 'closure' : 'current') : view === 'agents' ? agentRunStatus === 'running' ? pauseAgentReplay : startAgentReplay : view === 'x1' ? () => setView('t1') : view === 'foundry' || view === 't1' ? () => setView('gates') : startSweep}>{view === 'guide' ? 'Start guided workflow' : view === 'digital' ? 'Advance review scope' : view === 'agents' ? agentRunStatus === 'running' ? 'Pause replay' : agentRunStatus === 'blocked' ? 'Replay again' : 'Run mission replay' : view === 'x1' ? 'Review T1 qualification' : view === 'foundry' ? 'Review blocking gates' : view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
+              <span className={`fidelity-pill ${view === 'guide' || view === 'physical' || view === 'digital' || view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' ? 'running' : runStatus}`}>{view === 'guide' ? `${userLevel} path` : view === 'physical' ? `${physicalScope} · ${physicalEvidence.status}` : view === 'digital' ? `${digitalScope} · ${rtlEvidence.status}` : view === 'agents' ? `${agentRunStatus} · ${agentEvaluation.progressPercent}%` : view === 'x1' ? `${x1Evaluation.state.id} · production hold` : view === 'foundry' ? 'Policy enforced · hold' : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
+              <button className="primary-button" onClick={view === 'guide' ? () => setView('readiness') : view === 'physical' ? () => setPhysicalScope(physicalScope === 'mapped' ? 'implementation' : physicalScope === 'implementation' ? 'signoff' : 'mapped') : view === 'digital' ? () => setDigitalScope(digitalScope === 'current' ? 'regression' : digitalScope === 'regression' ? 'closure' : 'current') : view === 'agents' ? agentRunStatus === 'running' ? pauseAgentReplay : startAgentReplay : view === 'x1' ? () => setView('t1') : view === 'foundry' || view === 't1' ? () => setView('gates') : startSweep}>{view === 'guide' ? 'Start guided workflow' : view === 'physical' ? 'Advance implementation scope' : view === 'digital' ? 'Advance review scope' : view === 'agents' ? agentRunStatus === 'running' ? 'Pause replay' : agentRunStatus === 'blocked' ? 'Replay again' : 'Run mission replay' : view === 'x1' ? 'Review T1 qualification' : view === 'foundry' ? 'Review blocking gates' : view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
 
           {view === 'guide' ? (
             <div className="metric-strip">
               <Metric label="Experience levels" value="3" unit="paths" accent />
-              <Metric label="Workflow steps" value="12" unit="steps" />
-              <Metric label="Platform views" value="11" unit="views" />
+              <Metric label="Workflow steps" value="13" unit="steps" />
+              <Metric label="Platform views" value="12" unit="views" />
               <Metric label="Role tracks" value="6" unit="roles" />
               <Metric label="Evidence states" value="4" unit="states" />
+            </div>
+          ) : view === 'physical' ? (
+            <div className="metric-strip">
+              <Metric label="Mapped cells" value={physicalImplementation.evidence.mapped_cells.toLocaleString()} unit="Sky130" accent />
+              <Metric label="Cell area" value={physicalImplementation.evidence.chip_area_um2.toLocaleString(undefined, { maximumFractionDigits: 0 })} unit="µm²" />
+              <Metric label="Clock target" value={String(physicalImplementation.evidence.clock_target_mhz)} unit="MHz" />
+              <Metric label="Flow stages" value={String(physicalImplementation.passedStages)} unit={`/${physicalImplementation.stages.length} pass`} />
+              <Metric label="Physical decision" value="HOLD" unit="proxy" />
             </div>
           ) : view === 'digital' ? (
             <div className="metric-strip">
@@ -354,6 +378,7 @@ export default function Home() {
           {view === 'explore' && <ExploreView config={config} evaluation={evaluation} sweep={sweep} runStatus={runStatus} runProgress={runProgress} startSweep={startSweep} />}
           {view === 'gates' && <GatesView gates={evaluation.gates} />}
           {view === 'digital' && <DigitalImplementationView evaluation={digitalEvaluation} selectedModule={selectedDigitalModule} setSelectedModule={setSelectedDigitalModule} />}
+          {view === 'physical' && <PhysicalImplementationView evaluation={physicalImplementation} selectedStage={selectedPhysicalStage} setSelectedStage={setSelectedPhysicalStage} />}
           {view === 't1' && <T1ScaleUpView config={t1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} />}
           {view === 'foundry' && <FoundryReadinessView readiness={foundryReadiness} />}
           {view === 'x1' && <ProductionX1View config={x1Config} evaluation={x1Evaluation} />}
@@ -362,12 +387,12 @@ export default function Home() {
 
           <footer className="provenance-bar">
             <span><i className="status-dot" /> Inputs recalculated locally</span>
-            <span>{view === 'guide' ? 'Guide: embedded · contextual · role-aware' : view === 'digital' ? 'Evidence: rtl-synthesis.json · reproducible open-source execution' : view === 'agents' ? 'Contract: orchestration-contract.json · open-source runtime' : view === 'x1' ? 'Spec: aimem-x1-production.json · architecture planning' : view === 'foundry' ? 'Contract: t1-enclave-handoff.json · schema 1.0.0' : view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
-            <span>{view === 'guide' ? 'Use the evidence labels before making any engineering decision' : view === 'digital' ? 'Generic synthesis + bounded proof · not timing closure, full RTL verification, or silicon evidence' : view === 'agents' ? 'Replay is deterministic visualization · no external tool or foundry job is launched' : view === 'x1' ? 'Fidelity: source-derived architecture + deterministic system proxy · T1 evidence absent' : view === 'foundry' ? 'No proprietary PDK, IP, package, or signoff data is bundled or exported' : view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
+            <span>{view === 'guide' ? 'Guide: embedded · contextual · role-aware' : view === 'physical' ? 'Evidence: physical-synthesis.json · Sky130 public-platform mapping' : view === 'digital' ? 'Evidence: rtl-synthesis.json · reproducible open-source execution' : view === 'agents' ? 'Contract: orchestration-contract.json · open-source runtime' : view === 'x1' ? 'Spec: aimem-x1-production.json · architecture planning' : view === 'foundry' ? 'Contract: t1-enclave-handoff.json · schema 1.0.0' : view === 't1' ? 'Spec: aimem-t1.json · draft baseline 0.1.0' : 'Spec: aimem-t0.json · evidence rev 0.4.0'}</span>
+            <span>{view === 'guide' ? 'Use the evidence labels before making any engineering decision' : view === 'physical' ? 'Pre-placement cell mapping · not routed timing, physical verification, production signoff, or silicon evidence' : view === 'digital' ? 'Generic synthesis + bounded proof · not timing closure, full RTL verification, or silicon evidence' : view === 'agents' ? 'Replay is deterministic visualization · no external tool or foundry job is launched' : view === 'x1' ? 'Fidelity: source-derived architecture + deterministic system proxy · T1 evidence absent' : view === 'foundry' ? 'No proprietary PDK, IP, package, or signoff data is bundled or exported' : view === 't1' ? 'Fidelity: derived architecture + open-source planning proxies · foundry evidence absent' : 'Fidelity: analytical + Ramulator2 + RTL/formal + Sky130 proxy · not silicon evidence'}</span>
           </footer>
         </section>
 
-        {view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 'digital' ? <DigitalControlPanel scope={digitalScope} setScope={setDigitalScope} evaluation={digitalEvaluation} selectedModule={selectedDigitalModule} setSelectedModule={setSelectedDigitalModule} navigate={setView} /> : view === 'agents' ? <AgentControlPanel mission={agentMission} evaluation={agentEvaluation} runStatus={agentRunStatus} onMissionChange={resetAgentReplay} onStart={startAgentReplay} onPause={pauseAgentReplay} onReset={() => resetAgentReplay()} navigate={setView} /> : view === 'x1' ? <X1ControlPanel config={x1Config} updateConfig={setX1Config} evaluation={x1Evaluation} navigate={setView} /> : view === 'foundry' ? <FoundryControlPanel readiness={foundryReadiness} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
+        {view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 'physical' ? <PhysicalControlPanel scope={physicalScope} setScope={setPhysicalScope} utilization={physicalUtilization} setUtilization={setPhysicalUtilization} evaluation={physicalImplementation} selectedStage={selectedPhysicalStage} setSelectedStage={setSelectedPhysicalStage} navigate={setView} /> : view === 'digital' ? <DigitalControlPanel scope={digitalScope} setScope={setDigitalScope} evaluation={digitalEvaluation} selectedModule={selectedDigitalModule} setSelectedModule={setSelectedDigitalModule} navigate={setView} /> : view === 'agents' ? <AgentControlPanel mission={agentMission} evaluation={agentEvaluation} runStatus={agentRunStatus} onMissionChange={resetAgentReplay} onStart={startAgentReplay} onPause={pauseAgentReplay} onReset={() => resetAgentReplay()} navigate={setView} /> : view === 'x1' ? <X1ControlPanel config={x1Config} updateConfig={setX1Config} evaluation={x1Evaluation} navigate={setView} /> : view === 'foundry' ? <FoundryControlPanel readiness={foundryReadiness} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
@@ -462,11 +487,12 @@ function GuideView({ level, setLevel, navigate }: {
     { number: '05', title: 'Run a design-space experiment', view: 'explore', action: 'Adjust T0 controls, run the 12-point lane-rate/SRAM sweep, inspect the chart, and compare ranked candidates.', output: 'A reproducible candidate comparison with bandwidth, power, and proxy-gate context.', stop: 'Treat a favorable point as a hypothesis until higher-fidelity evidence replaces it.' },
     { number: '06', title: 'Audit decision gates', view: 'gates', action: 'Read each target, current observation, evidence type, and status before recommending promotion.', output: 'A requirement-by-requirement decision record and explicit list of missing proof.', stop: 'An agent explanation can never upgrade a gate without its named artifact.' },
     { number: '07', title: 'Inspect digital implementation', view: 'digital', action: 'Trace the five RTL modules, controller state flow, reproduced synthesis evidence, bounded proofs, and verification backlog.', output: 'A module-level digital evidence review with exact pass, provisional, and planned checks.', stop: 'Generic synthesis and bounded proof do not imply complete RTL verification, timing closure, production mapping, or silicon behavior.' },
-    { number: '08', title: 'Explore the T1 scale-up', view: 't1', action: 'Sweep capacity, lane rate, PHY energy, bond pitch, route length, cooling, and activity; inspect digital and multiphysics proxies.', output: 'A bounded 8-high, 4,096-lane T1 research plan with solver handoffs.', stop: 'Foundry entry stays on hold until measured T0 and qualified process/package evidence exists.' },
-    { number: '09', title: 'Prepare foundry entry', view: 'foundry', action: 'Review the trust boundary, qualified inputs, approval chain, release policy, and named human owners.', output: 'A secure handoff contract that keeps proprietary inputs inside an authorized enclave.', stop: 'A prepared contract is not fabrication authorization; every measured gate, qualified input, and human approval remains mandatory.' },
-    { number: '10', title: 'Balance the Production X1 system', view: 'x1', action: 'Sweep stack count, capacity, performance state, demand, efficiency, accelerator ingest, route layers, and distributed ports.', output: 'A deterministic 16-high stack and multi-stack system plan with an explicit bottleneck and production gate state.', stop: 'Production architecture exploration remains blocked from promotion until the four measured T1 qualification outcomes pass.' },
-    { number: '11', title: 'Orchestrate an agent mission', view: 'agents', action: 'Choose T0 closure, T1 qualification, or Production X1; replay the open automation lane and inspect the dependency graph, event stream, artifacts, runtime, and authority policy.', output: 'A transparent execution plan that completes safe software work and stops at physical, restricted, and human boundaries.', stop: 'The replay is a deterministic orchestration visualization; it does not launch EDA, lab, or foundry jobs.' },
-    { number: '12', title: 'Export and review', view: null, action: 'Use Export evidence in the header after setting the desired configuration. Store the JSON with the review decision and source revision.', output: 'A portable snapshot of configuration, calculations, campaign results, evidence class, and timestamp.', stop: 'The export records the current model state; it is not a signed release or signoff certificate.' },
+    { number: '08', title: 'Plan physical implementation', view: 'physical', action: 'Review the mapped Sky130 cells, select each implementation stage, vary target utilization, and inspect the timing and evidence handoff contracts.', output: 'A public-PDK physical plan connected to reproduced mapping evidence and explicit required outputs.', stop: 'Floorplan dimensions and routing pressure are analytical planning values until OpenROAD artifacts replace them.' },
+    { number: '09', title: 'Explore the T1 scale-up', view: 't1', action: 'Sweep capacity, lane rate, PHY energy, bond pitch, route length, cooling, and activity; inspect digital and multiphysics proxies.', output: 'A bounded 8-high, 4,096-lane T1 research plan with solver handoffs.', stop: 'Foundry entry stays on hold until measured T0 and qualified process/package evidence exists.' },
+    { number: '10', title: 'Prepare foundry entry', view: 'foundry', action: 'Review the trust boundary, qualified inputs, approval chain, release policy, and named human owners.', output: 'A secure handoff contract that keeps proprietary inputs inside an authorized enclave.', stop: 'A prepared contract is not fabrication authorization; every measured gate, qualified input, and human approval remains mandatory.' },
+    { number: '11', title: 'Balance the Production X1 system', view: 'x1', action: 'Sweep stack count, capacity, performance state, demand, efficiency, accelerator ingest, route layers, and distributed ports.', output: 'A deterministic 16-high stack and multi-stack system plan with an explicit bottleneck and production gate state.', stop: 'Production architecture exploration remains blocked from promotion until the four measured T1 qualification outcomes pass.' },
+    { number: '12', title: 'Orchestrate an agent mission', view: 'agents', action: 'Choose T0 closure, T1 qualification, or Production X1; replay the open automation lane and inspect the dependency graph, event stream, artifacts, runtime, and authority policy.', output: 'A transparent execution plan that completes safe software work and stops at physical, restricted, and human boundaries.', stop: 'The replay is a deterministic orchestration visualization; it does not launch EDA, lab, or foundry jobs.' },
+    { number: '13', title: 'Export and review', view: null, action: 'Use Export evidence in the header after setting the desired configuration. Store the JSON with the review decision and source revision.', output: 'A portable snapshot of configuration, calculations, campaign results, evidence class, and timestamp.', stop: 'The export records the current model state; it is not a signed release or signoff certificate.' },
   ];
   const workspaceCards: Array<{ view: View; title: string; purpose: string; firstQuestion: string }> = [
     { view: 'readiness', title: 'Readiness', purpose: 'Program-level evidence and blockers', firstQuestion: 'What is actually complete, and what still depends on external proof?' },
@@ -476,6 +502,7 @@ function GuideView({ level, setLevel, navigate }: {
     { view: 'explore', title: 'Experiment', purpose: 'T0 parameter sweep and ranking', firstQuestion: 'Which candidate trades bandwidth, SRAM, PHY power, and risk most effectively?' },
     { view: 'gates', title: 'Gates', purpose: 'Requirement-level decision audit', firstQuestion: 'What evidence is required before a result can be called passing?' },
     { view: 'digital', title: 'RTL + verification', purpose: 'Executable digital implementation evidence', firstQuestion: 'Which modules and properties pass today, and what is still required for RTL closure?' },
+    { view: 'physical', title: 'Physical implementation', purpose: 'Public-PDK mapping and implementation handoff', firstQuestion: 'What has physically mapped, and which place-and-route artifacts remain absent?' },
     { view: 't1', title: 'T1 scale-up', purpose: 'Next-milestone digital and physical proxies', firstQuestion: 'What breaks when the stack, lanes, SRAM, routing, and thermal load scale up?' },
     { view: 'foundry', title: 'Foundry readiness', purpose: 'Secure restricted-lane handoff', firstQuestion: 'Which inputs, controls, and human approvals are still required before fabrication review?' },
     { view: 'x1', title: 'Production X1', purpose: 'Full-stack and accelerator-system planning', firstQuestion: 'Can the package and accelerator consume the bandwidth exposed by up to eight production stacks?' },
@@ -486,7 +513,7 @@ function GuideView({ level, setLevel, navigate }: {
     ['System architect', 'Architecture → Workloads → Experiment → Gates', 'Challenge organization, address mapping, efficiency assumptions, and rejected alternatives.'],
     ['Performance engineer', 'Workloads → Correlation → Experiment', 'Compare seeded workloads, inspect latency/locality gaps, and preserve input lineage.'],
     ['RTL / verification engineer', 'Architecture → Digital → Gates → Agents', 'Trace implementation blocks, audit bounded proofs, plan randomized regressions, and preserve evidence lineage.'],
-    ['Physical / package / thermal engineer', 'T1 → Foundry → Gates', 'Replace analytical indicators with OpenROAD, openEMS, Elmer, and OpenFOAM artifacts, then define qualified signoff handoffs.'],
+    ['Physical / package / thermal engineer', 'Digital → Physical → T1 → Foundry', 'Replace analytical indicators with OpenROAD, openEMS, Elmer, and OpenFOAM artifacts, then define qualified signoff handoffs.'],
     ['Program or release lead', 'Readiness → Gates → Agents → Foundry → Export', 'Require reproducibility, review dependencies, record waivers, and prevent unsupported promotion.'],
   ];
   const evidenceStates = [
@@ -503,6 +530,7 @@ function GuideView({ level, setLevel, navigate }: {
     { title: 'Balance a Production X1 system', level: 'Expert', steps: ['Open Production X1 and select the intended stack count and P-state.', 'Set memory efficiency and workload demand, then size accelerator fabric ingest.', 'Increase route layers or distributed ports until routing pressure is reviewable.', 'Export the plan with the HOLD decision and assign the four missing T1 qualification artifacts.'] },
     { title: 'Replay a governed agent mission', level: 'Practitioner', steps: ['Open Agent operations and choose a T0, T1, or X1 mission.', 'Start the deterministic replay and watch each open-source agent complete.', 'Inspect the artifact ledger and mandatory silicon, foundry, and human stops.', 'Export the mission snapshot without relabeling the replay as real tool execution.'] },
     { title: 'Review digital implementation evidence', level: 'Expert', steps: ['Open RTL + verification and select each implementation module.', 'Compare the five passed checks with the provisional and planned work.', 'Advance from current evidence to regression and closure planning scopes.', 'Export the digital evidence snapshot with the HOLD decision and next artifact.'] },
+    { title: 'Prepare a physical implementation handoff', level: 'Expert', steps: ['Open Physical implementation and audit the two reproduced mapping stages.', 'Adjust utilization to inspect planning geometry and routing pressure.', 'Select every placement-through-verification stage and read its required artifact.', 'Export the physical snapshot while keeping production signoff in the restricted lane.'] },
   ];
 
   return (
@@ -514,7 +542,7 @@ function GuideView({ level, setLevel, navigate }: {
       </section>
 
       <section className="panel guide-workflow-panel" id="guide-workflow">
-        <PanelTitle label="End-to-end operating workflow" meta={`${currentLevel.label} path · twelve steps`} />
+        <PanelTitle label="End-to-end operating workflow" meta={`${currentLevel.label} path · thirteen steps`} />
         <div className="guide-workflow">{workflow.map((step) => <article key={step.number}><b>{step.number}</b><div><h3>{step.title}</h3><p>{step.action}</p><dl><div><dt>Expected output</dt><dd>{step.output}</dd></div><div><dt>Evidence stop</dt><dd>{step.stop}</dd></div></dl></div>{step.view ? <button onClick={() => navigate(step.view)}>Open {step.view === 'explore' ? 'experiment' : step.view}<span>→</span></button> : <span className="guide-header-hint">Header action</span>}</article>)}</div>
       </section>
 
@@ -856,7 +884,7 @@ function AgentMissionControlView({ evaluation, runStatus, navigate }: {
       <section className="panel agent-graph-panel" id="agent-graph">
         <PanelTitle label="End-to-end execution graph" meta="Dependencies, tools, artifacts, and stop rules remain visible" />
         <div className="agent-lane-label"><span>Open automation lane</span><b>{evaluation.completedOpenNodes}/{evaluation.safeNodeCount} replayed</b></div>
-        <div className="agent-graph-grid">{evaluation.openNodes.map((node, index) => <article key={node.id} className={node.status}><div className="agent-node-head"><b>{String(index + 1).padStart(2, '0')}</b><span>{node.status}</span></div><h3>{node.title}</h3><strong>{node.agent}</strong><p>{node.tools}</p><dl><div><dt>Consumes</dt><dd>{node.consumes}</dd></div><div><dt>Produces</dt><dd>{node.artifact}</dd></div></dl>{(node.id === 'rtl' || node.id === 'formal') && <button onClick={() => navigate('digital')}>Open real evidence →</button>}{index < evaluation.openNodes.length - 1 && <i aria-hidden="true">→</i>}</article>)}</div>
+        <div className="agent-graph-grid">{evaluation.openNodes.map((node, index) => <article key={node.id} className={node.status}><div className="agent-node-head"><b>{String(index + 1).padStart(2, '0')}</b><span>{node.status}</span></div><h3>{node.title}</h3><strong>{node.agent}</strong><p>{node.tools}</p><dl><div><dt>Consumes</dt><dd>{node.consumes}</dd></div><div><dt>Produces</dt><dd>{node.artifact}</dd></div></dl>{(node.id === 'rtl' || node.id === 'formal') && <button onClick={() => navigate('digital')}>Open digital evidence →</button>}{node.id === 'physical' && <button onClick={() => navigate('physical')}>Open physical evidence →</button>}{index < evaluation.openNodes.length - 1 && <i aria-hidden="true">→</i>}</article>)}</div>
         <div className="agent-lane-label boundary"><span>Mandatory boundary lane</span><b>No autonomous promotion</b></div>
         <div className="agent-boundary-grid">{evaluation.boundaryNodes.map((node, index) => <article key={node.id} className={node.lane}><div><b>{String(index + 9).padStart(2, '0')}</b><span>{node.lane}</span></div><h3>{node.title}</h3><strong>{node.agent}</strong><p>{node.stopRule}</p><small>Required artifact · {node.artifact}</small></article>)}</div>
       </section>
@@ -926,6 +954,57 @@ function DigitalImplementationView({ evaluation, selectedModule, setSelectedModu
       </section>
 
       <section className="gate-note digital-hold-note"><strong>Current decision · HOLD</strong><p>Passing generic synthesis and bounded properties makes this a reproducible implementation slice—not a complete controller, timing-closed netlist, production-process result, or silicon qualification.</p></section>
+    </div>
+  );
+}
+
+function PhysicalImplementationView({ evaluation, selectedStage, setSelectedStage }: {
+  evaluation: ReturnType<typeof evaluatePhysicalImplementation>;
+  selectedStage: string;
+  setSelectedStage: (stage: string) => void;
+}) {
+  const activeStage = evaluation.stages.find((stage) => stage.id === selectedStage) ?? evaluation.stages[1];
+  const requiredOutputs = ['Placed DEF', 'Clock-tree report', 'Routed DEF', 'SPEF parasitics', 'Post-route setup and hold', 'DRC and LVS reports'];
+  return (
+    <div className="physical-lab-layout">
+      <section className="panel physical-lab-hero" id="physical-overview">
+        <div className="physical-chip-mark"><div>{Array.from({ length: 36 }).map((_, index) => <i key={index} />)}</div><span>Mapped channel</span></div>
+        <div><p className="eyebrow accent">Executed evidence · {evaluation.evidence.platform}</p><h3>From synthesizable RTL to an auditable physical-design handoff.</h3><p>The complete T0 channel maps to public Sky130 standard cells. This lab separates reproduced mapping evidence from analytical floorplan planning, future open-source implementation, and restricted production signoff.</p><div className="readiness-tags"><span className="good">{evaluation.evidence.mapped_cells.toLocaleString()} mapped cells</span><span className="good">No generic cells</span><span className="good">SDC versioned</span><span className="pending">Route + signoff open</span></div></div>
+        <div className="physical-lab-decision"><span>Physical release</span><strong>{evaluation.decision}</strong><small>{evaluation.nextArtifact}</small></div>
+      </section>
+
+      <section className="panel physical-flow-panel" id="physical-flow">
+        <PanelTitle label="Implementation and signoff flow" meta={`${evaluation.passedStages} pass · ${evaluation.readyStages} ready · ${evaluation.plannedStages} planned · ${evaluation.restrictedStages} restricted`} />
+        <div className="physical-stage-grid">{evaluation.stages.map((stage, index) => <button key={stage.id} className={`${stage.status} ${selectedStage === stage.id ? 'active' : ''}`} onClick={() => setSelectedStage(stage.id)}><div><b>{String(index + 1).padStart(2, '0')}</b><span>{stage.status}</span></div><h3>{stage.title}</h3><p>{stage.tool}</p>{index < evaluation.stages.length - 1 && <i>→</i>}</button>)}</div>
+        <div className="physical-stage-detail"><div><span>Selected stage</span><strong>{activeStage.title}</strong><small>{activeStage.tool} · {activeStage.status}</small></div><p>{activeStage.detail}</p><div><span>Required artifact</span><strong>{activeStage.artifact}</strong></div></div>
+      </section>
+
+      <section className="panel physical-floorplan-panel" id="physical-floorplan">
+        <PanelTitle label="Analytical floorplan explorer" meta={`${evaluation.utilizationPercent}% target utilization · planning only`} />
+        <div className="physical-floorplan-body"><div className="physical-die" style={{ '--core-ratio': `${Math.max(58, 88 - (evaluation.dieSideUm - evaluation.coreSideUm) / evaluation.dieSideUm * 100)}%` } as CSSProperties}><span className="die-edge top">power + clock entry</span><span className="die-edge left">command + data in</span><div className="physical-core"><b>aimem_t0_channel</b><span>{evaluation.evidence.mapped_cells.toLocaleString()} cells</span><div>{Array.from({ length: 80 }).map((_, index) => <i key={index} className={index % 5 === 0 ? 'seq' : ''} />)}</div></div><span className="die-edge right">response + status</span><span className="die-edge bottom">test + telemetry</span></div><div className="physical-floorplan-metrics"><article><span>Mapped cell area</span><strong>{evaluation.evidence.chip_area_um2.toLocaleString(undefined, { maximumFractionDigits: 0 })} µm²</strong></article><article><span>Estimated core</span><strong>{evaluation.coreSideUm.toFixed(1)} × {evaluation.coreSideUm.toFixed(1)} µm</strong></article><article><span>Planning die</span><strong>{evaluation.dieSideUm.toFixed(1)} × {evaluation.dieSideUm.toFixed(1)} µm</strong></article><article><span>Routing pressure</span><strong>{evaluation.routingPressure}% · {evaluation.clockRisk}</strong></article><p>Core and die dimensions are first-order planning values derived from mapped-cell area and target utilization. They are not OpenROAD floorplan output.</p></div></div>
+      </section>
+
+      <section className="panel physical-cell-panel" id="physical-cells">
+        <PanelTitle label="Mapped cell composition" meta={`${evaluation.evidence.sequential_cells} sequential · ${evaluation.combinationalCells.toLocaleString()} combinational`} />
+        <div className="physical-cell-summary"><div><strong>{evaluation.sequentialPercent.toFixed(1)}%</strong><span>sequential share</span></div><div><strong>{(100 - evaluation.sequentialPercent).toFixed(1)}%</strong><span>combinational share</span></div></div>
+        <div className="physical-cell-bars">{evaluation.topCells.map((cell, index) => <div key={cell.name}><b>{String(index + 1).padStart(2, '0')}</b><span>{cell.name}</span><i><em style={{ width: `${Math.max(4, (cell.count / evaluation.topCells[0].count) * 100)}%` }} /></i><strong>{cell.count}</strong></div>)}</div>
+      </section>
+
+      <section className="panel physical-constraint-panel" id="physical-constraints">
+        <PanelTitle label="Versioned timing contract" meta="SDC inputs are ready; timing results are not" />
+        <div className="physical-clock"><div><span>core_clk</span><strong>{(1000 / evaluation.evidence.clock_target_mhz).toFixed(3)} ns</strong><small>{evaluation.evidence.clock_target_mhz} MHz target</small></div><i /><div><span>Clock uncertainty</span><strong>0.100 ns</strong><small>8% of period</small></div></div>
+        <div className="physical-constraint-list"><div><span>Input delay</span><b>0.150 ns</b></div><div><span>Output delay</span><b>0.150 ns</b></div><div><span>Output load</span><b>0.020</b></div><div><span>Reset</span><b>false path</b></div><div><span>Corner</span><b>TT · 25°C · 1.80 V</b></div></div>
+        <p className="physical-constraint-note">The 800 MHz value is an implementation objective. It is not achieved timing until post-route setup and hold reports exist.</p>
+      </section>
+
+      <section className="panel physical-handoff-panel" id="physical-handoff">
+        <PanelTitle label="Evidence handoff contract" meta={`${evaluation.scope.label} · ${evaluation.scope.objective}`} />
+        <div className="physical-output-grid">{requiredOutputs.map((output, index) => <article key={output}><b>{String(index + 1).padStart(2, '0')}</b><div><h3>{output}</h3><p>{index < 4 ? 'Open-source implementation artifact · absent until the corresponding tool stage runs' : 'Reviewed verification artifact · absent until implementation converges'}</p></div><span>required</span></article>)}</div>
+        <div className="physical-boundary"><strong>Production boundary</strong><p>Sky130 is a public research proxy. Qualified 2 nm libraries, SRAM and PHY macros, hybrid-bond rules, package extraction, EM/IR, reliability, and production signoff must remain inside the authorized foundry enclave.</p></div>
+        <div className="physical-limit-list">{evaluation.evidence.limitations.map((limitation) => <span key={limitation}>{limitation}</span>)}</div>
+      </section>
+
+      <section className="gate-note physical-lab-hold"><strong>Current decision · HOLD</strong><p>Technology mapping passed. Physical implementation has not passed until placed and routed geometry, extracted parasitics, timing, DRC/LVS, power integrity, and independent review artifacts satisfy their contracts.</p></section>
     </div>
   );
 }
@@ -1233,11 +1312,36 @@ function GuideControlPanel({ level, setLevel, navigate }: {
           <div className="guide-topic-list">{topics.map(([label, id], index) => <button key={id} onClick={() => jump(id)}><b>{String(index + 1).padStart(2, '0')}</b><span>{label}</span><i>→</i></button>)}</div>
         </ControlGroup>
         <ControlGroup title="Start working">
-          <div className="guide-start-list"><button onClick={() => navigate('readiness')}>T0 readiness <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button><button onClick={() => navigate('digital')}>RTL + verification <span>→</span></button><button onClick={() => navigate('t1')}>T1 scale-up <span>→</span></button><button onClick={() => navigate('foundry')}>Foundry readiness <span>→</span></button><button onClick={() => navigate('x1')}>Production X1 <span>→</span></button><button onClick={() => navigate('agents')}>Agent operations <span>→</span></button></div>
+          <div className="guide-start-list"><button onClick={() => navigate('readiness')}>T0 readiness <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button><button onClick={() => navigate('digital')}>RTL + verification <span>→</span></button><button onClick={() => navigate('physical')}>Physical implementation <span>→</span></button><button onClick={() => navigate('t1')}>T1 scale-up <span>→</span></button><button onClick={() => navigate('foundry')}>Foundry readiness <span>→</span></button><button onClick={() => navigate('x1')}>Production X1 <span>→</span></button><button onClick={() => navigate('agents')}>Agent operations <span>→</span></button></div>
         </ControlGroup>
         <section className="route-risk low"><span>Guide principle</span><strong>Evidence first</strong><p>Use every chart with its evidence class, limitations, and next replacement artifact.</p></section>
       </div>
       <div className="control-footer"><button className="primary-button wide" onClick={() => navigate('readiness')}>Begin with readiness</button><p>Your selected guide level changes explanations, not engineering results.</p></div>
+    </aside>
+  );
+}
+
+function PhysicalControlPanel({ scope, setScope, utilization, setUtilization, evaluation, selectedStage, setSelectedStage, navigate }: {
+  scope: PhysicalReviewScope;
+  setScope: (scope: PhysicalReviewScope) => void;
+  utilization: number;
+  setUtilization: (utilization: number) => void;
+  evaluation: ReturnType<typeof evaluatePhysicalImplementation>;
+  selectedStage: string;
+  setSelectedStage: (stage: string) => void;
+  navigate: (view: View) => void;
+}) {
+  return (
+    <aside className="control-rail physical-lab-control">
+      <div className="control-head"><div><p className="eyebrow">Physical controls</p><h2>Implementation</h2></div><span className="control-hold">HOLD</span></div>
+      <div className="control-scroll">
+        <ControlGroup title="Review scope"><div className="digital-scope-control">{(['mapped', 'implementation', 'signoff'] as PhysicalReviewScope[]).map((item) => <button key={item} className={scope === item ? 'active' : ''} onClick={() => setScope(item)}><strong>{item === 'mapped' ? 'Mapped evidence' : item === 'implementation' ? 'Implementation plan' : 'Signoff boundary'}</strong><span>{item === 'mapped' ? 'Reproduced' : 'Planning only'}</span></button>)}</div></ControlGroup>
+        <ControlGroup title="Floorplan assumption"><RangeControl label="Target utilization" value={utilization} min={35} max={80} step={5} unit="%" onChange={setUtilization} /><div className="t1-output-list"><span>Estimated core <b>{evaluation.coreSideUm.toFixed(1)} µm</b></span><span>Planning die <b>{evaluation.dieSideUm.toFixed(1)} µm</b></span><span>Routing pressure <b>{evaluation.routingPressure}%</b></span><span>Clock risk <b>{evaluation.clockRisk}</b></span></div></ControlGroup>
+        <ControlGroup title="Inspect flow stage"><div className="physical-stage-control">{evaluation.stages.map((stage, index) => <button key={stage.id} className={`${stage.status} ${selectedStage === stage.id ? 'active' : ''}`} onClick={() => setSelectedStage(stage.id)}><b>{String(index + 1).padStart(2, '0')}</b><span>{stage.title}</span><em>{stage.status}</em></button>)}</div></ControlGroup>
+        <ControlGroup title="Related workspaces"><div className="guide-start-list"><button onClick={() => navigate('digital')}>RTL + verification <span>→</span></button><button onClick={() => navigate('agents')}>Agent mission control <span>→</span></button><button onClick={() => navigate('foundry')}>Foundry boundary <span>→</span></button></div></ControlGroup>
+        <section className="route-risk high"><span>Physical decision</span><strong>{evaluation.decision}</strong><p>{evaluation.nextArtifact}</p></section>
+      </div>
+      <div className="control-footer"><button className="primary-button wide" onClick={() => setScope(scope === 'mapped' ? 'implementation' : scope === 'implementation' ? 'signoff' : 'mapped')}>Advance implementation scope</button><p>Floorplan controls update planning geometry only; they cannot create implementation evidence.</p></div>
     </aside>
   );
 }
@@ -1257,7 +1361,7 @@ function DigitalControlPanel({ scope, setScope, evaluation, selectedModule, setS
         <ControlGroup title="Review scope"><div className="digital-scope-control">{(['current', 'regression', 'closure'] as DigitalReviewScope[]).map((item) => <button key={item} className={scope === item ? 'active' : ''} onClick={() => setScope(item)}><strong>{item === 'current' ? 'Current evidence' : item === 'regression' ? 'Regression plan' : 'Closure plan'}</strong><span>{item === 'current' ? 'Reproduced now' : 'Planning only'}</span></button>)}</div></ControlGroup>
         <ControlGroup title="Inspect module"><div className="digital-module-control">{DIGITAL_MODULES.map((module) => <button key={module.id} className={selectedModule === module.id ? 'active' : ''} onClick={() => setSelectedModule(module.id)}><span>{module.name}</span><b>{module.lines}</b></button>)}</div></ControlGroup>
         <ControlGroup title="Evidence summary"><div className="t1-output-list"><span>Top module <b>{evaluation.evidence.top}</b></span><span>Channels <b>{evaluation.evidence.channels}</b></span><span>Generic cells <b>{evaluation.evidence.cells.toLocaleString()}</b></span><span>Formal proofs <b>{evaluation.evidence.formal_proofs}</b></span><span>Passed checks <b>{evaluation.passCount}/{evaluation.checks.length}</b></span><span>Readiness <b>{evaluation.weightedReadiness}%</b></span></div></ControlGroup>
-        <ControlGroup title="Related workspaces"><div className="guide-start-list"><button onClick={() => navigate('agents')}>Agent mission control <span>→</span></button><button onClick={() => navigate('gates')}>T0 evidence gates <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button></div></ControlGroup>
+        <ControlGroup title="Related workspaces"><div className="guide-start-list"><button onClick={() => navigate('physical')}>Physical implementation <span>→</span></button><button onClick={() => navigate('agents')}>Agent mission control <span>→</span></button><button onClick={() => navigate('gates')}>T0 evidence gates <span>→</span></button><button onClick={() => navigate('architecture')}>T0 architecture <span>→</span></button></div></ControlGroup>
         <section className="route-risk high"><span>Digital decision</span><strong>{evaluation.releaseDecision}</strong><p>{evaluation.nextArtifact}</p></section>
       </div>
       <div className="control-footer"><button className="primary-button wide" onClick={() => setScope(scope === 'current' ? 'regression' : scope === 'regression' ? 'closure' : 'current')}>Advance review scope</button><p>Changing scope reveals planned targets; it never marks unexecuted work complete.</p></div>
@@ -1282,7 +1386,7 @@ function AgentControlPanel({ mission, evaluation, runStatus, onMissionChange, on
         <ControlGroup title="Mission objective"><div className="agent-mission-select">{(Object.keys(AGENT_MISSIONS) as AgentMission[]).map((item) => <button key={item} className={mission === item ? 'active' : ''} onClick={() => onMissionChange(item)}><strong>{AGENT_MISSIONS[item].label}</strong><span>{AGENT_MISSIONS[item].objective}</span></button>)}</div></ControlGroup>
         <ControlGroup title="Replay control"><div className="agent-run-control"><button className="primary-button" onClick={runStatus === 'running' ? onPause : onStart}>{runStatus === 'running' ? 'Pause replay' : runStatus === 'blocked' ? 'Replay open lane' : 'Start mission replay'}</button><div><span>Open-lane progress</span><strong>{evaluation.completedOpenNodes}/{evaluation.safeNodeCount}</strong></div><div className="agent-control-meter"><i style={{ width: `${evaluation.progressPercent}%` }} /></div><p>Deterministic UI replay only. No external tool, compute cluster, lab, or foundry job is started.</p></div></ControlGroup>
         <ControlGroup title="Current agent"><div className="agent-current-card"><span>{evaluation.currentNode.status}</span><h3>{evaluation.currentNode.agent}</h3><p>{evaluation.currentNode.title}</p><small>{evaluation.currentNode.tools}</small></div></ControlGroup>
-        <ControlGroup title="Evidence workspaces"><div className="guide-start-list"><button onClick={() => navigate('digital')}>RTL + verification <span>→</span></button><button onClick={() => navigate('gates')}>T0 evidence gates <span>→</span></button><button onClick={() => navigate('foundry')}>Foundry boundary <span>→</span></button><button onClick={() => navigate('x1')}>Production X1 <span>→</span></button></div></ControlGroup>
+        <ControlGroup title="Evidence workspaces"><div className="guide-start-list"><button onClick={() => navigate('digital')}>RTL + verification <span>→</span></button><button onClick={() => navigate('physical')}>Physical implementation <span>→</span></button><button onClick={() => navigate('gates')}>T0 evidence gates <span>→</span></button><button onClick={() => navigate('foundry')}>Foundry boundary <span>→</span></button><button onClick={() => navigate('x1')}>Production X1 <span>→</span></button></div></ControlGroup>
         <section className="route-risk high"><span>Mission decision</span><strong>{evaluation.decision}</strong><p>{evaluation.mission.boundary}</p></section>
       </div>
       <div className="control-footer"><button className="primary-button wide" onClick={runStatus === 'running' ? onPause : onStart}>{runStatus === 'running' ? 'Pause safe replay' : 'Replay safe automation'}</button><p>Agents can recommend and prepare evidence. They cannot create missing physical proof or authorize fabrication.</p></div>
