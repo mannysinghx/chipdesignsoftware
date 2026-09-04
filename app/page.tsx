@@ -12,7 +12,7 @@ import { AGENT_MISSIONS, AGENT_RUNTIME_STACK, evaluateAgentMission, type AgentMi
 import { DIGITAL_MODULES, evaluateDigitalImplementation, type DigitalReviewScope } from '@/lib/digital-implementation';
 import { evaluatePhysicalImplementation, type PhysicalReviewScope } from '@/lib/physical-implementation';
 import Chip3DExplorer, { type CircuitPhysicsMetrics, type TwinMetrics } from '@/app/components/Chip3DExplorer';
-import { TWIN_BUILD_STEPS, TWIN_HIERARCHY, TWIN_OVERLAYS, twinStageCounts, twinStageProgress, type TwinOverlay } from '@/lib/design-twin';
+import { ALL_TWIN_OVERLAYS, DEFAULT_TWIN_OVERLAYS, TWIN_BUILD_STEPS, TWIN_HIERARCHY, TWIN_OVERLAYS, toggleTwinOverlay, twinOverlaySummary, twinOverlaysAreComplete, twinStageCounts, twinStageProgress, type TwinOverlay } from '@/lib/design-twin';
 import { DEFAULT_INTERCONNECT_INPUTS, evaluateCircuitTopology, evaluateInterconnectPhysics } from '@/lib/interconnect-physics';
 import { AIMEM_REFERENCE_MACROS, BASE_DIE_FLOORPLAN, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS, X1_BASE_DIE_AREA_BUDGET_MM2 } from '@/lib/reference-microchip';
 import { PACKAGE_GEOMETRY, STACK_PLACEMENTS, evaluateConnectorChain } from '@/lib/package-connectors';
@@ -134,7 +134,7 @@ export default function Home() {
   const [physicalScope, setPhysicalScope] = useState<PhysicalReviewScope>('mapped');
   const [physicalUtilization, setPhysicalUtilization] = useState(55);
   const [selectedPhysicalStage, setSelectedPhysicalStage] = useState('mapping');
-  const [twinOverlay, setTwinOverlay] = useState<TwinOverlay>('circuitry');
+  const [twinOverlays, setTwinOverlays] = useState<TwinOverlay[]>(DEFAULT_TWIN_OVERLAYS);
   const [twinStepIndex, setTwinStepIndex] = useState(0);
   const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
   const timer = useRef<number | null>(null);
@@ -232,7 +232,7 @@ export default function Home() {
       agent_mission: view === 'agents' ? { mission: agentMission, run_status: agentRunStatus, evaluation: agentEvaluation, evidence_class: 'deterministic open-source orchestration replay' } : undefined,
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
       physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
-      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, package_connector_chain: connectorChain, package_geometry: PACKAGE_GEOMETRY, stack_placements: STACK_PLACEMENTS, base_die_floorplan: BASE_DIE_FLOORPLAN, base_die_area_budget_mm2: X1_BASE_DIE_AREA_BUDGET_MM2, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
+      design_twin: view === 'twin' ? { overlays: twinOverlays, overlay_composite: twinOverlays.length > 1, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, package_connector_chain: connectorChain, package_geometry: PACKAGE_GEOMETRY, stack_placements: STACK_PLACEMENTS, base_die_floorplan: BASE_DIE_FLOORPLAN, base_die_area_budget_mm2: X1_BASE_DIE_AREA_BUDGET_MM2, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -314,7 +314,7 @@ export default function Home() {
               <p>{view === 'twin' ? 'Trace animated traffic from accelerator ports through interposer routes, base-die NoCs, TSV bundles, hybrid bonds, and 128 DRAM tiers—then inspect the electrical physics and evidence behind every hierarchy level.' : view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 'physical' ? 'Trace the public-PDK flow from mapped cells and timing constraints through floorplanning, placement, clocking, routing, extraction, physical verification, and the restricted production boundary.' : view === 'digital' ? 'Inspect the real T0 RTL hierarchy, controller flow, bounded formal properties, synthesis metrics, verification status, and the exact artifacts still required for digital closure.' : view === 'agents' ? 'Coordinate requirements, architecture, performance, RTL, formal, physical, multiphysics, and evidence agents—then stop safely at silicon, foundry, and human approval boundaries.' : view === 'x1' ? 'Explore the source-defined 16-high, 8,192-lane production stack and its eight-stack accelerator system while preserving the T1 evidence gate.' : view === 'foundry' ? 'Prepare a secure, auditable path from the open-source control plane into a future authorized foundry enclave—without moving proprietary inputs into this platform.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
-              <span className={`fidelity-pill ${view === 'twin' || view === 'guide' || view === 'physical' || view === 'digital' || view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' ? 'running' : runStatus}`}>{view === 'twin' ? `${twinOverlay} · ${twinStep.status}` : view === 'guide' ? `${userLevel} path` : view === 'physical' ? `${physicalScope} · ${physicalEvidence.status}` : view === 'digital' ? `${digitalScope} · ${rtlEvidence.status}` : view === 'agents' ? `${agentRunStatus} · ${agentEvaluation.progressPercent}%` : view === 'x1' ? `${x1Evaluation.state.id} · production hold` : view === 'foundry' ? 'Policy enforced · hold' : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
+              <span className={`fidelity-pill ${view === 'twin' || view === 'guide' || view === 'physical' || view === 'digital' || view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' ? 'running' : runStatus}`}>{view === 'twin' ? `${twinOverlays.length === 1 ? twinOverlays[0] : `${twinOverlays.length} overlays`} · ${twinStep.status}` : view === 'guide' ? `${userLevel} path` : view === 'physical' ? `${physicalScope} · ${physicalEvidence.status}` : view === 'digital' ? `${digitalScope} · ${rtlEvidence.status}` : view === 'agents' ? `${agentRunStatus} · ${agentEvaluation.progressPercent}%` : view === 'x1' ? `${x1Evaluation.state.id} · production hold` : view === 'foundry' ? 'Policy enforced · hold' : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
               <button className="primary-button" onClick={view === 'twin' ? () => setTwinStepIndex((index) => (index + 1) % TWIN_BUILD_STEPS.length) : view === 'guide' ? () => setView('readiness') : view === 'physical' ? () => setPhysicalScope(physicalScope === 'mapped' ? 'implementation' : physicalScope === 'implementation' ? 'signoff' : 'mapped') : view === 'digital' ? () => setDigitalScope(digitalScope === 'current' ? 'regression' : digitalScope === 'regression' ? 'closure' : 'current') : view === 'agents' ? agentRunStatus === 'running' ? pauseAgentReplay : startAgentReplay : view === 'x1' ? () => setView('t1') : view === 'foundry' || view === 't1' ? () => setView('gates') : startSweep}>{view === 'twin' ? 'Next build step' : view === 'guide' ? 'Start guided workflow' : view === 'physical' ? 'Advance implementation scope' : view === 'digital' ? 'Advance review scope' : view === 'agents' ? agentRunStatus === 'running' ? 'Pause replay' : agentRunStatus === 'blocked' ? 'Replay again' : 'Run mission replay' : view === 'x1' ? 'Review T1 qualification' : view === 'foundry' ? 'Review blocking gates' : view === 't1' ? 'Review T0 entry gates' : runStatus === 'running' ? 'Running sweep…' : 'Run architecture sweep'}</button>
             </div>
           </div>
@@ -393,7 +393,7 @@ export default function Home() {
             </div>
           )}
 
-          {view === 'twin' && <TwinView overlay={twinOverlay} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} physics={circuitPhysics} topology={circuitTopology} connectors={connectorChain} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
+          {view === 'twin' && <TwinView overlays={twinOverlays} setOverlays={setTwinOverlays} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} physics={circuitPhysics} topology={circuitTopology} connectors={connectorChain} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
           {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
           {view === 'workloads' && <WorkloadsView campaign={campaign} />}
@@ -415,14 +415,15 @@ export default function Home() {
           </footer>
         </section>
 
-        {view === 'twin' ? <TwinControlPanel overlay={twinOverlay} setOverlay={setTwinOverlay} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} navigate={setView} /> : view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 'physical' ? <PhysicalControlPanel scope={physicalScope} setScope={setPhysicalScope} utilization={physicalUtilization} setUtilization={setPhysicalUtilization} evaluation={physicalImplementation} selectedStage={selectedPhysicalStage} setSelectedStage={setSelectedPhysicalStage} navigate={setView} /> : view === 'digital' ? <DigitalControlPanel scope={digitalScope} setScope={setDigitalScope} evaluation={digitalEvaluation} selectedModule={selectedDigitalModule} setSelectedModule={setSelectedDigitalModule} navigate={setView} /> : view === 'agents' ? <AgentControlPanel mission={agentMission} evaluation={agentEvaluation} runStatus={agentRunStatus} onMissionChange={resetAgentReplay} onStart={startAgentReplay} onPause={pauseAgentReplay} onReset={() => resetAgentReplay()} navigate={setView} /> : view === 'x1' ? <X1ControlPanel config={x1Config} updateConfig={setX1Config} evaluation={x1Evaluation} navigate={setView} /> : view === 'foundry' ? <FoundryControlPanel readiness={foundryReadiness} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
+        {view === 'twin' ? <TwinControlPanel overlays={twinOverlays} setOverlays={setTwinOverlays} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} navigate={setView} /> : view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 'physical' ? <PhysicalControlPanel scope={physicalScope} setScope={setPhysicalScope} utilization={physicalUtilization} setUtilization={setPhysicalUtilization} evaluation={physicalImplementation} selectedStage={selectedPhysicalStage} setSelectedStage={setSelectedPhysicalStage} navigate={setView} /> : view === 'digital' ? <DigitalControlPanel scope={digitalScope} setScope={setDigitalScope} evaluation={digitalEvaluation} selectedModule={selectedDigitalModule} setSelectedModule={setSelectedDigitalModule} navigate={setView} /> : view === 'agents' ? <AgentControlPanel mission={agentMission} evaluation={agentEvaluation} runStatus={agentRunStatus} onMissionChange={resetAgentReplay} onStart={startAgentReplay} onPause={pauseAgentReplay} onReset={() => resetAgentReplay()} navigate={setView} /> : view === 'x1' ? <X1ControlPanel config={x1Config} updateConfig={setX1Config} evaluation={x1Evaluation} navigate={setView} /> : view === 'foundry' ? <FoundryControlPanel readiness={foundryReadiness} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
     </main>
   );
 }
 
-function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology, connectors }: {
-  overlay: TwinOverlay;
+function TwinView({ overlays, setOverlays, stepIndex, setStepIndex, metrics, physics, topology, connectors }: {
+  overlays: TwinOverlay[];
+  setOverlays: (overlays: TwinOverlay[]) => void;
   stepIndex: number;
   setStepIndex: (index: number) => void;
   metrics: TwinMetrics;
@@ -434,8 +435,8 @@ function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology
   return (
     <div className="twin-layout">
       <section className="panel twin-scene-panel" id="twin-system">
-        <PanelTitle label="Movable package twin" meta={`${metrics.stackCount} stacks · ${metrics.dramTiers * metrics.stackCount} DRAM tiers · ${overlay} overlay`} />
-        <Chip3DExplorer overlay={overlay} step={step} metrics={metrics} physics={physics} />
+        <PanelTitle label="Movable package twin" meta={`${metrics.stackCount} stacks · ${metrics.dramTiers * metrics.stackCount} DRAM tiers · ${twinOverlaySummary(overlays)}`} />
+        <Chip3DExplorer overlays={overlays} setOverlays={setOverlays} step={step} metrics={metrics} physics={physics} />
       </section>
 
       <section className="panel twin-circuit-panel" id="twin-circuit">
@@ -545,23 +546,32 @@ function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology
   );
 }
 
-function TwinControlPanel({ overlay, setOverlay, stepIndex, setStepIndex, navigate }: {
-  overlay: TwinOverlay;
-  setOverlay: (overlay: TwinOverlay) => void;
+function TwinControlPanel({ overlays, setOverlays, stepIndex, setStepIndex, navigate }: {
+  overlays: TwinOverlay[];
+  setOverlays: (overlays: TwinOverlay[]) => void;
   stepIndex: number;
   setStepIndex: (index: number) => void;
   navigate: (view: View) => void;
 }) {
   const step = TWIN_BUILD_STEPS[stepIndex];
+  const allOverlaysActive = twinOverlaysAreComplete(overlays);
   const sourceView: View = step.id === 'rtl' || step.id === 'formal' ? 'digital' : step.id === 'mapping' || step.id === 'floorplan' || step.id === 'place-route' ? 'physical' : step.id === 'signoff' || step.id === 'silicon' || step.id === 'release' ? 'foundry' : step.id === 'package' || step.id === 'multiphysics' ? 'x1' : 'architecture';
   return (
     <aside className="control-rail">
       <div className="control-scroll">
         <section className="control-section">
-          <div className="section-heading"><span>Data overlay</span><b>6</b></div>
+          <div className="section-heading"><span>Data overlay</span><b>{overlays.length}/{TWIN_OVERLAYS.length}</b></div>
+          <button className={`twin-overlay-all${allOverlaysActive ? ' active' : ''}`} aria-pressed={allOverlaysActive} onClick={() => setOverlays(allOverlaysActive ? DEFAULT_TWIN_OVERLAYS : ALL_TWIN_OVERLAYS)}>
+            <span>{allOverlaysActive ? 'Showing all 6 overlays' : 'Show all overlays at once'}</span>
+            <small>{allOverlaysActive ? 'Every overlay is composited in the 3D model. Select again to return to micro-circuitry alone.' : 'Composite every overlay in the 3D model at the same time.'}</small>
+          </button>
           <div className="twin-overlay-control">
-            {TWIN_OVERLAYS.map((item) => <button key={item.id} className={overlay === item.id ? 'active' : ''} onClick={() => setOverlay(item.id)}><span>{item.label}</span><small>{item.detail}</small></button>)}
+            {TWIN_OVERLAYS.map((item) => {
+              const active = overlays.includes(item.id);
+              return <button key={item.id} className={active ? 'active' : ''} aria-pressed={active} onClick={() => setOverlays(toggleTwinOverlay(overlays, item.id))}><span>{item.label}</span><small>{item.detail}</small></button>;
+            })}
           </div>
+          <p className="twin-overlay-note">{overlays.length === 1 ? 'Select more overlays to composite them in the 3D model.' : `The 3D model averages ${overlays.length} overlays. Composited color is a blend, so read single overlays for exact per-part mapping.`}</p>
         </section>
         <section className="control-section">
           <div className="section-heading"><span>Build step</span><b>{step.short}</b></div>

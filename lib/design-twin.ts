@@ -57,3 +57,31 @@ export function twinStageCounts() {
 export function twinStageProgress(activeStep: number) {
   return Math.round(((Math.max(0, Math.min(TWIN_BUILD_STEPS.length - 1, activeStep)) + 1) / TWIN_BUILD_STEPS.length) * 100);
 }
+
+// Overlays are multi-select: any combination can be active at once and the 3D
+// twin composites them. Selection order never matters, and the active set is
+// never empty, so the scene always has a defined color mapping.
+export const ALL_TWIN_OVERLAYS: TwinOverlay[] = TWIN_OVERLAYS.map((overlay) => overlay.id);
+export const DEFAULT_TWIN_OVERLAYS: TwinOverlay[] = ['circuitry'];
+
+export function normalizeTwinOverlays(active: TwinOverlay[]): TwinOverlay[] {
+  const canonical = ALL_TWIN_OVERLAYS.filter((id) => active.includes(id));
+  return canonical.length > 0 ? canonical : DEFAULT_TWIN_OVERLAYS;
+}
+
+export function toggleTwinOverlay(active: TwinOverlay[], id: TwinOverlay): TwinOverlay[] {
+  const isActive = active.includes(id);
+  if (isActive && active.length <= 1) return normalizeTwinOverlays(active);
+  return normalizeTwinOverlays(isActive ? active.filter((entry) => entry !== id) : [...active, id]);
+}
+
+export function twinOverlaysAreComplete(active: TwinOverlay[]) {
+  return ALL_TWIN_OVERLAYS.every((id) => active.includes(id));
+}
+
+export function twinOverlaySummary(active: TwinOverlay[]) {
+  const normalized = normalizeTwinOverlays(active);
+  if (normalized.length === 1) return `${normalized[0]} overlay`;
+  if (twinOverlaysAreComplete(normalized)) return `all ${normalized.length} overlays composited`;
+  return `${normalized.length} overlays composited`;
+}

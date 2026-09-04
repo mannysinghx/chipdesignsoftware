@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import type { TwinBuildStep, TwinOverlay } from '@/lib/design-twin';
+import { TWIN_OVERLAYS, toggleTwinOverlay, twinOverlaysAreComplete, type TwinBuildStep, type TwinOverlay } from '@/lib/design-twin';
+import { ALL_TWIN_OVERLAYS, DEFAULT_TWIN_OVERLAYS, normalizeTwinOverlays } from '@/lib/design-twin';
 import { ACCELERATOR_FLOORPLAN, BASE_DIE_FLOORPLAN, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS, X1_BASE_DIE_MM, floorplanAreaMm2 } from '@/lib/reference-microchip';
 import { CONNECTOR_SAMPLING, PACKAGE_GEOMETRY, STACK_PLACEMENTS, acceleratorPhyAnchor, evaluateConnectorChain, stackLocalToWorld, type StackPlacement } from '@/lib/package-connectors';
 
@@ -53,7 +54,8 @@ type Part = {
 };
 
 type Props = {
-  overlay: TwinOverlay;
+  overlays: TwinOverlay[];
+  setOverlays: (overlays: TwinOverlay[]) => void;
   step: TwinBuildStep;
   metrics: TwinMetrics;
   physics: CircuitPhysicsMetrics;
@@ -62,6 +64,14 @@ type Props = {
 type LabelMode = 'off' | 'key' | 'all';
 type LabelLevel = 0 | 1 | 2;
 type LabelEntry = { object: CSS2DObject; element: HTMLDivElement; level: LabelLevel; part: Part; tier?: number };
+
+// Safari still ships only the prefixed Fullscreen API.
+type FullscreenElement = HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+type FullscreenDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void };
+const currentFullscreenElement = () => {
+  const owner = document as FullscreenDocument;
+  return owner.fullscreenElement ?? owner.webkitFullscreenElement ?? null;
+};
 
 const LABEL_MODES: LabelMode[] = ['all', 'key', 'off'];
 const LABEL_MODE_TEXT: Record<LabelMode, string> = { all: 'Labels: all', key: 'Labels: key', off: 'Labels: off' };
@@ -80,7 +90,7 @@ const PALETTE = {
 const CIRCUIT_KINDS: PartKind[] = ['route', 'noc', 'tsv', 'bond', 'package', 'bga', 'c4', 'pad', 'macro', 'cell', 'metal', 'via', 'seal', 'phy', 'compute', 'capacitor', 'stiffener'];
 const PACKAGE_KINDS: PartKind[] = ['package', 'bga', 'c4', 'stiffener', 'capacitor'];
 
-function partColor(part: Part, overlay: TwinOverlay, metrics: TwinMetrics) {
+function overlayColor(part: Part, overlay: TwinOverlay, metrics: TwinMetrics) {
   if (overlay === 'circuitry') {
     if (part.kind === 'route') return new THREE.Color('#2e74b5');
     if (part.kind === 'noc') return PALETTE.navy;
@@ -131,9 +141,21 @@ function partColor(part: Part, overlay: TwinOverlay, metrics: TwinMetrics) {
   return new THREE.Color().lerpColors(PALETTE.pale, PALETTE.navy, height);
 }
 
-function matchesFocus(part: Part, overlay: TwinOverlay, focus: TwinBuildStep['focus']) {
+// Several overlays can be active at once. Each still answers the same question
+// ("what color is this part under overlay X?"); the composite is their mean in
+// three.js linear working space, so no overlay is privileged and the blend is
+// stable regardless of selection order.
+function partColor(part: Part, overlays: TwinOverlay[], metrics: TwinMetrics) {
+  const active = overlays.length > 0 ? overlays : DEFAULT_TWIN_OVERLAYS;
+  if (active.length === 1) return overlayColor(part, active[0], metrics);
+  const blend = new THREE.Color(0, 0, 0);
+  for (const overlay of active) blend.add(overlayColor(part, overlay, metrics));
+  return blend.multiplyScalar(1 / active.length);
+}
+
+function matchesFocus(part: Part, overlays: TwinOverlay[], focus: TwinBuildStep['focus']) {
   const circuitKind = CIRCUIT_KINDS.includes(part.kind);
-  if (overlay === 'circuitry' && circuitKind) return true;
+  if (overlays.includes('circuitry') && circuitKind) return true;
   if (focus === 'system') return true;
   if (focus === 'stack') return part.host === 'stack' || part.host === 'base' || circuitKind;
   return focus === part.host;
@@ -154,15 +176,16 @@ const tierBottom = (tier: number) => BASE_TOP + G.dramTier.bondGap + tier * G.dr
 const tierCenter = (tier: number) => tierBottom(tier) + G.dramTier.thickness / 2;
 const bondCenter = (interfaceIndex: number) => tierBottom(interfaceIndex) - G.dramTier.bondGap / 2;
 
-export default function Chip3DExplorer({ overlay, step, metrics, physics }: Props) {
+export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, physics }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<{
     camera: THREE.PerspectiveCamera;
     controls: OrbitControls;
     meshes: THREE.Mesh[];
     renderer: THREE.WebGLRenderer;
   } | null>(null);
-  const overlayRef = useRef(overlay);
+  const overlayRef = useRef(overlays);
   const stepRef = useRef(step);
   const metricsRef = useRef(metrics);
   const physicsRef = useRef(physics);
@@ -176,8 +199,10 @@ export default function Chip3DExplorer({ overlay, step, metrics, physics }: Prop
   const [siliconDetail, setSiliconDetail] = useState(true);
   const [labelMode, setLabelMode] = useState<LabelMode>('all');
   const [componentCount, setComponentCount] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
 
-  useEffect(() => { overlayRef.current = overlay; }, [overlay]);
+  useEffect(() => { overlayRef.current = overlays; }, [overlays]);
   useEffect(() => { stepRef.current = step; }, [step]);
   useEffect(() => { metricsRef.current = metrics; }, [metrics]);
   useEffect(() => { physicsRef.current = physics; }, [physics]);
@@ -701,8 +726,9 @@ export default function Chip3DExplorer({ overlay, step, metrics, physics }: Prop
         const progress = (elapsed + signal.offset) % 1;
         signal.mesh.position.lerpVectors(signal.start, signal.end, signal.reverse ? 1 - progress : progress);
         signal.mesh.position.y = G.interposer.top + 0.03;
-        (signal.mesh.material as THREE.MeshBasicMaterial).opacity = currentOverlay === 'circuitry' ? 1 : 0;
-        signal.mesh.visible = currentOverlay === 'circuitry';
+        const showTraffic = currentOverlay.includes('circuitry');
+        (signal.mesh.material as THREE.MeshBasicMaterial).opacity = showTraffic ? 1 : 0;
+        signal.mesh.visible = showTraffic;
       }
       controls.update();
       renderer.render(scene, camera);
@@ -730,6 +756,40 @@ export default function Chip3DExplorer({ overlay, step, metrics, physics }: Prop
     };
   }, []);
 
+  useEffect(() => {
+    const shell = shellRef.current as FullscreenElement | null;
+    setFullscreenSupported(Boolean(shell?.requestFullscreen ?? shell?.webkitRequestFullscreen));
+    const sync = () => setFullscreen(currentFullscreenElement() === shellRef.current);
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    sync();
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const shell = shellRef.current as FullscreenElement | null;
+    if (!shell) return;
+    const owner = document as FullscreenDocument;
+    try {
+      if (currentFullscreenElement()) {
+        await (owner.exitFullscreen ? owner.exitFullscreen() : owner.webkitExitFullscreen?.());
+      } else {
+        await (shell.requestFullscreen ? shell.requestFullscreen() : shell.webkitRequestFullscreen?.());
+      }
+    } catch {
+      // A permissions policy or an unsupported browser can reject the request.
+      // The viewport stays usable inline, so surface it through state only.
+      setFullscreen(currentFullscreenElement() === shellRef.current);
+    }
+  };
+
+  const activeOverlays = normalizeTwinOverlays(overlays);
+  const allOverlaysActive = twinOverlaysAreComplete(activeOverlays);
+  const setAllOverlays = () => setOverlays(allOverlaysActive ? DEFAULT_TWIN_OVERLAYS : ALL_TWIN_OVERLAYS);
+
   const zoom = (factor: number) => {
     const current = sceneRef.current;
     if (!current) return;
@@ -748,8 +808,10 @@ export default function Chip3DExplorer({ overlay, step, metrics, physics }: Prop
   const cycleLabels = () => setLabelMode((mode) => LABEL_MODES[(LABEL_MODES.indexOf(mode) + 1) % LABEL_MODES.length]);
 
   return (
-    <div className="twin-viewport-shell">
+    <div className={`twin-viewport-shell${fullscreen ? ' fullscreen' : ''}`} ref={shellRef}>
       <div className="twin-canvas" ref={hostRef} role="img" aria-label="Interactive 3D circuit model of the AIMEM-X1 package: BGA, substrate, stiffener, decoupling capacitors, C4 bumps, silicon interposer with TSVs and RDL bundles, microbumps, accelerator die floorplan, and eight sixteen-tier memory stacks with base-die floorplans, TSV columns, and hybrid bonds" />
+      <div className="twin-top-controls">
+        <div className="twin-control-row">
       <div className="twin-toolbar" aria-label="3D view controls">
         <button onClick={() => zoom(0.82)} title="Zoom in">＋</button>
         <button onClick={() => zoom(1.22)} title="Zoom out">−</button>
@@ -758,8 +820,18 @@ export default function Chip3DExplorer({ overlay, step, metrics, physics }: Prop
         <button className={exploded ? 'active' : ''} onClick={() => setExploded((value) => !value)}>{exploded ? 'Collapse' : 'Explode'}</button>
         <button className={labelMode !== 'off' ? 'active' : ''} onClick={cycleLabels} aria-label={`Component labels: ${labelMode}. Click to change.`}>{LABEL_MODE_TEXT[labelMode]}</button>
         <button className={autoRotate ? 'active' : ''} onClick={() => setAutoRotate((value) => !value)}>Orbit</button>
+        {fullscreenSupported && <button className={fullscreen ? 'active' : ''} onClick={toggleFullscreen} aria-pressed={fullscreen} title={fullscreen ? 'Exit full screen (Esc)' : 'Open the 3D model in full screen'}>{fullscreen ? '⤡ Exit full screen' : '⤢ Full screen'}</button>}
       </div>
-      <div className="twin-instructions">Drag to rotate · scroll or pinch to zoom · right-drag to pan · click any part or its label · zoom in to reveal fine labels · {componentCount} named components</div>
+      <div className="twin-overlay-bar" role="group" aria-label="Data overlays composited in the 3D model">
+        <button className={`all${allOverlaysActive ? ' active' : ''}`} onClick={setAllOverlays} aria-pressed={allOverlaysActive} title={allOverlaysActive ? 'Return to the micro-circuitry overlay' : 'Composite every data overlay at once'}>{allOverlaysActive ? 'All 6 on' : 'All overlays'}</button>
+        {TWIN_OVERLAYS.map((item) => {
+          const active = activeOverlays.includes(item.id);
+          return <button key={item.id} className={active ? 'active' : ''} aria-pressed={active} title={item.detail} onClick={() => setOverlays(toggleTwinOverlay(activeOverlays, item.id))}>{item.label}</button>;
+        })}
+      </div>
+        </div>
+        <div className="twin-instructions">Drag to rotate · scroll or pinch to zoom · right-drag to pan · click any part or its label · zoom in to reveal fine labels · {componentCount} named components · {activeOverlays.length === 1 ? `${activeOverlays[0]} overlay` : `${activeOverlays.length} overlays composited`}</div>
+      </div>
       <div className="twin-selection" aria-live="polite">
         {selected ? <>
           <div><span>Selected component</span><button onClick={() => setSelected(null)} aria-label="Clear selected component">×</button></div>

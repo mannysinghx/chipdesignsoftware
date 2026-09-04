@@ -712,3 +712,36 @@ small { font-size: 10px !important; }
 .connector-chain-heading span { color: var(--faint); font: 9px var(--font-geist-mono); }
 @media (max-width: 1280px) { .connector-chain { grid-template-columns: repeat(4,1fr); } }
 @media (max-width: 720px) { .connector-chain { grid-template-columns: repeat(2,1fr); } .twin-label.level-2 { display: none; } }
+
+/* Full-screen 3D twin */
+.twin-viewport-shell:fullscreen, .twin-viewport-shell:-webkit-full-screen { width: 100vw; height: 100vh; min-height: 0; border-top: 0; background: #f7f7f4; }
+.twin-viewport-shell.fullscreen .twin-selection { width: min(340px,calc(100% - 28px)); }
+
+/* Toolbar, overlay bar, and instructions share one flowing stack so they can never overlap */
+.twin-top-controls { position: absolute; z-index: 4; top: 14px; right: 14px; left: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none; }
+.twin-top-controls > *, .twin-control-row > * { pointer-events: auto; }
+.twin-control-row { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.twin-toolbar, .twin-overlay-bar { position: static; top: auto; right: auto; bottom: auto; left: auto; max-width: 100%; }
+.twin-instructions { position: static; top: auto; left: auto; max-width: 100%; }
+
+/* In-viewport overlay compositing bar */
+.twin-overlay-bar { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: min(560px,100%); border: 1px solid rgba(36,79,125,.16); border-radius: 10px; padding: 5px; background: rgba(255,255,255,.9); box-shadow: 0 8px 24px rgba(36,79,125,.10); backdrop-filter: blur(10px); }
+.twin-overlay-bar button { height: 28px; border: 1px solid var(--line); border-radius: 7px; padding: 0 9px; background: #f7f9fb; color: #52667c; font-size: 10px; font-weight: 650; white-space: nowrap; }
+.twin-overlay-bar button:hover { border-color: #4f83bd; background: #eef3f8; }
+.twin-overlay-bar button.active { border-color: #285f9c; background: #e0eaf4; color: #1d4470; box-shadow: inset 0 0 0 1px rgba(40,95,156,.22); }
+.twin-overlay-bar button.all { background: #244f7d; border-color: #244f7d; color: #ffffff; }
+.twin-overlay-bar button.all:hover { background: #1d4470; }
+.twin-overlay-bar button.all.active { background: #14304f; border-color: #14304f; color: #ffffff; box-shadow: none; }
+
+/* Overlay multi-select in the control rail */
+.twin-overlay-all { width: 100%; margin-bottom: 7px; border: 1px solid #244f7d; border-radius: 7px; padding: 9px; background: #244f7d; color: #ffffff; text-align: left; }
+.twin-overlay-all:hover { background: #1d4470; }
+.twin-overlay-all.active { background: #14304f; border-color: #14304f; }
+.twin-overlay-all span, .twin-overlay-all small { display: block; }
+.twin-overlay-all span { font-size: 10px; font-weight: 700; }
+.twin-overlay-all small { margin-top: 4px; color: rgba(255,255,255,.78); font-size: 9px; line-height: 1.35; }
+.twin-overlay-control button[aria-pressed="true"] { border-color: #285f9c; background: #e0eaf4; box-shadow: inset 0 0 0 1px rgba(40,95,156,.2); }
+.twin-overlay-note { margin: 9px 0 0; color: var(--faint); font-size: 9px; line-height: 1.45; }
+
+@media (max-width: 980px) { .twin-overlay-bar { max-width: 100%; } }
+@media (max-width: 720px) { .twin-top-controls { top: 10px; right: 10px; left: 10px; } .twin-toolbar, .twin-overlay-bar { width: 100%; max-width: 100%; justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; } .twin-toolbar button, .twin-overlay-bar button { flex: 0 0 auto; white-space: nowrap; } }
