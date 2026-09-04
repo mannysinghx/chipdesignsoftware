@@ -11,7 +11,7 @@ test('3D twin covers the end-to-end build with explicit evidence boundaries', ()
 
 test('3D twin exposes every requested analytical overlay and hierarchy layer', () => {
   assert.deepEqual(TWIN_OVERLAYS.map((overlay) => overlay.id), ['circuitry', 'architecture', 'bandwidth', 'power', 'thermal', 'evidence']);
-  assert.equal(TWIN_HIERARCHY.length, 7);
+  assert.equal(TWIN_HIERARCHY.length, 8);
 });
 
 test('build progress clamps to the available sequence', () => {

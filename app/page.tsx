@@ -14,6 +14,7 @@ import { evaluatePhysicalImplementation, type PhysicalReviewScope } from '@/lib/
 import Chip3DExplorer, { type CircuitPhysicsMetrics, type TwinMetrics } from '@/app/components/Chip3DExplorer';
 import { TWIN_BUILD_STEPS, TWIN_HIERARCHY, TWIN_OVERLAYS, twinStageCounts, twinStageProgress, type TwinOverlay } from '@/lib/design-twin';
 import { DEFAULT_INTERCONNECT_INPUTS, evaluateCircuitTopology, evaluateInterconnectPhysics } from '@/lib/interconnect-physics';
+import { AIMEM_REFERENCE_MACROS, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS } from '@/lib/reference-microchip';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
@@ -229,7 +230,7 @@ export default function Home() {
       agent_mission: view === 'agents' ? { mission: agentMission, run_status: agentRunStatus, evaluation: agentEvaluation, evidence_class: 'deterministic open-source orchestration replay' } : undefined,
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
       physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
-      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive hierarchical circuitry with first-order electrical physics; production extraction remains restricted' } : undefined,
+      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -451,7 +452,29 @@ function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology
           <div><span>Payload lanes</span><strong>{topology.payloadLanes.toLocaleString()}</strong><small>{metrics.payloadLanesPerStack.toLocaleString()} per stack</small></div>
           <div><span>Protected conductors</span><strong>{topology.protectedConductors.toLocaleString()}</strong><small>data + ECC + spares</small></div>
           <div><span>Vertical interfaces</span><strong>{topology.hybridBondInterfaces}</strong><small>base/tier + tier/tier</small></div>
-          <div><span>Visible circuit samples</span><strong>2,282</strong><small>bundles represent full counts</small></div>
+          <div><span>Visible circuit samples</span><strong>3,361</strong><small>bundles represent full counts</small></div>
+        </div>
+      </section>
+
+      <section className="panel twin-reference-panel" id="twin-reference">
+        <PanelTitle label="Real-chip architecture reference" meta={`${OPEN_TITAN_REFERENCE.name} · public SKY130 conventions`} />
+        <div className="twin-reference-hero">
+          <div><span>Open reference</span><strong>{OPEN_TITAN_REFERENCE.name}</strong><small>{OPEN_TITAN_REFERENCE.top}</small></div>
+          <p>We reuse publicly documented ASIC organization patterns—power and clock domains, a two-level interconnect, pad banks, macro islands, cell rows, and a local-to-global metal stack—then assign AIMEM-specific memory-system functions.</p>
+        </div>
+        <div className="twin-reference-facts">
+          <article><b>{OPEN_TITAN_REFERENCE.asicPadCount}</b><span>reference ASIC pads</span><p>Rendered around the accelerator in {OPEN_TITAN_REFERENCE.ioBanks} independently visible edge banks.</p></article>
+          <article><b>{OPEN_TITAN_REFERENCE.powerDomains.length}</b><span>power domains</span><p>Main and always-on organization is reflected in the functional macro floorplan.</p></article>
+          <article><b>{OPEN_TITAN_REFERENCE.clocks.length}</b><span>clock domains</span><p>A sampled H-tree exposes clock and reset distribution across the die.</p></article>
+          <article><b>{SKY130_VISUAL_LAYERS.length}</b><span>visible routing layers</span><p>{SKY130_VISUAL_LAYERS.map((layer) => layer.id).join(' · ')}, plus sampled vertical vias.</p></article>
+        </div>
+        <div className="twin-reference-map">
+          {AIMEM_REFERENCE_MACROS.map((macro) => <article key={macro.id}><div><strong>{macro.label}</strong><span>{macro.domain}</span></div><p><b>{macro.referencePattern}</b> → {macro.aimemRole}</p></article>)}
+        </div>
+        <div className="twin-reference-sources">
+          <strong>Provenance boundary</strong>
+          <p>This is a reference-informed educational floorplan, not a copy of Earl Grey RTL or layout and not AIMEM signoff geometry. Exact transistor placement, routing, pad assignment, timing, SI, EM/IR, DRC, LVS, and GDS remain future qualified artifacts.</p>
+          <div><a href={OPEN_TITAN_REFERENCE.sources[0]} target="_blank" rel="noreferrer">Earl Grey architecture ↗</a><a href={OPEN_TITAN_REFERENCE.sources[1]} target="_blank" rel="noreferrer">ASIC pinout ↗</a><a href={OPEN_TITAN_REFERENCE.sources[2]} target="_blank" rel="noreferrer">SKY130 layers ↗</a><a href={OPEN_TITAN_REFERENCE.sources[3]} target="_blank" rel="noreferrer">SKY130 extraction ↗</a></div>
         </div>
       </section>
 
@@ -509,7 +532,7 @@ function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology
 
       <section className="gate-note twin-hold" id="twin-interposer">
         <strong>GEOMETRY + EVIDENCE BOUNDARY</strong>
-        <p>The package geometry is an interactive system representation, not production layout. T0 RTL, formal, and Sky130 mapping are executed evidence; X1 bandwidth, power, thermal, and package values are models; foundry and silicon stages remain restricted.</p>
+        <p>The package geometry is a reference-informed interactive system representation, not production layout. OpenTitan and SKY130 guide visible organization only; T0 RTL, formal, and Sky130 mapping are executed evidence; X1 bandwidth, power, thermal, and package values are models; foundry and silicon stages remain restricted.</p>
       </section>
     </div>
   );
@@ -679,7 +702,7 @@ function GuideView({ level, setLevel, navigate }: {
     ['Unverified', 'The required evidence does not exist yet. Absence of a failure is not evidence of success.'],
   ];
   const recipes = [
-    { title: 'Navigate the X1 package in 3D', level: 'Beginner', steps: ['Open 3D design twin and drag the package to orbit around it.', 'Scroll or pinch to zoom; use Fit to restore the full package.', 'Choose Explode and select a DRAM tier or intelligent base die.', 'Change the data overlay, then scrub the build-step control without treating proxy geometry as layout evidence.'] },
+    { title: 'Navigate the X1 package in 3D', level: 'Beginner', steps: ['Open 3D design twin and drag the package to orbit around it.', 'Turn on Silicon detail, zoom into the accelerator, and select its pad ring, macro islands, cell rows, metal layers, vias, microbumps, or BGA connectors.', 'Use the Real-chip architecture reference panel to distinguish the OpenTitan and SKY130 organization patterns from AIMEM-specific functions.', 'Choose Explode or another overlay, then scrub the build-step control without treating reference-informed geometry as production layout evidence.'] },
     { title: 'Validate the T0 nominal baseline', level: 'Beginner', steps: ['Open Architecture and confirm 16 × 64-bit = 1,024 lanes.', 'Confirm 8 Gb/s produces 1.024 TB/s raw bandwidth.', 'Open Gates and verify the bandwidth result is provisional—not measured.', 'Export the snapshot and record the review purpose.'] },
     { title: 'Compare a T0 bandwidth variant', level: 'Practitioner', steps: ['Open Experiment.', 'Change lane rate, SRAM, route length, or PHY energy in the right rail.', 'Run the 12-point sweep and inspect exact chart values.', 'Compare the ranked candidates and review any failed or high-risk indicators.'] },
     { title: 'Stress the T1 cooling concept', level: 'Practitioner', steps: ['Open T1 scale-up.', 'Raise active workload and cooling resistance.', 'Compare hotspot and margin against the 85°C provisional limit.', 'Capture the configuration and define the Elmer/OpenFOAM artifact needed to replace the proxy.'] },

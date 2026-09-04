@@ -38,6 +38,7 @@ export const TWIN_BUILD_STEPS: TwinBuildStep[] = [
 
 export const TWIN_HIERARCHY = [
   { id: 'twin-system', label: 'X1 package twin', meta: '8 stacks · accelerator' },
+  { id: 'twin-reference', label: 'Real-chip reference', meta: 'Earl Grey · SKY130' },
   { id: 'twin-circuit', label: 'Micro-circuit network', meta: '75,776 conductors' },
   { id: 'twin-accelerator', label: 'Accelerator die', meta: '48 TB/s fabric proxy' },
   { id: 'twin-interposer', label: 'Active interposer', meta: '12 routing layers' },
