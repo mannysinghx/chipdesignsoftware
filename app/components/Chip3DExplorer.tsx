@@ -221,8 +221,25 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
     const chain = Object.fromEntries(evaluateConnectorChain(stackCount, tiers).levels.map((level) => [level.id, level]));
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#f7f7f4');
-    scene.fog = new THREE.Fog('#f7f7f4', 32, 60);
+    // A deep backdrop: the dies are pale silicon tones, so a near-white ground
+    // left the model washed out against it. The gradient keeps the horizon
+    // lighter than the darkest part color so nothing disappears into it.
+    const backdrop = document.createElement('canvas');
+    backdrop.width = 2;
+    backdrop.height = 256;
+    const backdropContext = backdrop.getContext('2d');
+    if (backdropContext) {
+      const gradient = backdropContext.createLinearGradient(0, 0, 0, 256);
+      gradient.addColorStop(0, '#0a121d');
+      gradient.addColorStop(0.58, '#132234');
+      gradient.addColorStop(1, '#1d3048');
+      backdropContext.fillStyle = gradient;
+      backdropContext.fillRect(0, 0, 2, 256);
+    }
+    const backdropTexture = new THREE.CanvasTexture(backdrop);
+    backdropTexture.colorSpace = THREE.SRGBColorSpace;
+    scene.background = backdropTexture;
+    scene.fog = new THREE.Fog('#1b2c42', 34, 66);
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
     camera.position.set(14.5, 11.5, 17.5);
 
@@ -230,7 +247,7 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 1.0;
     host.appendChild(renderer.domElement);
 
     const labelRenderer = new CSS2DRenderer();
@@ -246,19 +263,23 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.autoRotateSpeed = 0.7;
 
-    scene.add(new THREE.HemisphereLight('#ffffff', '#a9b4bf', 2.2));
-    const key = new THREE.DirectionalLight('#ffffff', 4.2);
+    scene.add(new THREE.HemisphereLight('#dbe9f8', '#16243a', 1.15));
+    const key = new THREE.DirectionalLight('#ffffff', 2.0);
     key.position.set(8, 16, 10);
     scene.add(key);
-    const fill = new THREE.DirectionalLight('#8cb7e2', 2.1);
+    const fill = new THREE.DirectionalLight('#7ba7d8', 0.7);
     fill.position.set(-12, 8, -9);
     scene.add(fill);
+    // Back rim light so die silhouettes separate from the dark backdrop.
+    const rim = new THREE.DirectionalLight('#cfe4ff', 0.95);
+    rim.position.set(-7, 6, -15);
+    scene.add(rim);
 
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(25, 64), new THREE.MeshStandardMaterial({ color: '#edf0f2', roughness: 1, metalness: 0 }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(25, 64), new THREE.MeshStandardMaterial({ color: '#0d1826', roughness: 1, metalness: 0 }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -1.35;
     scene.add(floor);
-    const grid = new THREE.GridHelper(42, 42, '#9db0c1', '#dbe1e6');
+    const grid = new THREE.GridHelper(42, 42, '#3c5a7c', '#22354c');
     grid.position.y = -1.32;
     scene.add(grid);
 
@@ -650,7 +671,7 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
 
     const packageOutline = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(G.substrate.width + 0.2, 0.7, G.substrate.depth + 0.2)),
-      new THREE.LineBasicMaterial({ color: '#7291af', transparent: true, opacity: 0.75 }),
+      new THREE.LineBasicMaterial({ color: '#6f97c4', transparent: true, opacity: 0.72 }),
     );
     packageOutline.position.y = -0.25;
     scene.add(packageOutline);

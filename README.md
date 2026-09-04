@@ -27,6 +27,7 @@ The twin is built with three.js and binds live to the X1 planning model.
 - **Labels.** Every component has a clickable name label. `Labels` cycles All / Key / Off; detail and fine labels reveal as you zoom in, and per-tier labels expand in the exploded view.
 - **Full screen.** A toolbar button opens the model full screen (Esc or the same button exits). The toolbar, overlay bar, labels, and selection panel stay available in full screen.
 - **Overlays.** The six data overlays are multi-select: enable any combination, or press `All overlays` to composite all six at once. Composited color is the mean of the active overlays, so read a single overlay when you need exact per-part mapping.
+- **Viewport.** The 3D scene renders on a dark gradient backdrop. The dies are pale silicon tones, so a light ground left the model washed out against it; on the dark ground the model separates by roughly 147 luminance points instead of 26.
 - **Scale.** Plan view is 1 scene unit ≈ 4.9 mm. Vertical scale is exaggerated about 20× so tiers, bonds, and bumps remain selectable. Geometry is reference-informed and conceptual, not GDS or a released bump, ball, TSV, or bond map.
 
 ## Getting started

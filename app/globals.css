@@ -609,13 +609,13 @@ small { font-size: 10px !important; }
 .twin-layout { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(320px,.75fr); gap: 13px; margin-top: 13px; }
 .twin-layout > section { scroll-margin-top: 82px; }
 .twin-scene-panel, .twin-circuit-panel, .twin-reference-panel, .twin-build-panel, .twin-hold { grid-column: 1/-1; overflow: hidden; }
-.twin-viewport-shell { position: relative; min-height: 610px; overflow: hidden; border-top: 1px solid var(--line); background: #f7f7f4; }
+.twin-viewport-shell { position: relative; min-height: 610px; overflow: hidden; border-top: 1px solid var(--line); background: #101c2b; }
 .twin-canvas { position: absolute; inset: 0; touch-action: none; }
 .twin-canvas canvas { display: block; width: 100%; height: 100%; outline: none; }
 .twin-toolbar { position: absolute; z-index: 4; top: 14px; left: 14px; display: flex; gap: 5px; border: 1px solid rgba(36,79,125,.16); border-radius: 10px; padding: 5px; background: rgba(255,255,255,.9); box-shadow: 0 8px 24px rgba(36,79,125,.10); backdrop-filter: blur(10px); }
 .twin-toolbar button { min-width: 36px; height: 34px; border: 1px solid var(--line); border-radius: 7px; padding: 0 10px; background: #f7f9fb; color: #244f7d; font-size: 11px; font-weight: 700; }
 .twin-toolbar button:hover, .twin-toolbar button.active { border-color: #4f83bd; background: #e7eef6; }
-.twin-instructions { position: absolute; z-index: 3; top: 66px; left: 15px; border-radius: 6px; padding: 7px 9px; background: rgba(244,241,234,.88); color: #566b82; font: 10px var(--font-geist-mono); backdrop-filter: blur(8px); }
+.twin-instructions { position: absolute; z-index: 3; top: 66px; left: 15px; border: 1px solid rgba(150,185,220,.22); border-radius: 6px; padding: 7px 9px; background: rgba(12,24,38,.72); color: #c3d6ea; font: 10px var(--font-geist-mono); backdrop-filter: blur(8px); }
 .twin-selection { position: absolute; z-index: 3; right: 14px; bottom: 14px; width: min(300px,calc(100% - 28px)); border: 1px solid rgba(36,79,125,.16); border-radius: 12px; padding: 14px; background: rgba(255,255,255,.93); box-shadow: 0 10px 30px rgba(36,79,125,.12); backdrop-filter: blur(12px); }
 .twin-selection > div { display: flex; align-items: center; justify-content: space-between; }.twin-selection button { width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: #f0f3f6; color: #244f7d; }.twin-selection span { color: #6f8092; font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }.twin-selection h3 { margin: 8px 0 7px; color: #172b46; font-size: 15px; }.twin-selection strong { display: block; color: #244f7d; font: 650 12px var(--font-geist-mono); }.twin-selection p { margin: 7px 0 10px; color: #52667c; font-size: 11px; line-height: 1.5; }
 .twin-axis { position: absolute; z-index: 3; bottom: 16px; left: 16px; width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,.72); }.twin-axis i { position: absolute; left: 31px; bottom: 21px; width: 22px; height: 2px; transform-origin: left; }.twin-axis i::after { position: absolute; right: 0; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: inherit; content: ''; }.twin-axis .x { background: #244f7d; transform: rotate(-15deg); }.twin-axis .y { width: 25px; background: #4f83bd; transform: rotate(-90deg); }.twin-axis .z { background: #8ba3bb; transform: rotate(42deg); }.twin-axis span { position: absolute; right: 7px; bottom: 5px; color: #65788b; font: 7px var(--font-geist-mono); }
@@ -714,7 +714,7 @@ small { font-size: 10px !important; }
 @media (max-width: 720px) { .connector-chain { grid-template-columns: repeat(2,1fr); } .twin-label.level-2 { display: none; } }
 
 /* Full-screen 3D twin */
-.twin-viewport-shell:fullscreen, .twin-viewport-shell:-webkit-full-screen { width: 100vw; height: 100vh; min-height: 0; border-top: 0; background: #f7f7f4; }
+.twin-viewport-shell:fullscreen, .twin-viewport-shell:-webkit-full-screen { width: 100vw; height: 100vh; min-height: 0; border-top: 0; background: #101c2b; }
 .twin-viewport-shell.fullscreen .twin-selection { width: min(340px,calc(100% - 28px)); }
 
 /* Toolbar, overlay bar, and instructions share one flowing stack so they can never overlap */
@@ -745,3 +745,15 @@ small { font-size: 10px !important; }
 
 @media (max-width: 980px) { .twin-overlay-bar { max-width: 100%; } }
 @media (max-width: 720px) { .twin-top-controls { top: 10px; right: 10px; left: 10px; } .twin-toolbar, .twin-overlay-bar { width: 100%; max-width: 100%; justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; } .twin-toolbar button, .twin-overlay-bar button { flex: 0 0 auto; white-space: nowrap; } }
+
+/* The 3D viewport uses a dark backdrop, so its in-scene overlays invert */
+.twin-axis { background: rgba(12,24,38,.66); }
+.twin-axis .x { background: #9dc2e8; } .twin-axis .y { background: #cfe4ff; } .twin-axis .z { background: #6f97c4; }
+.twin-axis span { color: #a8c0d8; }
+.twin-label::after { background: rgba(198,222,246,.6); }
+.twin-label.level-0 { border-color: rgba(215,234,252,.8); background: #e8f1fa; color: #12283f; }
+.twin-label.level-0 i { background: #24507e; }
+.twin-label.level-0::after { background: rgba(232,241,250,.75); }
+.twin-label.level-0.selected { background: #ffffff; color: #0d1e31; box-shadow: 0 0 0 2px rgba(160,200,240,.55); }
+.twin-label.level-2 { background: rgba(255,255,255,.9); }
+.twin-label.dim { opacity: .42; }
