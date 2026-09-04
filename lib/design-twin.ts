@@ -1,4 +1,4 @@
-export type TwinOverlay = 'architecture' | 'bandwidth' | 'power' | 'thermal' | 'evidence';
+export type TwinOverlay = 'circuitry' | 'architecture' | 'bandwidth' | 'power' | 'thermal' | 'evidence';
 export type TwinStageStatus = 'executed' | 'modeled' | 'planned' | 'restricted';
 
 export type TwinBuildStep = {
@@ -13,6 +13,7 @@ export type TwinBuildStep = {
 };
 
 export const TWIN_OVERLAYS: Array<{ id: TwinOverlay; label: string; detail: string }> = [
+  { id: 'circuitry', label: 'Micro-circuitry', detail: 'Hierarchical links, NoC meshes, TSVs, hybrid bonds, and animated package traffic.' },
   { id: 'architecture', label: 'Architecture', detail: 'Physical hierarchy, die roles, lanes, capacity, and package topology.' },
   { id: 'bandwidth', label: 'Bandwidth', detail: 'Per-stack supply and accelerator-ingest pressure from the X1 planning model.' },
   { id: 'power', label: 'Power', detail: 'Activity-scaled memory power envelope; values are planning proxies.' },
@@ -37,6 +38,7 @@ export const TWIN_BUILD_STEPS: TwinBuildStep[] = [
 
 export const TWIN_HIERARCHY = [
   { id: 'twin-system', label: 'X1 package twin', meta: '8 stacks · accelerator' },
+  { id: 'twin-circuit', label: 'Micro-circuit network', meta: '75,776 conductors' },
   { id: 'twin-accelerator', label: 'Accelerator die', meta: '48 TB/s fabric proxy' },
   { id: 'twin-interposer', label: 'Active interposer', meta: '12 routing layers' },
   { id: 'twin-stacks', label: 'Memory stacks', meta: '8 × 16-high' },

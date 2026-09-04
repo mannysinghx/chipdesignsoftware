@@ -22,10 +22,22 @@ export type TwinMetrics = {
   distributedComputePorts: number;
 };
 
+export type CircuitPhysicsMetrics = {
+  resistanceOhms: number;
+  flightTimePs: number;
+  rcDelayPs: number;
+  totalElectricalDelayPs: number;
+  capacitanceFf: number;
+  energyPerTransitionPj: number;
+  aggregateDynamicPowerWatts: number;
+  aggregateJoulePowerWatts: number;
+  currentDensityMAcm2: number;
+};
+
 type Part = {
   id: string;
   name: string;
-  kind: 'accelerator' | 'interposer' | 'base' | 'dram';
+  kind: 'accelerator' | 'interposer' | 'base' | 'dram' | 'route' | 'noc' | 'tsv' | 'bond';
   stack?: number;
   tier?: number;
   evidence: 'executed' | 'modeled' | 'planned' | 'restricted';
@@ -37,6 +49,7 @@ type Props = {
   overlay: TwinOverlay;
   step: TwinBuildStep;
   metrics: TwinMetrics;
+  physics: CircuitPhysicsMetrics;
 };
 
 const PALETTE = {
@@ -49,6 +62,13 @@ const PALETTE = {
 };
 
 function partColor(part: Part, overlay: TwinOverlay, metrics: TwinMetrics) {
+  if (overlay === 'circuitry') {
+    if (part.kind === 'route') return new THREE.Color('#2e74b5');
+    if (part.kind === 'noc') return PALETTE.navy;
+    if (part.kind === 'tsv') return new THREE.Color('#628db8');
+    if (part.kind === 'bond') return new THREE.Color('#91abc4');
+    return new THREE.Color().lerpColors(PALETTE.pale, PALETTE.steel, 0.35);
+  }
   if (overlay === 'architecture') {
     if (part.kind === 'accelerator') return PALETTE.navy;
     if (part.kind === 'interposer') return PALETTE.pale;
@@ -82,7 +102,7 @@ function partColor(part: Part, overlay: TwinOverlay, metrics: TwinMetrics) {
   return evidenceColors[part.evidence];
 }
 
-export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
+export default function Chip3DExplorer({ overlay, step, metrics, physics }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<{
     camera: THREE.PerspectiveCamera;
@@ -93,6 +113,7 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
   const overlayRef = useRef(overlay);
   const stepRef = useRef(step);
   const metricsRef = useRef(metrics);
+  const physicsRef = useRef(physics);
   const explodedRef = useRef(false);
   const selectedRef = useRef<Part | null>(null);
   const [selected, setSelected] = useState<Part | null>(null);
@@ -102,6 +123,7 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
   useEffect(() => { overlayRef.current = overlay; }, [overlay]);
   useEffect(() => { stepRef.current = step; }, [step]);
   useEffect(() => { metricsRef.current = metrics; }, [metrics]);
+  useEffect(() => { physicsRef.current = physics; }, [physics]);
   useEffect(() => { explodedRef.current = exploded; }, [exploded]);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { if (sceneRef.current) sceneRef.current.controls.autoRotate = autoRotate; }, [autoRotate]);
@@ -191,6 +213,42 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
       [-6.7, -4.2], [-2.3, -4.2], [2.3, -4.2], [6.7, -4.2],
       [-6.7, 4.2], [-2.3, 4.2], [2.3, 4.2], [6.7, 4.2],
     ];
+    const signals: Array<{ mesh: THREE.Mesh; curve: THREE.CatmullRomCurve3; offset: number }> = [];
+    const circuitPart = (id: string, name: string, kind: Part['kind'], primary: string, secondary: string): Part => ({ id, name, kind, evidence: 'modeled', primary, secondary });
+
+    const acceleratorNetwork = circuitPart(
+      'accelerator-network', 'Accelerator on-die network', 'noc',
+      `${metricsRef.current.distributedComputePorts} distributed memory ports`,
+      'Visible mesh represents hierarchical connectivity; production transistor placement and extracted parasitics are absent.',
+    );
+    for (let index = -2; index <= 2; index += 1) {
+      addPart(new THREE.BoxGeometry(0.035, 0.025, 4.45), acceleratorNetwork, [index * 1.08, 1.04, 0]);
+      addPart(new THREE.BoxGeometry(5.25, 0.025, 0.035), acceleratorNetwork, [0, 1.04, index * 0.88]);
+    }
+
+    stackPositions.slice(0, metricsRef.current.stackCount).forEach(([x, z], stackIndex) => {
+      const routePart = circuitPart(
+        `route-${stackIndex + 1}`, `Accelerator ↔ stack ${stackIndex + 1} interposer bundle`, 'route',
+        `${(metricsRef.current.payloadLanesPerStack / 256).toFixed(0)} logical 256-lane bundles`,
+        `${physicsRef.current.resistanceOhms.toFixed(2)} Ω/trace · ${physicsRef.current.totalElectricalDelayPs.toFixed(1)} ps first-order electrical delay`,
+      );
+      const start = new THREE.Vector3(Math.sign(x) * 2.85, 0.23, Math.sign(z) * 1.75);
+      const end = new THREE.Vector3(x, 0.23, z);
+      const bend = new THREE.Vector3(x * 0.54, 0.27, z * 0.54);
+      const curve = new THREE.CatmullRomCurve3([start, bend, end]);
+      addPart(new THREE.TubeGeometry(curve, 36, 0.055, 7, false), routePart, [0, 0, 0]);
+      const returnCurve = new THREE.CatmullRomCurve3([
+        start.clone().add(new THREE.Vector3(0.13, 0, -0.11)),
+        bend.clone().add(new THREE.Vector3(0.13, 0, -0.11)),
+        end.clone().add(new THREE.Vector3(0.13, 0, -0.11)),
+      ]);
+      addPart(new THREE.TubeGeometry(returnCurve, 36, 0.028, 6, false), routePart, [0, 0, 0]);
+      const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true }));
+      pulse.userData.circuitPulse = true;
+      scene.add(pulse);
+      signals.push({ mesh: pulse, curve, offset: stackIndex / metricsRef.current.stackCount });
+    });
+
     stackPositions.slice(0, metricsRef.current.stackCount).forEach(([x, z], stackIndex) => {
       const basePart: Part = {
         id: `stack-${stackIndex + 1}-base`, name: `Stack ${stackIndex + 1} intelligent base die`, kind: 'base', stack: stackIndex + 1, evidence: 'executed',
@@ -198,6 +256,47 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
         secondary: `${metricsRef.current.payloadLanesPerStack.toLocaleString()} payload lanes · T0 RTL and public-PDK mapping evidence`,
       };
       addPart(new THREE.BoxGeometry(2.45, 0.34, 2.45), basePart, [x, 0.28, z], { layer: 0 });
+      const nocPart = circuitPart(
+        `stack-${stackIndex + 1}-noc`, `Stack ${stackIndex + 1} base-die NoC`, 'noc',
+        '16 NoC regions · 128 physical channels',
+        'Mesh routes scheduling, ECC, gather, refresh, telemetry, and memory traffic across the intelligent base die.',
+      );
+      for (let line = -2; line <= 2; line += 1) {
+        addPart(new THREE.BoxGeometry(0.025, 0.018, 2.05), nocPart, [x + line * 0.42, 0.47, z]);
+        addPart(new THREE.BoxGeometry(2.05, 0.018, 0.025), nocPart, [x, 0.47, z + line * 0.42]);
+      }
+
+      const tsvPart = circuitPart(
+        `stack-${stackIndex + 1}-tsv`, `Stack ${stackIndex + 1} TSV bundle`, 'tsv',
+        `${metricsRef.current.payloadLanesPerStack.toLocaleString()} payload lanes represented by 16 sampled vertical conductors`,
+        'Vertical conductors connect base-die PHY endpoints through the 16-tier stack; exact pitch and keep-outs require qualified layout.',
+      );
+      for (let row = -1.5; row <= 1.5; row += 1) for (let column = -1.5; column <= 1.5; column += 1) {
+        addPart(new THREE.CylinderGeometry(0.022, 0.022, 2.75, 7), tsvPart, [x + row * 0.24, 1.89, z + column * 0.24]);
+      }
+
+      const bondPart = circuitPart(
+        `stack-${stackIndex + 1}-bonds`, `Stack ${stackIndex + 1} hybrid-bond array`, 'bond',
+        `${metricsRef.current.dramTiers} vertical die interfaces`,
+        '4 × 4 visible contacts per interface are a sampled representation of the much denser signal, power, ground, and repair network.',
+      );
+      const bondGeometry = new THREE.CylinderGeometry(0.032, 0.032, 0.045, 7);
+      const bondMaterial = new THREE.MeshStandardMaterial({ color: partColor(bondPart, overlayRef.current, metricsRef.current), metalness: 0.42, roughness: 0.35, transparent: true });
+      const bonds = new THREE.InstancedMesh(bondGeometry, bondMaterial, metricsRef.current.dramTiers * 16);
+      const matrix = new THREE.Matrix4();
+      let bondIndex = 0;
+      for (let tier = 0; tier < metricsRef.current.dramTiers; tier += 1) {
+        for (let row = -1.5; row <= 1.5; row += 1) for (let column = -1.5; column <= 1.5; column += 1) {
+          matrix.makeTranslation(x + row * 0.28, 0.50 + tier * 0.17, z + column * 0.28);
+          bonds.setMatrixAt(bondIndex, matrix);
+          bondIndex += 1;
+        }
+      }
+      bonds.userData.part = bondPart;
+      bonds.userData.baseY = 0;
+      bonds.userData.layer = 0;
+      meshes.push(bonds);
+      scene.add(bonds);
       Array.from({ length: metricsRef.current.dramTiers }).forEach((_, tier) => {
         const dramPart: Part = {
           id: `stack-${stackIndex + 1}-tier-${tier + 1}`, name: `Stack ${stackIndex + 1} · DRAM tier ${tier + 1}`, kind: 'dram', stack: stackIndex + 1, tier, evidence: 'restricted',
@@ -253,10 +352,17 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
         const targetY = (mesh.userData.baseY as number) + (explodedRef.current ? layer * 0.19 : 0);
         mesh.position.y += (targetY - mesh.position.y) * 0.09;
         material.color.lerp(partColor(part, overlayRef.current, metricsRef.current), 0.1);
-        const matches = focus === 'system' || focus === 'stack' && (part.kind === 'dram' || part.kind === 'base') || focus === part.kind;
+        const circuitKind = part.kind === 'route' || part.kind === 'noc' || part.kind === 'tsv' || part.kind === 'bond';
+        const matches = overlayRef.current === 'circuitry' && circuitKind || focus === 'system' || focus === 'stack' && (part.kind === 'dram' || part.kind === 'base' || circuitKind) || focus === part.kind;
         material.opacity += ((matches ? 1 : 0.28) - material.opacity) * 0.09;
         material.emissive.set(selectedRef.current?.id === part.id ? '#244f7d' : '#000000');
         material.emissiveIntensity = selectedRef.current?.id === part.id ? 0.4 : 0;
+      }
+      const elapsed = performance.now() * 0.00022;
+      for (const signal of signals) {
+        signal.mesh.position.copy(signal.curve.getPoint((elapsed + signal.offset) % 1));
+        (signal.mesh.material as THREE.MeshBasicMaterial).opacity = overlayRef.current === 'circuitry' ? 1 : 0;
+        signal.mesh.visible = overlayRef.current === 'circuitry';
       }
       controls.update();
       renderer.render(scene, camera);
@@ -300,7 +406,7 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
 
   return (
     <div className="twin-viewport-shell">
-      <div className="twin-canvas" ref={hostRef} role="img" aria-label="Interactive 3D model of the AIMEM-X1 accelerator package with eight sixteen-tier memory stacks" />
+      <div className="twin-canvas" ref={hostRef} role="img" aria-label="Interactive 3D circuit model of the AIMEM-X1 accelerator, interposer traces, base-die networks, TSVs, hybrid bonds, and eight sixteen-tier memory stacks" />
       <div className="twin-toolbar" aria-label="3D view controls">
         <button onClick={() => zoom(0.82)} title="Zoom in">＋</button>
         <button onClick={() => zoom(1.22)} title="Zoom out">−</button>
@@ -308,7 +414,7 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
         <button className={exploded ? 'active' : ''} onClick={() => setExploded((value) => !value)}>{exploded ? 'Collapse' : 'Explode'}</button>
         <button className={autoRotate ? 'active' : ''} onClick={() => setAutoRotate((value) => !value)}>Orbit</button>
       </div>
-      <div className="twin-instructions">Drag to rotate · scroll or pinch to zoom · right-drag to pan · select any die</div>
+      <div className="twin-instructions">Drag to rotate · scroll or pinch to zoom · right-drag to pan · select dies, routes, NoCs, TSVs, or bonds</div>
       <div className="twin-selection" aria-live="polite">
         {selected ? <>
           <div><span>Selected component</span><button onClick={() => setSelected(null)} aria-label="Clear selected component">×</button></div>
@@ -319,7 +425,7 @@ export default function Chip3DExplorer({ overlay, step, metrics }: Props) {
         </> : <>
           <span>Interactive selection</span>
           <h3>Explore the package</h3>
-          <p>Select the accelerator, interposer, a base die, or any of the 128 visible DRAM tiers to inspect its linked data.</p>
+          <p>Select the accelerator, interposer, a DRAM tier, an interposer route, a base-die NoC, a TSV bundle, or a hybrid-bond array to inspect its linked data.</p>
         </>}
       </div>
       <div className="twin-axis" aria-hidden="true"><i className="x" /><i className="y" /><i className="z" /><span>X / Y / Z</span></div>

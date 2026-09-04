@@ -11,8 +11,9 @@ import { DEFAULT_X1_CONFIG, evaluateX1, X1_STATE_TABLE, type X1Config, type X1Pe
 import { AGENT_MISSIONS, AGENT_RUNTIME_STACK, evaluateAgentMission, type AgentMission, type AgentRunStatus } from '@/lib/agent-orchestration';
 import { DIGITAL_MODULES, evaluateDigitalImplementation, type DigitalReviewScope } from '@/lib/digital-implementation';
 import { evaluatePhysicalImplementation, type PhysicalReviewScope } from '@/lib/physical-implementation';
-import Chip3DExplorer, { type TwinMetrics } from '@/app/components/Chip3DExplorer';
+import Chip3DExplorer, { type CircuitPhysicsMetrics, type TwinMetrics } from '@/app/components/Chip3DExplorer';
 import { TWIN_BUILD_STEPS, TWIN_HIERARCHY, TWIN_OVERLAYS, twinStageCounts, twinStageProgress, type TwinOverlay } from '@/lib/design-twin';
+import { DEFAULT_INTERCONNECT_INPUTS, evaluateCircuitTopology, evaluateInterconnectPhysics } from '@/lib/interconnect-physics';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
@@ -131,7 +132,7 @@ export default function Home() {
   const [physicalScope, setPhysicalScope] = useState<PhysicalReviewScope>('mapped');
   const [physicalUtilization, setPhysicalUtilization] = useState(55);
   const [selectedPhysicalStage, setSelectedPhysicalStage] = useState('mapping');
-  const [twinOverlay, setTwinOverlay] = useState<TwinOverlay>('architecture');
+  const [twinOverlay, setTwinOverlay] = useState<TwinOverlay>('circuitry');
   const [twinStepIndex, setTwinStepIndex] = useState(0);
   const [userLevel, setUserLevel] = useState<UserLevel>('beginner');
   const timer = useRef<number | null>(null);
@@ -146,6 +147,8 @@ export default function Home() {
   const agentEvaluation = useMemo(() => evaluateAgentMission(agentMission, agentCompleted, agentRunStatus), [agentMission, agentCompleted, agentRunStatus]);
   const digitalEvaluation = useMemo(() => evaluateDigitalImplementation(digitalScope, rtlEvidence), [digitalScope]);
   const physicalImplementation = useMemo(() => evaluatePhysicalImplementation(physicalScope, physicalUtilization, physicalEvidence), [physicalScope, physicalUtilization]);
+  const circuitPhysics = useMemo(() => evaluateInterconnectPhysics({ ...DEFAULT_INTERCONNECT_INPUTS, laneRateGbps: x1Evaluation.state.laneRateGbps, payloadLaneCount: x1Evaluation.totalPayloadLanes }), [x1Evaluation.state.laneRateGbps, x1Evaluation.totalPayloadLanes]);
+  const circuitTopology = useMemo(() => evaluateCircuitTopology(x1Config.stackCount, x1Config.dramTiers), [x1Config.stackCount, x1Config.dramTiers]);
   const activeHierarchy = view === 'twin' ? TWIN_HIERARCHY : view === 'guide' ? guideHierarchy : view === 'physical' ? physicalHierarchy : view === 'digital' ? digitalHierarchy : view === 'agents' ? agentHierarchy : view === 'x1' ? x1Hierarchy : view === 'foundry' ? foundryHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
 
   useEffect(() => () => {
@@ -226,7 +229,7 @@ export default function Home() {
       agent_mission: view === 'agents' ? { mission: agentMission, run_status: agentRunStatus, evaluation: agentEvaluation, evidence_class: 'deterministic open-source orchestration replay' } : undefined,
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
       physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
-      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive geometry linked to executed, modeled, planned, and restricted evidence' } : undefined,
+      design_twin: view === 'twin' ? { overlay: twinOverlay, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive hierarchical circuitry with first-order electrical physics; production extraction remains restricted' } : undefined,
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -305,7 +308,7 @@ export default function Home() {
             <div>
               <p className="eyebrow">{view === 'twin' ? 'Interactive system visualization' : view === 'guide' ? 'Embedded learning center' : view === 'physical' ? 'Public-PDK implementation evidence' : view === 'digital' ? 'Open-source execution evidence' : view === 'agents' ? 'Evidence-aware orchestration' : view === 'x1' ? 'Final architecture target' : view === 'foundry' ? 'Restricted-lane control plane' : view === 't1' ? 'Next hardware milestone' : view === 'readiness' ? 'Program control plane' : view === 'architecture' ? 'Executable architecture' : view === 'workloads' ? 'Deterministic cycle campaign' : view === 'correlation' ? 'Independent memory reference' : view === 'explore' ? 'Design-space experiment' : 'T0 decision matrix'}</p>
               <h2>{view === 'twin' ? 'End-to-end 3D design twin' : view === 'guide' ? 'End-to-end user guide' : view === 'physical' ? 'Physical implementation lab' : view === 'digital' ? 'RTL & verification lab' : view === 'agents' ? 'AI Agent Mission Control' : view === 'x1' ? 'Production X1 system planner' : view === 'foundry' ? 'T1 foundry-entry readiness' : view === 't1' ? 'T1 engineering sample' : view === 'readiness' ? 'T0 evidence readiness' : view === 'architecture' ? 'T0 memory system' : view === 'workloads' ? 'Workload verification' : view === 'correlation' ? 'Ramulator2 correlation' : view === 'explore' ? 'Analytical sweep' : 'Evidence gates'}</h2>
-              <p>{view === 'twin' ? 'Rotate, pan, zoom, explode, and select the full eight-stack X1 package while changing data overlays and walking every build step from requirements through human release.' : view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 'physical' ? 'Trace the public-PDK flow from mapped cells and timing constraints through floorplanning, placement, clocking, routing, extraction, physical verification, and the restricted production boundary.' : view === 'digital' ? 'Inspect the real T0 RTL hierarchy, controller flow, bounded formal properties, synthesis metrics, verification status, and the exact artifacts still required for digital closure.' : view === 'agents' ? 'Coordinate requirements, architecture, performance, RTL, formal, physical, multiphysics, and evidence agents—then stop safely at silicon, foundry, and human approval boundaries.' : view === 'x1' ? 'Explore the source-defined 16-high, 8,192-lane production stack and its eight-stack accelerator system while preserving the T1 evidence gate.' : view === 'foundry' ? 'Prepare a secure, auditable path from the open-source control plane into a future authorized foundry enclave—without moving proprietary inputs into this platform.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
+              <p>{view === 'twin' ? 'Trace animated traffic from accelerator ports through interposer routes, base-die NoCs, TSV bundles, hybrid bonds, and 128 DRAM tiers—then inspect the electrical physics and evidence behind every hierarchy level.' : view === 'guide' ? 'Learn the complete platform workflow at your experience level, then jump directly into each workspace with the right evidence expectations.' : view === 'physical' ? 'Trace the public-PDK flow from mapped cells and timing constraints through floorplanning, placement, clocking, routing, extraction, physical verification, and the restricted production boundary.' : view === 'digital' ? 'Inspect the real T0 RTL hierarchy, controller flow, bounded formal properties, synthesis metrics, verification status, and the exact artifacts still required for digital closure.' : view === 'agents' ? 'Coordinate requirements, architecture, performance, RTL, formal, physical, multiphysics, and evidence agents—then stop safely at silicon, foundry, and human approval boundaries.' : view === 'x1' ? 'Explore the source-defined 16-high, 8,192-lane production stack and its eight-stack accelerator system while preserving the T1 evidence gate.' : view === 'foundry' ? 'Prepare a secure, auditable path from the open-source control plane into a future authorized foundry enclave—without moving proprietary inputs into this platform.' : view === 't1' ? 'Plan the 8-high, 4,096-lane scale-up while preserving the boundary between open-source engineering proxies and foundry-qualified evidence.' : view === 'readiness' ? 'One traceable view of architecture, RTL, formal, physical, thermal, release, and external silicon evidence.' : view === 'architecture' ? 'Four DRAM tiers over a distributed intelligent base die, connected by a 1,024-lane short-reach interface.' : view === 'workloads' ? 'Seeded request-level simulations expose bandwidth, latency, row locality, queueing, gather value, and refresh interference.' : view === 'correlation' ? 'A pinned official Ramulator2 HBM3 lane checks workload ordering, row locality, and the internal model’s absolute latency scale.' : view === 'explore' ? 'Compare lane rate and SRAM variants using transparent analytical proxies.' : 'Twelve source-derived gates separate assumptions from verified engineering evidence.'}</p>
             </div>
             <div className="stage-actions">
               <span className={`fidelity-pill ${view === 'twin' || view === 'guide' || view === 'physical' || view === 'digital' || view === 't1' || view === 'foundry' || view === 'x1' || view === 'agents' ? 'running' : runStatus}`}>{view === 'twin' ? `${twinOverlay} · ${twinStep.status}` : view === 'guide' ? `${userLevel} path` : view === 'physical' ? `${physicalScope} · ${physicalEvidence.status}` : view === 'digital' ? `${digitalScope} · ${rtlEvidence.status}` : view === 'agents' ? `${agentRunStatus} · ${agentEvaluation.progressPercent}%` : view === 'x1' ? `${x1Evaluation.state.id} · production hold` : view === 'foundry' ? 'Policy enforced · hold' : view === 't1' ? 'Draft baseline · entry hold' : runStatus === 'running' ? `Running ${runProgress}%` : runStatus === 'complete' ? 'Sweep complete' : 'Evidence rev 0.4'}</span>
@@ -387,7 +390,7 @@ export default function Home() {
             </div>
           )}
 
-          {view === 'twin' && <TwinView overlay={twinOverlay} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
+          {view === 'twin' && <TwinView overlay={twinOverlay} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} physics={circuitPhysics} topology={circuitTopology} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
           {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
           {view === 'workloads' && <WorkloadsView campaign={campaign} />}
@@ -415,18 +418,57 @@ export default function Home() {
   );
 }
 
-function TwinView({ overlay, stepIndex, setStepIndex, metrics }: {
+function TwinView({ overlay, stepIndex, setStepIndex, metrics, physics, topology }: {
   overlay: TwinOverlay;
   stepIndex: number;
   setStepIndex: (index: number) => void;
   metrics: TwinMetrics;
+  physics: CircuitPhysicsMetrics;
+  topology: ReturnType<typeof evaluateCircuitTopology>;
 }) {
   const step = TWIN_BUILD_STEPS[stepIndex];
   return (
     <div className="twin-layout">
       <section className="panel twin-scene-panel" id="twin-system">
         <PanelTitle label="Movable package twin" meta={`${metrics.stackCount} stacks · ${metrics.dramTiers * metrics.stackCount} DRAM tiers · ${overlay} overlay`} />
-        <Chip3DExplorer overlay={overlay} step={step} metrics={metrics} />
+        <Chip3DExplorer overlay={overlay} step={step} metrics={metrics} physics={physics} />
+      </section>
+
+      <section className="panel twin-circuit-panel" id="twin-circuit">
+        <PanelTitle label="Hierarchical micro-circuit connectivity" meta={`${topology.protectedConductors.toLocaleString()} protected package conductors · representative geometry`} />
+        <div className="circuit-topology-flow">
+          {[
+            ['Accelerator', `${metrics.distributedComputePorts} ports`],
+            ['Interposer', `${topology.routeBundles} route bundles`],
+            ['Base-die NoCs', `${topology.nocRegions} regions`],
+            ['Channels', topology.physicalChannels.toLocaleString()],
+            ['Pseudochannels', topology.pseudochannels.toLocaleString()],
+            ['Banks', topology.banks.toLocaleString()],
+            ['Subarrays', topology.subarrays.toLocaleString()],
+          ].map(([label, value], index, items) => <article key={label}><span>{label}</span><strong>{value}</strong>{index < items.length - 1 && <i>→</i>}</article>)}
+        </div>
+        <div className="circuit-detail-strip">
+          <div><span>Payload lanes</span><strong>{topology.payloadLanes.toLocaleString()}</strong><small>{metrics.payloadLanesPerStack.toLocaleString()} per stack</small></div>
+          <div><span>Protected conductors</span><strong>{topology.protectedConductors.toLocaleString()}</strong><small>data + ECC + spares</small></div>
+          <div><span>Vertical interfaces</span><strong>{topology.hybridBondInterfaces}</strong><small>base/tier + tier/tier</small></div>
+          <div><span>Visible circuit samples</span><strong>2,282</strong><small>bundles represent full counts</small></div>
+        </div>
+      </section>
+
+      <section className="panel twin-physics-panel">
+        <PanelTitle label="First-order electrical physics" meta="Copper interposer trace · parameterized assumptions" />
+        <div className="circuit-physics-grid">
+          <article><span>Trace resistance</span><strong>{physics.resistanceOhms.toFixed(2)} Ω</strong><small>temperature adjusted</small></article>
+          <article><span>Flight time</span><strong>{physics.flightTimePs.toFixed(1)} ps</strong><small>c / √εr</small></article>
+          <article><span>RC delay</span><strong>{physics.rcDelayPs.toFixed(1)} ps</strong><small>0.69 RC proxy</small></article>
+          <article><span>Total delay</span><strong>{physics.totalElectricalDelayPs.toFixed(1)} ps</strong><small>flight + lumped RC</small></article>
+          <article><span>Trace capacitance</span><strong>{physics.capacitanceFf.toFixed(0)} fF</strong><small>20 fF/mm assumption</small></article>
+          <article><span>Transition energy</span><strong>{physics.energyPerTransitionPj.toFixed(3)} pJ</strong><small>½CV²</small></article>
+          <article><span>Dynamic lane power</span><strong>{physics.aggregateDynamicPowerWatts.toFixed(1)} W</strong><small>50% activity aggregate</small></article>
+          <article><span>Copper I²R</span><strong>{physics.aggregateJoulePowerWatts.toFixed(1)} W</strong><small>payload-lane aggregate</small></article>
+          <article><span>Current density</span><strong>{physics.currentDensityMAcm2.toFixed(3)} MA/cm²</strong><small>uniform cross-section</small></article>
+        </div>
+        <p className="circuit-physics-note">12 mm copper route · 5 × 2 µm cross-section · εr 3.2 · 0.6 V · 2 mA/lane · 85°C. These equations obey first-order electrical physics, but production accuracy requires extracted geometry, material stacks, drivers, receivers, return paths, coupling, and calibrated foundry models.</p>
       </section>
 
       <section className="panel twin-data-panel" id="twin-accelerator">
@@ -486,7 +528,7 @@ function TwinControlPanel({ overlay, setOverlay, stepIndex, setStepIndex, naviga
     <aside className="control-rail">
       <div className="control-scroll">
         <section className="control-section">
-          <div className="section-heading"><span>Data overlay</span><b>5</b></div>
+          <div className="section-heading"><span>Data overlay</span><b>6</b></div>
           <div className="twin-overlay-control">
             {TWIN_OVERLAYS.map((item) => <button key={item.id} className={overlay === item.id ? 'active' : ''} onClick={() => setOverlay(item.id)}><span>{item.label}</span><small>{item.detail}</small></button>)}
           </div>
@@ -593,7 +635,7 @@ function GuideView({ level, setLevel, navigate }: {
   const currentLevel = levelContent[level];
   const workflow: Array<{ number: string; title: string; view: View | null; action: string; output: string; stop: string }> = [
     { number: '01', title: 'Read the readiness summary', view: 'readiness', action: 'Start with the completion contract, domain maturity cards, reliability results, and blockers.', output: 'A shared understanding of what is implemented, provisional, external, or missing.', stop: 'Do not interpret open-source readiness as measured silicon readiness.' },
-    { number: '02', title: 'Explore the complete 3D design twin', view: 'twin', action: 'Drag to orbit, scroll or pinch to zoom, explode the 16-high stacks, select individual dies, switch data overlays, and scrub through all 12 build stages.', output: 'A spatial understanding of the full package with architecture, bandwidth, power, thermal, and evidence data attached to selectable components.', stop: 'The geometry is conceptual; it does not replace routed package, foundry, or measured silicon evidence.' },
+    { number: '02', title: 'Explore the complete 3D design twin', view: 'twin', action: 'Drag to orbit, scroll or pinch to zoom, explode the 16-high stacks, select dies or circuit networks, switch data overlays, and scrub through all 12 build stages.', output: 'A spatial understanding of accelerator ports, interposer bundles, NoC meshes, TSVs, hybrid bonds, DRAM tiers, and their first-order electrical physics.', stop: 'The network is hierarchically complete but geometrically sampled; only extracted production layout and foundry models can provide signoff accuracy.' },
     { number: '03', title: 'Inspect the architecture', view: 'architecture', action: 'Select hierarchy nodes and DRAM tiers; review channels, pseudochannels, banks, SRAM, NoC regions, and useful-delivery proxies.', output: 'A concrete mental model of the current T0 organization and calculated bandwidth.', stop: 'Dimensions shown as concepts or assumptions still require physical evidence.' },
     { number: '04', title: 'Review workload behavior', view: 'workloads', action: 'Compare dense stream, banked random, KV decode, and sparse gather using identical seeded request counts.', output: 'Bandwidth, latency, row-locality, queueing, refresh, and host-traffic-reduction evidence.', stop: 'Request-level projections are not RTL timing or measured application performance.' },
     { number: '05', title: 'Check independent correlation', view: 'correlation', action: 'Compare the internal model with pinned Ramulator2 results and read the accept/rework/hold decision.', output: 'A transparent view of relative agreement and the remaining absolute-latency calibration gap.', stop: 'Never hide a scale mismatch because workload ordering agrees.' },
