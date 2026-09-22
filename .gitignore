@@ -37,3 +37,12 @@ next-env.d.ts
 /outputs/
 /work/
 /.cache/
+
+# platform (Python control plane)
+/platform/.venv/
+/platform/var/
+/platform/.pytest_cache/
+/platform/*.egg-info/
+__pycache__/
+
+*.tsbuildinfo

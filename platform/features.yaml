@@ -1,0 +1,193 @@
+# AIMEM platform feature registry: the complete vocabulary of the audit log.
+#
+# Every API route, UI surface, CLI command, and system process is a feature.
+#   events    actions the feature MUST emit. tests/test_event_coverage.py runs a
+#             scenario per feature and fails the build if any action is missing.
+#   may_emit  extra actions the feature is ALLOWED to emit (failure paths). They
+#             are exercised by dedicated failure tests instead of the scenarios.
+#
+# Emitting an unregistered feature or an undeclared action raises at runtime,
+# and the API refuses to start if a route names an unknown feature. Every
+# `api` feature must declare `http_request`: the audit middleware writes one
+# for every request, including CORS preflights and unmatched paths.
+version: 1
+features:
+  # ---- system -------------------------------------------------------------
+  - id: system.lifecycle
+    kind: system
+    phase: 0
+    owner: platform
+    title: Service start and stop
+    events: [started, stopped]
+  - id: system.migrate
+    kind: system
+    phase: 0
+    owner: platform
+    title: Database schema migrations (written inside the migration transaction)
+    events: [finished]
+
+  # ---- api: platform plumbing ----------------------------------------------
+  - id: system.health
+    kind: api
+    phase: 0
+    owner: platform
+    title: Health, chain head, and fallback-log status
+    events: [http_request]
+  - id: feature.registry
+    kind: api
+    phase: 0
+    owner: platform
+    title: Feature registry listing
+    events: [http_request]
+  - id: api.docs
+    kind: api
+    phase: 0
+    owner: platform
+    title: OpenAPI document and interactive API docs
+    events: [http_request]
+  - id: api.unrouted
+    kind: api
+    phase: 0
+    owner: platform
+    title: Requests that match no route
+    events: [http_request]
+  - id: api.preflight
+    kind: api
+    phase: 0
+    owner: platform
+    title: CORS preflight requests answered before routing
+    events: [http_request]
+  - id: ui.ingest
+    kind: api
+    phase: 0
+    owner: platform
+    title: Browser event ingestion endpoint
+    events: [http_request]
+
+  # ---- api: identity -------------------------------------------------------
+  - id: auth.session
+    kind: api
+    phase: 0
+    owner: platform
+    title: Sign-in, sign-out, and session lookup
+    events: [http_request, login, login_failed, logout]
+  - id: auth.user
+    kind: api
+    phase: 0
+    owner: platform
+    title: User administration
+    events: [http_request, created, updated]
+    may_emit: [failed]
+
+  # ---- api: audit ----------------------------------------------------------
+  - id: audit.query
+    kind: api
+    phase: 0
+    owner: platform
+    title: Read the audit log, event detail, and trace trees
+    events: [http_request]
+  - id: audit.coverage
+    kind: api
+    phase: 0
+    owner: platform
+    title: Live event-coverage report against this registry
+    events: [http_request]
+  - id: audit.verify_chain
+    kind: api
+    phase: 0
+    owner: platform
+    title: Hash-chain and anchor verification
+    events: [http_request, started, verified]
+    may_emit: [break_detected, failed]
+
+  # ---- api: artifacts ------------------------------------------------------
+  - id: artifact.write
+    kind: api
+    phase: 0
+    owner: platform
+    title: Content-addressed artifact upload
+    events: [http_request, artifact_written]
+    may_emit: [failed]
+  - id: artifact.read
+    kind: api
+    phase: 0
+    owner: platform
+    title: Artifact download
+    events: [http_request, artifact_read]
+  - id: artifact.list
+    kind: api
+    phase: 0
+    owner: platform
+    title: Artifact listing
+    events: [http_request]
+
+  # ---- cli -----------------------------------------------------------------
+  - id: cli.command
+    kind: cli
+    phase: 0
+    owner: platform
+    title: Platform CLI invocations
+    events: [started, finished]
+    may_emit: [failed]
+
+  # ---- ui (emitted by the browser and accepted through ui.ingest) ----------
+  - id: ui.session
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Page load and unload
+    events: [started, ended]
+  - id: ui.interaction
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Every click, committed input change, form submit, keyboard shortcut, and 3D camera gesture
+    events: [click, change, submit, key, camera]
+  - id: ui.view
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Workspace view changes
+    events: [changed]
+  - id: ui.state
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Selection, scope, overlay, and display-state changes
+    events: [changed]
+  - id: ui.param
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Engineering model parameter edits (T0, T1, X1, physical)
+    events: [edited]
+  - id: ui.export
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Evidence snapshot exports
+    events: [exported]
+  - id: ui.sweep
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Analytical architecture sweeps
+    events: [started, completed]
+  - id: ui.agent_replay
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Agent mission replay controls
+    events: [started, paused, reset, completed]
+  - id: ui.twin
+    kind: ui
+    phase: 0
+    owner: studio
+    title: 3D design twin component selection
+    events: [part_selected, part_cleared]
+  - id: ui.error
+    kind: ui
+    phase: 0
+    owner: studio
+    title: Browser errors and unhandled promise rejections, with stack traces
+    events: [error, unhandled_rejection]
