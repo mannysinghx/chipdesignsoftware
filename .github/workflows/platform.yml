@@ -1,0 +1,102 @@
+name: platform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-backbone:
+    name: Audit backbone (pytest + event-coverage gate)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the platform
+        run: |
+          python -m venv platform/.venv
+          platform/.venv/bin/pip install --quiet -e 'platform[dev]'
+      - name: Create roles and databases
+        run: bash platform/scripts/setup-local-db.sh
+      - name: Tests (chain, tamper, guard, fail-closed, RBAC, coverage gate)
+        run: cd platform && .venv/bin/pytest -q
+
+  studio:
+    name: Studio (tests, lint, types, builds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npx next build
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  ui-audit-smoke:
+    name: UI audit smoke (every control logged, every event delivered)
+    runs-on: ubuntu-latest
+    needs: [audit-backbone, studio]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install the platform and migrate the test database
+        run: |
+          python -m venv platform/.venv
+          platform/.venv/bin/pip install --quiet -e 'platform[dev]'
+          bash platform/scripts/setup-local-db.sh
+          set -a; . platform/.env; set +a
+          cd platform && .venv/bin/alembic -x url="$AIMEM_TEST_OWNER_DATABASE_URL" upgrade head
+      - name: Build and start the Studio
+        run: |
+          npm ci
+          npx next build
+          npx next start -p 3000 > next.log 2>&1 &
+          for attempt in $(seq 1 60); do curl -fs http://localhost:3000 > /dev/null && exit 0; sleep 1; done
+          cat next.log; exit 1
+      - name: Exercise every control in a real browser
+        run: node scripts/ui-audit-smoke.mjs --app http://localhost:3000 --api-port 8101
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-audit-smoke
+          path: outputs/ui-audit-smoke

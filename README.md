@@ -2,6 +2,8 @@
 
 An evidence-gated chip design workbench for the AIMEM memory-system program: a T0 pathfinder channel with executed RTL, formal, and public-PDK mapping evidence, a T1 scale-up planner, a production X1 eight-stack system planner, and an interactive 3D design twin of the complete 2.5D package.
 
+Every action in the Studio and its control plane is written to an append-only, hash-chained audit log (see [Audit backbone](#audit-backbone-phase-0)).
+
 Every number in the app carries an evidence class: **executed** (reproduced locally from versioned sources), **modeled** (deterministic planning proxy), **planned** (artifact defined but not produced), or **restricted** (requires a qualified foundry, PDK, or silicon). Production release stays on HOLD until measured evidence and named human approvals exist.
 
 ## Workspaces
@@ -16,6 +18,7 @@ Every number in the app carries an evidence class: **executed** (reproduced loca
 | Production X1 | Eight-stack, 16-high, 8,192-lane production target with performance states and routing pressure. |
 | Agent operations | Deterministic replay of the AI agent mission control plane. |
 | User guide | Role-aware end-to-end guide embedded in the app. |
+| Activity | The audit log: every click, edit, sign-in, API request, CLI command, and migration, with trace trees, chain verification, and live feature coverage. |
 
 ## 3D design twin
 
@@ -51,6 +54,24 @@ Open http://localhost:3000.
 | `npm run verify:physical` | Maps the T0 channel to the public Sky130 HD library and regenerates physical evidence. |
 | `npm run bootstrap:ramulator` · `npm run correlate:ramulator` | Fetches Ramulator2 and regenerates the correlation evidence. |
 | `npm run evidence` | Full evidence pipeline: spec validation, tests, RTL, physical, correlation, and evidence summary. |
+| `npm run platform:dev` · `npm run platform:test` · `npm run platform:migrate` | Run, test, and migrate the audit backbone ([platform/README.md](platform/README.md)). |
+| `npm run smoke:ui-audit` | Clicks every control in every view of a running Studio and proves each one is logged and delivered. |
+
+## Audit backbone (Phase 0)
+
+The platform in [`platform/`](platform/README.md) (Python, FastAPI, PostgreSQL) is the first phase of the self-improving design platform in [`docs/RSI_PLATFORM_PLAN.md`](docs/RSI_PLATFORM_PLAN.md). It enforces **no log, no action**:
+
+- Every browser interaction is captured by page-wide listeners and shipped to the API; every API request, CLI command, migration, and service start/stop is logged server-side.
+- Rows are append-only (privileges and triggers) and hash-chained; verification recomputes every hash and checks external anchors.
+- `platform/features.yaml` defines the complete vocabulary. CI fails if a registered feature never emits a declared action, and the browser smoke test fails if any control in any view is not logged.
+
+```bash
+bash platform/scripts/setup-local-db.sh && npm run platform:migrate
+platform/.venv/bin/aimem-platform create-user --email you@example.com --role admin
+npm run platform:dev    # API on :8100; open the Activity tab in the Studio
+```
+
+Deployed without an API, the Studio keeps events in the page and labels them local-only.
 
 ## Deployment
 
@@ -75,7 +96,9 @@ rtl/                 Synthesizable T0 channel and SECDED sources
 formal/              Bounded formal properties
 evidence/            Generated evidence JSON (RTL, physical, correlation, summary)
 scripts/ · tools/    Evidence generators, Yosys and Sky130 bootstrap, Ramulator2 correlation
+platform/            Audit backbone: FastAPI service, migrations, feature registry, tests
 docs/OPS_LOG.md      Log of actions with side effects outside the working tree
+docs/RSI_PLATFORM_PLAN.md  Phased plan for the self-improving platform
 ```
 
 ## Evidence policy
