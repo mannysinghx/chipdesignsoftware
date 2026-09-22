@@ -16,11 +16,14 @@ import { ALL_TWIN_OVERLAYS, DEFAULT_TWIN_OVERLAYS, TWIN_BUILD_STEPS, TWIN_HIERAR
 import { DEFAULT_INTERCONNECT_INPUTS, evaluateCircuitTopology, evaluateInterconnectPhysics } from '@/lib/interconnect-physics';
 import { AIMEM_REFERENCE_MACROS, BASE_DIE_FLOORPLAN, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS, X1_BASE_DIE_AREA_BUDGET_MM2 } from '@/lib/reference-microchip';
 import { PACKAGE_GEOMETRY, STACK_PLACEMENTS, evaluateConnectorChain } from '@/lib/package-connectors';
+import { getUiAudit, track, trackExport } from '@/lib/ui-audit';
+import { useTrackedParams, useTrackedValue, useUiAuditInstallation } from '@/lib/ui-audit-react';
+import ActivityWorkspace from '@/app/components/ActivityWorkspace';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'twin' | 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide';
+type View = 'twin' | 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide' | 'activity';
 type UserLevel = 'beginner' | 'practitioner' | 'expert';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
@@ -39,6 +42,7 @@ const views: Array<{ id: View; label: string }> = [
   { id: 'x1', label: 'Production X1' },
   { id: 'agents', label: 'Agent operations' },
   { id: 'guide', label: 'User guide' },
+  { id: 'activity', label: 'Activity' },
 ];
 
 const hierarchy = [
@@ -153,6 +157,41 @@ export default function Home() {
   const circuitTopology = useMemo(() => evaluateCircuitTopology(x1Config.stackCount, x1Config.dramTiers), [x1Config.stackCount, x1Config.dramTiers]);
   const connectorChain = useMemo(() => evaluateConnectorChain(x1Config.stackCount, x1Config.dramTiers), [x1Config.stackCount, x1Config.dramTiers]);
   const activeHierarchy = view === 'twin' ? TWIN_HIERARCHY : view === 'guide' ? guideHierarchy : view === 'physical' ? physicalHierarchy : view === 'digital' ? digitalHierarchy : view === 'agents' ? agentHierarchy : view === 'x1' ? x1Hierarchy : view === 'foundry' ? foundryHierarchy : view === 't1' ? t1Hierarchy : hierarchy;
+  const sweepEvent = useRef<ReturnType<typeof track>>(null);
+  const agentReplayEvent = useRef<ReturnType<typeof track>>(null);
+
+  // Audit logging: every interaction is captured by the page-wide listeners; these
+  // record what each interaction changed (views, parameters, selections, scopes).
+  useUiAuditInstallation(view);
+  useTrackedValue('ui.view', 'changed', 'view', view);
+  useTrackedParams('t0', config);
+  useTrackedParams('t1', t1Config);
+  useTrackedParams('x1', x1Config);
+  useTrackedParams('physical', { utilization_percent: physicalUtilization });
+  useTrackedValue('ui.state', 'changed', 'selectedNode', selectedNode);
+  useTrackedValue('ui.state', 'changed', 'architecture.tier', selectedTier);
+  useTrackedValue('ui.state', 'changed', 'twin.overlays', twinOverlays);
+  useTrackedValue('ui.state', 'changed', 'twin.buildStep', TWIN_BUILD_STEPS[twinStepIndex]?.short ?? twinStepIndex);
+  useTrackedValue('ui.state', 'changed', 'guide.level', userLevel);
+  useTrackedValue('ui.state', 'changed', 'digital.scope', digitalScope);
+  useTrackedValue('ui.state', 'changed', 'digital.module', selectedDigitalModule);
+  useTrackedValue('ui.state', 'changed', 'physical.scope', physicalScope);
+  useTrackedValue('ui.state', 'changed', 'physical.stage', selectedPhysicalStage);
+  useTrackedValue('ui.state', 'changed', 'agents.mission', agentMission);
+
+  useEffect(() => {
+    const started = sweepEvent.current;
+    if (runStatus !== 'complete' || !started) return;
+    sweepEvent.current = null;
+    track('ui.sweep', 'completed', { points: sweep.length }, { parent: started.event_id, traceId: started.trace_id });
+  }, [runStatus, sweep.length]);
+
+  useEffect(() => {
+    const started = agentReplayEvent.current;
+    if (agentRunStatus !== 'blocked' || !started) return;
+    agentReplayEvent.current = null;
+    track('ui.agent_replay', 'completed', { mission: agentMission, completed_nodes: agentCompleted, stopped_at: 'mandatory boundary' }, { parent: started.event_id, traceId: started.trace_id });
+  }, [agentRunStatus, agentMission, agentCompleted]);
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current);
@@ -160,6 +199,8 @@ export default function Home() {
   }, []);
 
   const resetAgentReplay = (mission: AgentMission = agentMission) => {
+    track('ui.agent_replay', 'reset', { mission, previous_mission: agentMission, completed_nodes: agentCompleted });
+    agentReplayEvent.current = null;
     if (agentTimer.current !== null) window.clearInterval(agentTimer.current);
     agentTimer.current = null;
     setAgentMission(mission);
@@ -168,6 +209,7 @@ export default function Home() {
   };
 
   const startAgentReplay = () => {
+    agentReplayEvent.current = track('ui.agent_replay', 'started', { mission: agentMission, resumed_from: agentCompleted >= agentEvaluation.safeNodeCount ? 0 : agentCompleted });
     if (agentTimer.current !== null) window.clearInterval(agentTimer.current);
     if (agentCompleted >= agentEvaluation.safeNodeCount) setAgentCompleted(0);
     setAgentRunStatus('running');
@@ -185,6 +227,8 @@ export default function Home() {
   };
 
   const pauseAgentReplay = () => {
+    track('ui.agent_replay', 'paused', { mission: agentMission, completed_nodes: agentCompleted });
+    agentReplayEvent.current = null;
     if (agentTimer.current !== null) window.clearInterval(agentTimer.current);
     agentTimer.current = null;
     setAgentRunStatus('paused');
@@ -197,6 +241,7 @@ export default function Home() {
   };
 
   const startSweep = () => {
+    sweepEvent.current = track('ui.sweep', 'started', { config });
     if (timer.current !== null) window.clearInterval(timer.current);
     setView('explore');
     setRunStatus('running');
@@ -220,7 +265,7 @@ export default function Home() {
   const exportSnapshot = () => {
     const snapshot = {
       schema_version: '1.0',
-      product: view === 'twin' ? 'AIMEM Design Studio 3D Design Twin' : view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
+      product: view === 'activity' ? 'AIMEM Design Studio Activity Log' : view === 'twin' ? 'AIMEM Design Studio 3D Design Twin' : view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
       fidelity: 'multi-domain-open-source-proxy',
       generated_at: new Date().toISOString(),
       config,
@@ -233,13 +278,16 @@ export default function Home() {
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
       physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
       design_twin: view === 'twin' ? { overlays: twinOverlays, overlay_composite: twinOverlays.length > 1, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, package_connector_chain: connectorChain, package_geometry: PACKAGE_GEOMETRY, stack_placements: STACK_PLACEMENTS, base_die_floorplan: BASE_DIE_FLOORPLAN, base_die_area_budget_mm2: X1_BASE_DIE_AREA_BUDGET_MM2, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
+      activity_log: view === 'activity' ? { this_page: getUiAudit()?.snapshot() ?? null, evidence_class: 'browser-recorded UI audit events; the platform log is authoritative' } : undefined,
     };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
+    const text = JSON.stringify(snapshot, null, 2);
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = view === 'twin' ? 'aimem-x1-3d-design-twin.json' : view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
+    anchor.download = view === 'activity' ? 'aimem-activity-log.json' : view === 'twin' ? 'aimem-x1-3d-design-twin.json' : view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
     anchor.click();
     URL.revokeObjectURL(url);
+    trackExport(anchor.download, text, { view });
   };
 
   const passCount = evaluation.gates.filter((gate) => gate.status === 'pass').length;
@@ -255,7 +303,7 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>{view === 'twin' ? '3D Design Twin' : view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
+            <h1>{view === 'activity' ? 'Activity Log' : view === 'twin' ? '3D Design Twin' : view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
@@ -266,11 +314,12 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> {view === 'twin' ? `X1 package · ${twinStep.short}/12` : view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
+          <span className="baseline-status"><i /> {view === 'activity' ? 'Audit log · append-only · hash-chained' : view === 'twin' ? `X1 package · ${twinStep.short}/12` : view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
 
+      {view === 'activity' ? <ActivityWorkspace /> : (
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
@@ -417,6 +466,7 @@ export default function Home() {
 
         {view === 'twin' ? <TwinControlPanel overlays={twinOverlays} setOverlays={setTwinOverlays} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} navigate={setView} /> : view === 'guide' ? <GuideControlPanel level={userLevel} setLevel={setUserLevel} navigate={setView} /> : view === 'physical' ? <PhysicalControlPanel scope={physicalScope} setScope={setPhysicalScope} utilization={physicalUtilization} setUtilization={setPhysicalUtilization} evaluation={physicalImplementation} selectedStage={selectedPhysicalStage} setSelectedStage={setSelectedPhysicalStage} navigate={setView} /> : view === 'digital' ? <DigitalControlPanel scope={digitalScope} setScope={setDigitalScope} evaluation={digitalEvaluation} selectedModule={selectedDigitalModule} setSelectedModule={setSelectedDigitalModule} navigate={setView} /> : view === 'agents' ? <AgentControlPanel mission={agentMission} evaluation={agentEvaluation} runStatus={agentRunStatus} onMissionChange={resetAgentReplay} onStart={startAgentReplay} onPause={pauseAgentReplay} onReset={() => resetAgentReplay()} navigate={setView} /> : view === 'x1' ? <X1ControlPanel config={x1Config} updateConfig={setX1Config} evaluation={x1Evaluation} navigate={setView} /> : view === 'foundry' ? <FoundryControlPanel readiness={foundryReadiness} navigate={setView} /> : view === 't1' ? <T1ControlPanel config={t1Config} updateConfig={setT1Config} evaluation={t1Evaluation} campaign={t1Campaign} physical={t1Physical} /> : <ControlPanel config={config} updateConfig={updateConfig} evaluation={evaluation} startSweep={startSweep} onReset={() => setConfig(DEFAULT_T0_CONFIG)} />}
       </div>
+      )}
     </main>
   );
 }

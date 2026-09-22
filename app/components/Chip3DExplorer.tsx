@@ -8,6 +8,8 @@ import { TWIN_OVERLAYS, toggleTwinOverlay, twinOverlaysAreComplete, type TwinBui
 import { ALL_TWIN_OVERLAYS, DEFAULT_TWIN_OVERLAYS, normalizeTwinOverlays } from '@/lib/design-twin';
 import { ACCELERATOR_FLOORPLAN, BASE_DIE_FLOORPLAN, OPEN_TITAN_REFERENCE, SKY130_VISUAL_LAYERS, X1_BASE_DIE_MM, floorplanAreaMm2 } from '@/lib/reference-microchip';
 import { CONNECTOR_SAMPLING, PACKAGE_GEOMETRY, STACK_PLACEMENTS, acceleratorPhyAnchor, evaluateConnectorChain, stackLocalToWorld, type StackPlacement } from '@/lib/package-connectors';
+import { getUiAudit, track } from '@/lib/ui-audit';
+import { useTrackedValue } from '@/lib/ui-audit-react';
 
 export type TwinMetrics = {
   stackCount: number;
@@ -201,6 +203,22 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
   const [componentCount, setComponentCount] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const previousSelection = useRef<string | null>(null);
+
+  useTrackedValue('ui.state', 'changed', 'twin.exploded', exploded);
+  useTrackedValue('ui.state', 'changed', 'twin.autoRotate', autoRotate);
+  useTrackedValue('ui.state', 'changed', 'twin.siliconDetail', siliconDetail);
+  useTrackedValue('ui.state', 'changed', 'twin.labels', labelMode);
+  useTrackedValue('ui.state', 'changed', 'twin.fullscreen', fullscreen);
+  useEffect(() => {
+    const before = previousSelection.current;
+    previousSelection.current = selected?.id ?? null;
+    if (selected && selected.id !== before) {
+      track('ui.twin', 'part_selected', { part: selected.name, kind: selected.kind, host: selected.host, stack: selected.stack ?? null, tier: selected.tier ?? null, evidence: selected.evidence }, { target: { type: 'twin_part', id: selected.id } });
+    } else if (!selected && before) {
+      track('ui.twin', 'part_cleared', { previous: before }, { target: { type: 'twin_part', id: before } });
+    }
+  }, [selected]);
 
   useEffect(() => { overlayRef.current = overlays; }, [overlays]);
   useEffect(() => { stepRef.current = step; }, [step]);
@@ -262,6 +280,22 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
     controls.target.set(0, 1.6, 0);
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.autoRotateSpeed = 0.7;
+    // One audit event per camera gesture burst (drag, wheel, pinch), not per frame.
+    let cameraGestures = 0;
+    let cameraTimer: number | undefined;
+    const onCameraEnd = () => {
+      cameraGestures += 1;
+      window.clearTimeout(cameraTimer);
+      cameraTimer = window.setTimeout(() => {
+        getUiAudit()?.interaction('camera', {
+          gestures: cameraGestures,
+          distance: Number(camera.position.distanceTo(controls.target).toFixed(2)),
+          target: controls.target.toArray().map((value) => Number(value.toFixed(2))),
+        }, { type: 'control', id: '3D camera' });
+        cameraGestures = 0;
+      }, 800);
+    };
+    controls.addEventListener('end', onCameraEnd);
 
     scene.add(new THREE.HemisphereLight('#dbe9f8', '#16243a', 1.15));
     const key = new THREE.DirectionalLight('#ffffff', 2.0);
@@ -336,6 +370,8 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
     const addLabel = (parent: THREE.Object3D, part: Part, level: LabelLevel, position: [number, number, number], options?: { text?: string; tier?: number }) => {
       const element = document.createElement('div');
       element.className = `twin-label level-${level} ${part.evidence}`;
+      element.dataset.audit = 'twin-label';
+      element.dataset.auditLabel = options?.text ?? part.name;
       const dot = document.createElement('i');
       const text = document.createElement('span');
       text.textContent = options?.text ?? part.name;
@@ -762,6 +798,8 @@ export default function Chip3DExplorer({ overlays, setOverlays, step, metrics, p
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       renderer.domElement.removeEventListener('pointerup', pick);
+      controls.removeEventListener('end', onCameraEnd);
+      window.clearTimeout(cameraTimer);
       controls.dispose();
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh) {
