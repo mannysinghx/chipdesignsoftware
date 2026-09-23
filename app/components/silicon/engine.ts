@@ -455,11 +455,14 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     }, 800);
   };
 
-  // The surface the cursor points at: the focus layer in plan view, or the
-  // cut face in the cross-section.
+  // The surface the cursor points at: the cut face in the cross-section, or
+  // in plan view the layer for the CURRENT zoom depth (stop.targetY, not
+  // orbit.y - orbit.y can sit away from it, e.g. mid-ease or after a free
+  // height was set, and anchoring to its own possibly-wrong height here
+  // would only reinforce that height instead of correcting it).
   const planeHit = (ndc: THREE.Vector2) => {
     raycaster.setFromCamera(ndc, camera);
-    const plane = sectionOn ? new THREE.Plane(new THREE.Vector3(section.axis === 0 ? 1 : 0, 0, section.axis === 2 ? 1 : 0), -section.value) : new THREE.Plane(new THREE.Vector3(0, 1, 0), -orbit.y);
+    const plane = sectionOn ? new THREE.Plane(new THREE.Vector3(section.axis === 0 ? 1 : 0, 0, section.axis === 2 ? 1 : 0), -section.value) : new THREE.Plane(new THREE.Vector3(0, 1, 0), -stop.targetY);
     return raycaster.ray.intersectPlane(plane, new THREE.Vector3());
   };
 
@@ -990,13 +993,22 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     const distance = camera.position.distanceTo(orbit);
     stop = focusStopFor(distance, stop.id);
     // The orbit target descends through the stack as you zoom, so orbiting
-    // pivots on the layer in view.
-    const focusY = sectionOn ? sectionFocusY : freeY ? null : stop.targetY;
+    // pivots on the layer in view. A free height (set by a drag or a dive)
+    // is kept - unless it has drifted above the delayering crater's cleared
+    // void, where nothing is visible no matter how far you zoom in; that
+    // always forces a return to the layer in view, so zooming deeper never
+    // gets stranded looking at empty space.
+    const stranded = shared.uCraterOn.value > 0.5 && orbit.y > craterFloor;
+    const focusY = sectionOn ? sectionFocusY : freeY && !stranded ? null : stop.targetY;
     if (focusY !== null) {
       const dy = (focusY - orbit.y) * (1 - Math.exp(-dt * 6));
       // After a zoom at the cursor, slide along the line of sight to the zoom
       // anchor, so what is under the cursor stays put; otherwise straight
-      // down, which seen from above is along the line of sight anyway.
+      // down, which seen from above is along the line of sight anyway. A
+      // shallow ray (near side-on) keeps the plain vertical move rather
+      // than dividing by a near-zero y-component, which would demand a
+      // large sideways slide that only chases each tick's fresh anchor
+      // (a different point each time) instead of settling.
       lineOfSight.copy(zoomAnchor ?? orbit).sub(camera.position).normalize();
       if (zoomAnchor && Math.abs(lineOfSight.y) > 0.35) {
         lineOfSight.multiplyScalar(dy / lineOfSight.y);
