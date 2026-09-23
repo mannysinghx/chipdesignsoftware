@@ -32,7 +32,9 @@ const API_FOR_BROWSER = `http://localhost:${API_PORT}`; // same site as the app,
 const API_FOR_NODE = `http://127.0.0.1:${API_PORT}`;
 const OUT = path.resolve(ROOT, args.out ?? 'outputs/ui-audit-smoke');
 const BIN = process.env.AIMEM_PLATFORM_BIN ?? path.join(PLATFORM, '.venv', 'bin');
-const SKIP_LABELS = new Set(['Sign out']);
+// 'Run' queues real tool runs (formal and physical take ~10 min each); the self-test Run button is
+// exercised in a dedicated flow below instead.
+const SKIP_LABELS = new Set(['Sign out', 'Run', 'Running…']);
 // Long repeated families (3D labels, timeline rows) are sampled, not exhaustively clicked.
 const MAX_PER_FAMILY = 3;
 
@@ -317,6 +319,18 @@ try {
   await expectEvent('twin part selected', { feature: 'ui.twin', action: 'part_selected' }, () => page.locator('[data-audit="twin-label"]').first().dispatchEvent('click'));
   await expectEvent('twin part cleared', { feature: 'ui.twin', action: 'part_cleared' }, () => page.getByRole('button', { name: 'Clear selected component' }).click());
   await expectEvent('keyboard shortcut', { feature: 'ui.interaction', action: 'key' }, () => page.keyboard.press('Escape'));
+
+  // Runs: queue a sandbox self-test from the UI, execute it with a one-shot worker against the
+  // test database, then rebuild it from the audit log in the UI.
+  await openTab('Runs');
+  await expectEvent('run queued from the UI', { feature: 'ui.interaction', action: 'click' }, () =>
+    page.locator('.runs-card', { hasText: 'Sandbox self-test' }).getByRole('button', { name: 'Run', exact: true }).click(),
+  );
+  const worker = spawnSync(path.join(BIN, 'aimem-platform'), ['worker', '--once', '--runner', 'local'], { cwd: PLATFORM, env: apiEnv, encoding: 'utf8' });
+  if (worker.status !== 0) fail('worker', { stderr: worker.stderr.slice(-1000) });
+  await page.waitForSelector('.runs-detail', { timeout: 15_000 }).catch(() => fail('missing-flow-event', { flow: 'run detail did not open' }));
+  await page.getByRole('button', { name: 'Rebuild from audit log' }).click();
+  await page.waitForSelector('.runs-reconstruction.good', { timeout: 15_000 }).catch(() => fail('reconstruction', { detail: 'the UI did not report a consistent reconstruction' }));
 
   await openTab('Experiment');
   await expectEvent('sweep completed', { feature: 'ui.sweep', action: 'completed' }, () => page.getByRole('button', { name: /Run architecture sweep|Sweep complete|Running sweep/ }).first().click(), 8000);

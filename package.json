@@ -21,7 +21,8 @@
     "platform:dev": "platform/.venv/bin/uvicorn aimem_platform.app:create_app --factory --app-dir platform --host 127.0.0.1 --port 8100",
     "platform:migrate": "cd platform && .venv/bin/alembic upgrade head",
     "platform:test": "cd platform && .venv/bin/pytest -q",
-    "smoke:ui-audit": "node scripts/ui-audit-smoke.mjs"
+    "smoke:ui-audit": "node scripts/ui-audit-smoke.mjs",
+    "platform:worker": "platform/.venv/bin/aimem-platform worker"
   },
   "dependencies": {
     "next": "16.3.4",

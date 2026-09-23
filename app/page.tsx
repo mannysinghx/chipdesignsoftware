@@ -19,11 +19,13 @@ import { PACKAGE_GEOMETRY, STACK_PLACEMENTS, evaluateConnectorChain } from '@/li
 import { getUiAudit, track, trackExport } from '@/lib/ui-audit';
 import { useTrackedParams, useTrackedValue, useUiAuditInstallation } from '@/lib/ui-audit-react';
 import ActivityWorkspace from '@/app/components/ActivityWorkspace';
+import LiveEvidenceStrip from '@/app/components/LiveEvidenceStrip';
+import RunsWorkspace from '@/app/components/RunsWorkspace';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'twin' | 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide' | 'activity';
+type View = 'twin' | 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide' | 'runs' | 'activity';
 type UserLevel = 'beginner' | 'practitioner' | 'expert';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
@@ -42,6 +44,7 @@ const views: Array<{ id: View; label: string }> = [
   { id: 'x1', label: 'Production X1' },
   { id: 'agents', label: 'Agent operations' },
   { id: 'guide', label: 'User guide' },
+  { id: 'runs', label: 'Runs' },
   { id: 'activity', label: 'Activity' },
 ];
 
@@ -265,7 +268,7 @@ export default function Home() {
   const exportSnapshot = () => {
     const snapshot = {
       schema_version: '1.0',
-      product: view === 'activity' ? 'AIMEM Design Studio Activity Log' : view === 'twin' ? 'AIMEM Design Studio 3D Design Twin' : view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
+      product: view === 'runs' ? 'AIMEM Design Studio Tool Runs' : view === 'activity' ? 'AIMEM Design Studio Activity Log' : view === 'twin' ? 'AIMEM Design Studio 3D Design Twin' : view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
       fidelity: 'multi-domain-open-source-proxy',
       generated_at: new Date().toISOString(),
       config,
@@ -284,7 +287,7 @@ export default function Home() {
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = view === 'activity' ? 'aimem-activity-log.json' : view === 'twin' ? 'aimem-x1-3d-design-twin.json' : view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
+    anchor.download = view === 'runs' ? 'aimem-tool-runs.json' : view === 'activity' ? 'aimem-activity-log.json' : view === 'twin' ? 'aimem-x1-3d-design-twin.json' : view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
     anchor.click();
     URL.revokeObjectURL(url);
     trackExport(anchor.download, text, { view });
@@ -303,7 +306,7 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>{view === 'activity' ? 'Activity Log' : view === 'twin' ? '3D Design Twin' : view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
+            <h1>{view === 'runs' ? 'Tool Runs' : view === 'activity' ? 'Activity Log' : view === 'twin' ? '3D Design Twin' : view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
@@ -314,12 +317,12 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> {view === 'activity' ? 'Audit log · append-only · hash-chained' : view === 'twin' ? `X1 package · ${twinStep.short}/12` : view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
+          <span className="baseline-status"><i /> {view === 'runs' ? 'Sandboxed · pinned · reproducible' : view === 'activity' ? 'Audit log · append-only · hash-chained' : view === 'twin' ? `X1 package · ${twinStep.short}/12` : view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
 
-      {view === 'activity' ? <ActivityWorkspace /> : (
+      {view === 'activity' ? <ActivityWorkspace /> : view === 'runs' ? <RunsWorkspace /> : (
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
@@ -442,6 +445,7 @@ export default function Home() {
             </div>
           )}
 
+          {(view === 'digital' || view === 'physical') && <LiveEvidenceStrip adapters={view === 'digital' ? ['rtl.lint', 'rtl.sim', 'formal.sby'] : ['physical.orfs']} onOpenRuns={() => setView('runs')} />}
           {view === 'twin' && <TwinView overlays={twinOverlays} setOverlays={setTwinOverlays} stepIndex={twinStepIndex} setStepIndex={setTwinStepIndex} physics={circuitPhysics} topology={circuitTopology} connectors={connectorChain} metrics={{ stackCount: x1Config.stackCount, dramTiers: x1Config.dramTiers, capacityGibPerStack: x1Config.capacityGibPerStack, payloadLanesPerStack: x1Config.payloadLanesPerStack, sramMibPerStack: x1Config.sramMibPerStack, rawBandwidthPerStackTbps: x1Evaluation.rawBandwidthPerStackTbps, aggregateRawBandwidthTbps: x1Evaluation.aggregateRawBandwidthTbps, deliveredBandwidthTbps: x1Evaluation.deliveredBandwidthTbps, stackPowerWatts: x1Evaluation.stackPowerWatts, memorySystemPowerWatts: x1Evaluation.memorySystemPowerWatts, routingPressurePercent: x1Evaluation.routingPressurePercent, acceleratorFabricTbps: x1Config.acceleratorFabricTbps, interposerRoutingLayers: x1Config.interposerRoutingLayers, distributedComputePorts: x1Config.distributedComputePorts }} />}
           {view === 'readiness' && <ReadinessView campaign={campaign} />}
           {view === 'architecture' && <ArchitectureView config={config} evaluation={evaluation} selectedTier={selectedTier} setSelectedTier={setSelectedTier} selectedNode={selectedNode} />}
