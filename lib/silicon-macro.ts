@@ -1081,7 +1081,7 @@ const peCenter = (tile: Tile, i: number, j: number) => rectCenter(peRect(tile, i
 /** Systolic wavefront phase of PE (i, j): anti-diagonals pulse together. */
 const wave = (tile: Tile, i: number, j: number) => ((((i + j) * 0.055 + tile.index * 0.137) % 1) + 1) % 1;
 
-type Bus = { part: PartId; axis: 'x' | 'z'; across: number[]; from: number; to: number; dir: 1 | -1; phase: number; drops: Array<{ at: number; up: boolean }> };
+type Bus = { part: PartId; axis: 'x' | 'z'; across: number[]; from: number; to: number; dir: 1 | -1; phase: number; drops: Array<{ at: number; up: boolean }>; active?: boolean };
 
 /** The buses of one tile, as bundles of lines along x or z with drops at given positions. */
 function tileBuses(tile: Tile): Bus[] {
@@ -1173,6 +1173,77 @@ function busDropsByRow(tile: Tile) {
   return rows;
 }
 
+// Channel buses: long wires between the tiles. Each is a net that drops to
+// the cells at both ends of its channel, and the wires sit on grids that
+// keep those drops clear of every strap: vertical-channel wires at
+// x = 7k + 3 µm (between the Mx2 tracks, 3-4 µm from any Mx4 strap),
+// horizontal-channel wires at z = 6k µm (between the Mx1 and Mx3 tracks),
+// and no wire within reach of a My1 or My2 strap.
+const nearMyStrap = (value: number) => {
+  const offset = (((value - MY.offset) % MY.pitch) + MY.pitch) % MY.pitch;
+  return Math.min(offset, MY.pitch - offset) < um(3.5);
+};
+const nearMx4Strap = (x: number) => {
+  const offset = (((x - MX4.offset) % MX4.pitch) + MX4.pitch) % MX4.pitch;
+  return Math.min(offset, MX4.pitch - offset) < um(1.2);
+};
+/** A drop position along a wire near `value`, stepping inward (`dir`) until clear of the straps across its path. */
+function clearAlong(value: number, dir: 1 | -1, horizontalWire: boolean) {
+  if (horizontalWire) {
+    let x = Math.round(value / um(1)) * um(1);
+    while (nearMx4Strap(x) || nearMyStrap(x)) x += dir * um(1);
+    return x;
+  }
+  let z = busZ(value);
+  while (nearMyStrap(z)) z += dir * um(3);
+  return z;
+}
+
+const CHANNEL_WIRES = new Map<number, Array<{ bus: Bus; seed: number }>>();
+function channelWires(index: number) {
+  let wires = CHANNEL_WIRES.get(index);
+  if (wires) return wires;
+  wires = [];
+  const channel = CHANNEL_RECTS[index];
+  const c = channel.rect;
+  const margin = um(20);
+  const lo = channel.horizontal ? c.z0 + margin : c.x0 + margin;
+  const hi = channel.horizontal ? c.z1 - margin : c.x1 - margin;
+  const spacing = channel.horizontal ? um(6) : um(7);
+  const offset = channel.horizontal ? 0 : um(3);
+  for (let k = Math.ceil((lo - offset) / spacing); offset + k * spacing < hi; k += 1) {
+    const across = offset + k * spacing;
+    if (nearMyStrap(across)) continue;
+    const seed = hash(channel.horizontal ? 601 : 602, k, Math.round((channel.horizontal ? c.z0 : c.x0) * 1e4));
+    const dir: 1 | -1 = k % 2 ? 1 : -1;
+    const from = channel.horizontal ? c.x0 : c.z0;
+    const to = channel.horizontal ? c.x1 : c.z1;
+    const start = clearAlong(from + um(8), 1, channel.horizontal);
+    const end = clearAlong(to - um(8), -1, channel.horizontal);
+    wires.push({
+      seed,
+      bus: {
+        part: 'channel-bus', axis: channel.horizontal ? 'x' : 'z', across: [across], from, to, dir, phase: rand(seed, 1), active: rand(seed) < 0.1,
+        drops: [{ at: start, up: dir > 0 }, { at: end, up: dir < 0 }],
+      },
+    });
+  }
+  CHANNEL_WIRES.set(index, wires);
+  return wires;
+}
+
+/** Channel-bus drops landing inside `rect`. */
+function channelEndsIn(rect: Rect): RouteEnd[] {
+  const ends: RouteEnd[] = [];
+  CHANNEL_RECTS.forEach((channel, index) => {
+    if (!rectsOverlap(rect, channel.rect)) return;
+    for (const { bus } of channelWires(index)) {
+      for (const end of busDrops(bus)) if (insideRect(rect, end.x, end.z)) ends.push({ ...end, active: bus.active !== false });
+    }
+  });
+  return ends;
+}
+
 /** Bus drops of every tile landing inside `rect`. */
 function busEndsIn(rect: Rect): RouteEnd[] {
   const ends: RouteEnd[] = [];
@@ -1212,15 +1283,16 @@ function systolicClear(x: number, z: number, margin: number) {
 /** TSV risers stay clear of the NoC lanes and channel buses that cross the SRAM strip. */
 const tsvRiserClear = (z: number) => NOC.horizontal.every((lane) => Math.abs(z - lane) > um(90)) && CHANNEL_RECTS.every((c) => !c.horizontal || z < c.rect.z0 - um(20) || z > c.rect.z1 + um(20));
 
-function emitBus(builder: ChunkBuilder, bus: Bus) {
+function emitBus(builder: ChunkBuilder, bus: Bus, style: { half?: number; part?: PartId; drop?: PartId; y?: Band; seed?: number } = {}) {
   const stretch = LEVELS[1].viaStretch;
   const onSysH = bus.axis === 'x';
-  const y = onSysH ? STACK.sysH : STACK.sysV;
-  const glow = bus.dir;
+  const y = style.y ?? (onSysH ? STACK.sysH : STACK.sysV);
+  const half = style.half ?? SYS.half;
+  const glow = bus.active === false ? 0 : bus.dir;
   bus.across.forEach((across, line) => {
     const phase = bus.phase + line * 0.004;
-    if (onSysH) builder.seg('copper', Math.min(bus.from, bus.to), Math.max(bus.from, bus.to), y[0], y[1], across - SYS.half, across + SYS.half, { part: bus.part, glow, phase, axis: 'x' });
-    else builder.seg('copper', across - SYS.half, across + SYS.half, y[0], y[1], Math.min(bus.from, bus.to), Math.max(bus.from, bus.to), { part: bus.part, glow, phase, axis: 'z' });
+    if (onSysH) builder.seg('copper', Math.min(bus.from, bus.to), Math.max(bus.from, bus.to), y[0], y[1], across - half, across + half, { part: style.part ?? bus.part, glow, phase, axis: 'x', seed: style.seed });
+    else builder.seg('copper', across - half, across + half, y[0], y[1], Math.min(bus.from, bus.to), Math.max(bus.from, bus.to), { part: style.part ?? bus.part, glow, phase, axis: 'z', seed: style.seed });
     for (const drop of bus.drops) {
       // The line's own pulse coordinate at the drop, so the pulse runs on into it.
       const at = glow * drop.at * 1000;
@@ -1231,12 +1303,14 @@ function emitBus(builder: ChunkBuilder, bus: Bus) {
       const wide = (y[0] - STACK.mx1[0]) * 1000 * stretch;
       const thin = (STACK.v3[1] - STACK.v3[0]) * 1000 * LEVELS[1].viaStretch;
       const xs = m3Near(2, x);
+      const dropPart = style.drop ?? 'pe-pins';
+      const pulse = glow === 0 ? 0 : 1;
       if (drop.up) {
-        builder.via('tungsten', xs, z, DROP_HALF, DROP_HALF, STACK.v3[0], STACK.v3[1], { part: 'v3', glow: 1, phase, entry: 'min', arc: at - wide - thin });
-        builder.via('tungsten', x, z, um(0.2), um(0.2), STACK.mx1[0], y[0], { part: 'pe-pins', glow: 1, phase, entry: 'min', arc: at - wide });
+        builder.via('tungsten', xs, z, DROP_HALF, DROP_HALF, STACK.v3[0], STACK.v3[1], { part: 'v3', glow: pulse, phase, entry: 'min', arc: at - wide - thin });
+        builder.via('tungsten', x, z, um(0.2), um(0.2), STACK.mx1[0], y[0], { part: dropPart, glow: pulse, phase, entry: 'min', arc: at - wide });
       } else {
-        builder.via('tungsten', x, z, um(0.2), um(0.2), STACK.mx1[0], y[0], { part: 'pe-pins', glow: 1, phase, entry: 'max', arc: at });
-        builder.via('tungsten', xs, z, DROP_HALF, DROP_HALF, STACK.v3[0], STACK.v3[1], { part: 'v3', glow: 1, phase, entry: 'max', arc: at + wide });
+        builder.via('tungsten', x, z, um(0.2), um(0.2), STACK.mx1[0], y[0], { part: dropPart, glow: pulse, phase, entry: 'max', arc: at });
+        builder.via('tungsten', xs, z, DROP_HALF, DROP_HALF, STACK.v3[0], STACK.v3[1], { part: 'v3', glow: pulse, phase, entry: 'max', arc: at + wide });
       }
     }
   });
@@ -1406,25 +1480,11 @@ function level1(builder: ChunkBuilder) {
     }
   }
 
-  // Routing channels between tiles: long parallel buses.
-  for (const channel of CHANNEL_RECTS) {
-    if (!rectsOverlap(channel.rect, b)) continue;
-    const c = channel.rect;
-    const pitch = um(7);
-    if (channel.horizontal) {
-      for (let k = Math.ceil((Math.max(b.z0, c.z0 + um(20)) - c.z0) / pitch); c.z0 + k * pitch < Math.min(b.z1, c.z1 - um(20)); k += 1) {
-        const z = c.z0 + k * pitch;
-        const seed = hash(601, k, Math.round(c.z0 * 1e4));
-        builder.box('copper', c.x0, c.x1, STACK.chanH[0], STACK.chanH[1], z - um(0.7), z + um(0.7), rand(seed) < 0.1 ? (k % 2 ? 1 : -1) : 0, rand(seed, 1), seed);
-      }
-    } else {
-      for (let k = Math.ceil((Math.max(b.x0, c.x0 + um(20)) - c.x0) / pitch); c.x0 + k * pitch < Math.min(b.x1, c.x1 - um(20)); k += 1) {
-        const x = c.x0 + k * pitch;
-        const seed = hash(602, k, Math.round(c.x0 * 1e4));
-        builder.box('copper', x - um(0.7), x + um(0.7), STACK.chanV[0], STACK.chanV[1], c.z0, c.z1, rand(seed) < 0.1 ? (k % 2 ? 1 : -1) : 0, rand(seed, 1), seed);
-      }
-    }
-  }
+  // Routing channels between tiles: long parallel buses, each dropping to the cells at both ends.
+  CHANNEL_RECTS.forEach((channel, index) => {
+    if (!rectsOverlap(channel.rect, b)) return;
+    for (const wire of channelWires(index)) emitBus(builder, wire.bus, { half: um(0.7), part: 'channel-bus', drop: 'channel-drop', y: wire.bus.axis === 'x' ? STACK.chanH : STACK.chanV, seed: wire.seed });
+  });
 
   // I/O cells: ESD finger pairs and a guard ring per cell.
   const hx = DIE.width / 2;
@@ -1558,7 +1618,7 @@ function routeEndsIn(rect: Rect, leaves: LeafCache): RouteEnd[] {
     [2, { x0: rect.x0 - pad, x1: rect.x1 + pad, z0: rect.z0, z1: rect.z1 }],
   ];
   for (const [layer, bounds] of queries) for (const run of routeRuns(layer, bounds, leaves)) for (const end of routeEnds(run)) if (end.drop && insideRect(rect, end.x, end.z)) ends.push(end);
-  ends.push(...busEndsIn(rect));
+  ends.push(...busEndsIn(rect), ...channelEndsIn(rect));
   return ends.sort((a, b) => a.x - b.x || a.z - b.z);
 }
 

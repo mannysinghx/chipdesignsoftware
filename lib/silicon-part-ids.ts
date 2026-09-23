@@ -20,7 +20,7 @@ export const PART_ORDER = [
   // Semi-global metal
   'vx4', 'systolic-bus', 'pe-pins', 'weight-bus', 'activation-bus', 'result-bus', 'semi-global-strap', 'strap-via', 'strap-stack', 'router-xbar', 'noc-drop',
   'phy-lane', 'lane-drop', 'bump-stack', 'io-pad', 'io-guard', 'esd-finger', 'sram-ring', 'sram-strap', 'tsv-strap-pad', 'tsv-riser',
-  'inductor-guard', 'inductor-underpass', 'channel-bus', 'clock-spine',
+  'inductor-guard', 'inductor-underpass', 'channel-bus', 'channel-drop', 'clock-spine',
   // Global metal
   'noc-lane', 'noc-junction', 'tile-ring', 'ring-stack', 'sram-spine', 'spine-drop', 'global-strap', 'top-via', 'mesh-stack', 'inductor', 'pad-lead', 'pad-frame', 'bond-pad', 'pad-stack',
   'power-bump', 'clock-trunk',

@@ -71,7 +71,23 @@ function touching(a: Aabb, b: Aabb, plan: number) {
   return a.y0 <= b.y1 + gap && b.y0 <= a.y1 + gap;
 }
 
-export type TraceResult = { pieces: TracePiece[]; truncated: boolean };
+/** `open`: the net runs off the loaded chunks, so more of it exists than was traced. */
+export type TraceResult = { pieces: TracePiece[]; truncated: boolean; open: boolean };
+
+/** Whether a piece is cut by its chunk's edge where the neighbouring chunk is not loaded. */
+function leavesLoaded(piece: TracePiece, loaded: Set<string>) {
+  const data = piece.record.data;
+  // Only boxes are clipped at chunk edges (a cylinder stays whole in the chunk holding its axis).
+  if (piece.record.level === 0 || data.batches[piece.batch].shape !== 'box') return false;
+  const box = pieceBox(data, piece.batch, piece.index);
+  const e = (data.bounds.x1 - data.bounds.x0) * 1e-6;
+  const { level, ix, iz } = data;
+  const edges: Array<[boolean, number, number]> = [
+    [box.x0 <= data.bounds.x0 + e, ix - 1, iz], [box.x1 >= data.bounds.x1 - e, ix + 1, iz],
+    [box.z0 <= data.bounds.z0 + e, ix, iz - 1], [box.z1 >= data.bounds.z1 - e, ix, iz + 1],
+  ];
+  return edges.some(([cut, jx, jz]) => cut && !loaded.has(`${level}:${jx}:${jz}`));
+}
 
 /**
  * Every conductor connected to `seed` across the given chunks (all detail
@@ -79,8 +95,9 @@ export type TraceResult = { pieces: TracePiece[]; truncated: boolean };
  */
 export function traceNet(seed: TracePiece, records: Iterable<TraceRecord>, limit = 2500): TraceResult {
   const all = [...records];
+  const loaded = new Set(all.map((record) => record.id));
   const key = (piece: TracePiece) => `${piece.record.id}/${piece.batch}/${piece.index}`;
-  if (!CONDUCTORS.has(seed.record.data.batches[seed.batch]?.material)) return { pieces: [], truncated: false };
+  if (!CONDUCTORS.has(seed.record.data.batches[seed.batch]?.material)) return { pieces: [], truncated: false, open: false };
   const seen = new Set<string>([key(seed)]);
   const pieces: TracePiece[] = [seed];
   const queue: TracePiece[] = [seed];
@@ -108,13 +125,13 @@ export function traceNet(seed: TracePiece, records: Iterable<TraceRecord>, limit
           if (!touching(box, pieceBox(data, batch, index), plan)) continue;
           seen.add(id);
           pieces.push(candidate);
-          if (pieces.length >= limit) return { pieces, truncated: true };
+          if (pieces.length >= limit) return { pieces, truncated: true, open: true };
           queue.push(candidate);
         }
       }
     }
   }
-  return { pieces, truncated: false };
+  return { pieces, truncated: false, open: pieces.some((piece) => leavesLoaded(piece, loaded)) };
 }
 
 /** Packed phase (part, flow, pulse phase) of a traced piece. */

@@ -276,7 +276,7 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
     }
     const result = traceNet(target.piece, source.records());
     showNet(result.pieces.map((piece) => pieceBox(piece.record.data, piece.batch, piece.index)));
-    const summary = summarizeNet(result.pieces, result.truncated);
+    const summary = summarizeNet(result.pieces, result.truncated, result.open);
     // The outline takes the colour of what the net carries, as its pulses do.
     netMaterial.color.set(NET_COLORS[summary.flow]);
     return summary;

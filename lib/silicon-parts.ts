@@ -109,7 +109,8 @@ export const PARTS = {
   'tsv-riser': { title: 'TSV riser', role: 'Via stack from a TSV strap pad up to the SRAM spine, carrying stacked-die data into the L2 banks', material: 'Tungsten', layer: SEMI },
   'inductor-guard': { title: 'Inductor guard ring', role: 'Keeps substrate noise away from the PLL inductor', material: 'Copper', layer: SEMI },
   'inductor-underpass': { title: 'Inductor underpass', role: 'Brings the spiral inductor terminal out from its centre', material: 'Copper', layer: SEMI },
-  'channel-bus': { title: 'Channel bus', role: 'Long parallel global wires in the channel between compute tiles', material: 'Copper', layer: SEMI },
+  'channel-bus': { title: 'Channel bus', role: 'Long global wire in a channel between compute tiles, joining the logic at the two ends of the channel', material: 'Copper', layer: SEMI },
+  'channel-drop': { title: 'Channel bus drop', role: 'Via stack from a channel bus down to the cells at an end of its channel', material: 'Tungsten', layer: `${SEMI}–${INTERMEDIATE}` },
   'clock-spine': { title: 'Clock spine', role: 'Tile clock spine fed by the global clock tree, driving the local clock buffers', material: 'Copper', layer: SEMI },
   'noc-lane': { title: 'NoC lane', role: 'Network-on-chip link between tiles, SRAM, and PHYs; pulses are packets', material: 'Copper', layer: SEMI },
   'noc-junction': { title: 'NoC junction', role: 'Vias joining horizontal and vertical NoC links where the network branches', material: 'Tungsten', layer: SEMI },
@@ -292,6 +293,8 @@ export type NetSummary = {
   /** Distinct pieces (a wire split across two chunks counts once). */
   pieces: number;
   truncated: boolean;
+  /** The net runs on beyond the loaded area (zoom out or follow it to see the rest). */
+  open: boolean;
   flow: 'data' | 'vdd' | 'vss' | 'clock';
   /** Layers the net passes through, bottom to top, with the parts on each. */
   layers: Array<{ layer: string; parts: string[]; count: number }>;
@@ -302,7 +305,7 @@ export type NetSummary = {
 };
 
 /** What a traced net is, from its pieces: the layers it climbs through and the pins it joins. */
-export function summarizeNet(pieces: TracePiece[], truncated: boolean): NetSummary {
+export function summarizeNet(pieces: TracePiece[], truncated: boolean, open = truncated): NetSummary {
   const layers = new Map<string, { y: number; parts: Set<string>; count: number }>();
   const pins = new Map<string, { text: string; out: boolean }>();
   // Chunks clip wires at their edges; the halves share a part, a height, and
@@ -340,6 +343,7 @@ export function summarizeNet(pieces: TracePiece[], truncated: boolean): NetSumma
   return {
     pieces: logical.size,
     truncated,
+    open,
     flow,
     layers: [...layers.entries()].sort((a, b) => a[1].y - b[1].y).map(([layer, entry]) => ({ layer, parts: [...entry.parts], count: entry.count })),
     pins: [...pins.values()].sort((a, b) => Number(b.out) - Number(a.out)).map((item) => item.text),
@@ -407,7 +411,7 @@ const PART_LOOK: Partial<Record<PartId, { material: MaterialKey; glow?: boolean 
   'semi-global-strap': { material: 'copper' }, 'strap-via': { material: 'tungsten' }, 'strap-stack': { material: 'tungsten' }, 'mesh-stack': { material: 'tungsten' },
   'router-xbar': { material: 'copper', glow: true }, 'noc-drop': { material: 'tungsten', glow: true }, 'phy-lane': { material: 'copper', glow: true }, 'bump-stack': { material: 'copper' },
   'sram-ring': { material: 'copper' }, 'tsv-strap-pad': { material: 'copper' },
-  'channel-bus': { material: 'copper', glow: true }, 'noc-lane': { material: 'copper', glow: true }, 'noc-junction': { material: 'tungsten' }, 'tile-ring': { material: 'gold' },
+  'channel-bus': { material: 'copper', glow: true }, 'channel-drop': { material: 'tungsten' }, 'noc-lane': { material: 'copper', glow: true }, 'noc-junction': { material: 'tungsten' }, 'tile-ring': { material: 'gold' },
   'global-strap': { material: 'gold' }, 'top-via': { material: 'tungsten' }, 'power-bump': { material: 'solder' },
   inductor: { material: 'gold' }, 'bond-pad': { material: 'gold' }, ubm: { material: 'gold' }, pillar: { material: 'copper' }, 'solder-cap': { material: 'solder' },
   'seal-ring': { material: 'copper' }, 'die-surface': { material: 'silicon' }, die: { material: 'silicon' }, hbm: { material: 'silicon' },

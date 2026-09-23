@@ -524,9 +524,14 @@ export const EXPLAIN: Record<PartId, Explanation> = {
     made: UPPER_WIRE,
   },
   'channel-bus': {
-    does: 'Long parallel wires in the channels between tiles that carry wide global signals across the array.',
-    connects: 'Along the channel between tiles.',
+    does: 'A long global wire in a channel between tiles: wide signals cross the array on these, faster than hopping tile to tile.',
+    connects: 'Down: at each end of its channel, a via stack between the lower layers\' tracks to a cell pin; one end drives it and the other receives.',
     made: UPPER_WIRE,
+  },
+  'channel-drop': {
+    does: 'Where a channel bus enters or leaves the logic at the end of its channel.',
+    connects: 'Up: the channel bus. Down: through the gaps of the lower layers to a V3 stack, an M3 pad, and a cell pin.',
+    made: VIA_STACK,
   },
   'clock-spine': {
     does: 'A tile\'s clock spine: it takes the global clock from the H-tree and spreads it to the local clock buffers.',

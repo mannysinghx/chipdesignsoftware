@@ -256,6 +256,7 @@ export default function SiliconMacroView() {
                     <span>{selection.net.truncated ? `${selection.net.pieces.toLocaleString()}+ pieces in view` : `${selection.net.pieces.toLocaleString()} connected piece${selection.net.pieces === 1 ? '' : 's'}`}</span>
                     <button className={netShown ? 'active' : ''} aria-pressed={netShown} onClick={() => setNetShown((value) => !value)} title="Outline every piece of this net, through the other layers">{netShown ? 'Hide net' : 'Show net'}</button>
                   </div>
+                  {selection.net.open && !selection.net.truncated && <p className="silicon-net-open">The net runs on beyond the area loaded at this zoom: zoom out or move along it to follow the rest.</p>}
                   {selection.net.pins.length > 0 && <p className="silicon-net-pins">{selection.net.pins.slice(0, 6).join(' → ')}{selection.net.pins.length > 6 ? ` +${selection.net.pins.length - 6} more` : ''}{selection.net.gates > 0 ? ` · switches ${selection.net.gates} gate${selection.net.gates === 1 ? '' : 's'}` : ''}</p>}
                   <ol className="silicon-net-layers" aria-label="Layers the net passes through, top to bottom">
                     {[...selection.net.layers].reverse().map((layer) => <li key={layer.layer}><span>{layer.layer}</span><em>{layer.parts.slice(0, 3).join(', ')}{layer.count > 1 ? ` ×${layer.count}` : ''}</em></li>)}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CELL_WIDTH, FLOATS_PER_INSTANCE, LEVELS, PRESETS, cellLayout, generateChunk, generateGlobal, windowChunks, type CellType } from '../lib/silicon-macro.ts';
+import { CELL_WIDTH, CHANNEL_RECTS, FLOATS_PER_INSTANCE, LEVELS, PRESETS, cellLayout, generateChunk, generateGlobal, windowChunks, type CellType } from '../lib/silicon-macro.ts';
 import { EXPLAIN, explainRegion } from '../lib/silicon-explain.ts';
 import { FLOW, PART_ORDER, flowOfPhase, packPhase, partOfPhase } from '../lib/silicon-part-ids.ts';
 import { PARTS, identifyPrimitive, summarizeNet, type PartId } from '../lib/silicon-parts.ts';
@@ -133,6 +133,17 @@ test('intermediate routes and systolic buses are separate nets that drop to the 
   for (const { parts } of buses) {
     assert.ok(!parts.some((part) => SUPPLY.has(part)), 'a systolic line touches a supply');
     assert.deepEqual([...new Set(parts)].sort(), ['pe-pins', 'systolic-bus', 'v3'], 'a systolic line should be the line and its two drops');
+  }
+});
+
+test('channel buses between tiles drop to the cells at both ends of their channel', () => {
+  for (const channel of [CHANNEL_RECTS.find((item) => !item.horizontal)!, CHANNEL_RECTS.find((item) => item.horizontal)!]) {
+    const c = channel.rect;
+    const spot = channel.horizontal ? { x: c.x0 + 0.1, z: (c.z0 + c.z1) / 2 } : { x: (c.x0 + c.x1) / 2, z: c.z0 + 0.1 };
+    const all = records(spot, [[1, 4], [2, 6]], true);
+    const nets = netsFrom(seedsOf(all.find((record) => record.level === 1)!, ['channel-bus']), all);
+    assert.ok(nets.length > 20, `only ${nets.length} channel wires`);
+    for (const { parts } of nets) assert.deepEqual([...new Set(parts)].sort(), ['channel-bus', 'channel-drop', 'v3'], 'a channel wire should be the wire and its drops, touching nothing else');
   }
 });
 
