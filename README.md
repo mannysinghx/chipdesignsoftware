@@ -11,6 +11,7 @@ Every number in the app carries an evidence class: **executed** (reproduced loca
 | View | Purpose |
 | --- | --- |
 | 3D design twin | Orbit, explode, and select every component of the X1 package: BGA, substrate, stiffener, decoupling capacitors, C4 bumps, silicon interposer with TSVs and RDL route bundles, microbumps, accelerator floorplan, eight 16-high memory stacks with base-die floorplans, TSV columns, hybrid bonds, and individual DRAM tiers. Six data overlays and a 12-step build sequence. |
+| Silicon macro | Photoreal, real-time zoom into the accelerator die, from the whole package down to single transistors: gold power mesh, copper routing mazes, standard cells, FinFETs, TSVs, backside-power nano-TSVs, and deep-trench capacitors, with animated data pulses and a cross-section view. Illustrative: procedural geometry, not GDS. |
 | Readiness · Architecture · Workloads · Correlation · Experiment · Gates | T0 pathfinder: capacity, bandwidth, power, and reliability models, Ramulator2 correlation, analytical sweeps, and the evidence gate ledger. |
 | RTL + verification | Elaborated `aimem_t0_channel` and SECDED datapath, bounded formal properties, and synthesis evidence. |
 | Physical implementation | Sky130 HD technology mapping (2,447 cells), timing contract, and the OpenROAD implementation plan through DRC/LVS. |
@@ -33,6 +34,18 @@ The twin is built with three.js and binds live to the X1 planning model.
 - **Overlays.** The six data overlays are multi-select: enable any combination, or press `All overlays` to composite all six at once. Composited color is the mean of the active overlays, so read a single overlay when you need exact per-part mapping.
 - **Viewport.** The 3D scene renders on a dark gradient backdrop. The dies are pale silicon tones, so a light ground left the model washed out against it; on the dark ground the model separates by roughly 147 luminance points instead of 26.
 - **Scale.** Plan view is 1 scene unit ≈ 4.9 mm. Vertical scale is exaggerated about 20× so tiers, bonds, and bumps remain selectable. Geometry is reference-informed and conceptual, not GDS or a released bump, ball, TSV, or bond map.
+
+## Silicon macro view
+
+A macro-photography view of the accelerator die that zooms continuously across five orders of magnitude, from the 150 mm package view to a 1 µm field of fins and gates. The die outline, compute-tile array, shared SRAM strip, and eight memory PHYs follow the planned accelerator floorplan (`ACCELERATOR_FLOORPLAN`, `acceleratorPhyAnchor`). Everything inside them is procedurally generated from a deterministic hash (`lib/silicon-macro.ts`), so it is **illustrative**, never layout, GDS, or PDK data, and the view says so on screen and in its evidence export.
+
+- **Five detail levels, streamed.** Global metal (the whole die, built once), semi-global metal (systolic buses, TSVs, microbumps), intermediate routing, local interconnect M0–M3 over standard-cell rows, and front-end devices (fins, gates, raised source/drain epitaxy, contacts, buried power rails, nano-TSVs to a backside power network, deep-trench capacitors). Levels 1–4 are square chunks generated around the orbit target within a 5 ms-per-frame budget, cached, and evicted when out of range. Every primitive is placed from global coordinates, so chunks meet without seams and regenerate identically.
+- **Rendering.** Primitives are unit boxes and cylinders scaled per instance from one interleaved buffer (offset, size, tint, glow path). One draw call per material per chunk, chunk-relative coordinates for precision at nanometre scale, and per-chunk frustum culling. Lighting is image-based from a procedural HDR studio (light tent, softboxes, ring light) prefiltered with PMREM, plus a key light and a coaxial headlight for cross-sections. The pipeline is HDR with 4× MSAA, then bloom on the glowing pathways, ACES tone mapping, and a vignette/grain finish.
+- **Extreme zoom without clipping.** Smooth zoom-to-cursor, damped orbit and pan, and van Wijk–Nuij fly paths for the zoom ladder (Package → Die → Tile → Tensor PE → Cells → Transistors). Near and far planes scale with distance. As you zoom, the orbit target descends through the stack and a delayering crater removes every layer above the focus layer around the line of sight, with terraced walls that show each layer passed. Crater floors sit in true gaps of the layer stack (a test enforces this), so no layer is left as a sliver.
+- **Cross-section.** A vertical cut through the target, faced from the cleared side. Solid caps are generated for every cut primitive, and the plane snaps onto a column of vertical conductors (nano-TSVs or power rails at transistor scale, the TSV column at tile scale) so the deep structures show whole.
+- **Performance.** Measured on an Apple M4 Max in headless Chrome at 1600 × 1000: a steady 60 fps (p95 frame 16.8 ms) at every rung and in both cross-sections; with vsync off, 440–600 fps at 1× pixel ratio and 160–200 fps at 2× (Retina). Adaptive resolution trades pixels for frame rate from the median frame time, and a software-GL fallback (SwiftShader) runs at reduced resolution without MSAA.
+
+Code: `lib/silicon-macro.ts` (floorplan, stack, generators, crater, fly paths, section caps; tested in `tests/silicon-macro.test.ts`), `app/components/silicon/` (engine, materials and shader patches, die textures), and `app/components/SiliconMacroView.tsx` (controls and HUD).
 
 ## Getting started
 
@@ -95,7 +108,7 @@ Two build paths share the same source:
 ## Repository layout
 
 ```
-app/                 Next-style app: page.tsx (all views), components/Chip3DExplorer.tsx (3D twin), globals.css
+app/                 Next-style app: page.tsx (all views), components/Chip3DExplorer.tsx (3D twin), components/SiliconMacroView.tsx + components/silicon/ (silicon macro view), globals.css
 lib/                 Deterministic models: t0/t1/x1, campaigns, reliability, physics, package connectors, floorplans
 tests/               node:test suites for every model in lib/
 design/spec/         Versioned T0, T1, and X1 architecture contracts and schema

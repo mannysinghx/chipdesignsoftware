@@ -21,16 +21,19 @@ import { useTrackedParams, useTrackedValue, useUiAuditInstallation } from '@/lib
 import ActivityWorkspace from '@/app/components/ActivityWorkspace';
 import LiveEvidenceStrip from '@/app/components/LiveEvidenceStrip';
 import RunsWorkspace from '@/app/components/RunsWorkspace';
+import SiliconMacroView from '@/app/components/SiliconMacroView';
+import { DIE, FOCUS_STOPS, LEVELS, PRESETS, SILICON_EVIDENCE, STACK } from '@/lib/silicon-macro';
 import correlation from '@/evidence/ramulator-correlation.json';
 import rtlEvidence from '@/evidence/rtl-synthesis.json';
 import physicalEvidence from '@/evidence/physical-synthesis.json';
 
-type View = 'twin' | 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide' | 'runs' | 'activity';
+type View = 'twin' | 'silicon' | 'readiness' | 'architecture' | 'workloads' | 'correlation' | 'explore' | 'gates' | 'digital' | 'physical' | 't1' | 'foundry' | 'x1' | 'agents' | 'guide' | 'runs' | 'activity';
 type UserLevel = 'beginner' | 'practitioner' | 'expert';
 type SweepPoint = ReturnType<typeof runT0Sweep>[number];
 
 const views: Array<{ id: View; label: string }> = [
   { id: 'twin', label: '3D design twin' },
+  { id: 'silicon', label: 'Silicon macro' },
   { id: 'readiness', label: 'Readiness' },
   { id: 'architecture', label: 'Architecture' },
   { id: 'workloads', label: 'Workloads' },
@@ -71,7 +74,7 @@ const t1Hierarchy = [
 const guideHierarchy = [
   { id: 'guide-start', label: 'Start here', meta: 'Choose your level' },
   { id: 'guide-workflow', label: 'End-to-end workflow', meta: '14 steps' },
-  { id: 'guide-views', label: 'Platform views', meta: '13 workspaces' },
+  { id: 'guide-views', label: 'Platform views', meta: '14 workspaces' },
   { id: 'guide-roles', label: 'Role-based paths', meta: '6 disciplines' },
   { id: 'guide-evidence', label: 'Evidence language', meta: '4 statuses' },
   { id: 'guide-recipes', label: 'Practical recipes', meta: '9 walkthroughs' },
@@ -268,7 +271,7 @@ export default function Home() {
   const exportSnapshot = () => {
     const snapshot = {
       schema_version: '1.0',
-      product: view === 'runs' ? 'AIMEM Design Studio Tool Runs' : view === 'activity' ? 'AIMEM Design Studio Activity Log' : view === 'twin' ? 'AIMEM Design Studio 3D Design Twin' : view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
+      product: view === 'silicon' ? 'AIMEM Design Studio Silicon Macro View' : view === 'runs' ? 'AIMEM Design Studio Tool Runs' : view === 'activity' ? 'AIMEM Design Studio Activity Log' : view === 'twin' ? 'AIMEM Design Studio 3D Design Twin' : view === 'physical' ? 'AIMEM Design Studio Physical Implementation' : view === 'digital' ? 'AIMEM Design Studio Digital Implementation' : view === 'agents' ? 'AIMEM Design Studio Agent Mission Control' : view === 'x1' ? 'AIMEM-X1 Production Planner' : view === 't1' || view === 'foundry' ? 'AIMEM-X1 T1 Pathfinder' : 'AIMEM-X1 T0 Pathfinder',
       fidelity: 'multi-domain-open-source-proxy',
       generated_at: new Date().toISOString(),
       config,
@@ -281,13 +284,14 @@ export default function Home() {
       digital_implementation: view === 'digital' ? { scope: digitalScope, evaluation: digitalEvaluation, evidence_class: 'executed open-source RTL synthesis plus bounded formal and planned regressions' } : undefined,
       physical_implementation: view === 'physical' ? { scope: physicalScope, utilization_percent: physicalUtilization, evaluation: physicalImplementation, evidence_class: 'executed public-PDK mapping plus analytical floorplan planning' } : undefined,
       design_twin: view === 'twin' ? { overlays: twinOverlays, overlay_composite: twinOverlays.length > 1, active_build_step: TWIN_BUILD_STEPS[twinStepIndex], topology: circuitTopology, interconnect_physics: circuitPhysics, interconnect_inputs: DEFAULT_INTERCONNECT_INPUTS, reference_architecture: OPEN_TITAN_REFERENCE, aimem_macro_adaptation: AIMEM_REFERENCE_MACROS, metal_stack_visualization: SKY130_VISUAL_LAYERS, package_connector_chain: connectorChain, package_geometry: PACKAGE_GEOMETRY, stack_placements: STACK_PLACEMENTS, base_die_floorplan: BASE_DIE_FLOORPLAN, base_die_area_budget_mm2: X1_BASE_DIE_AREA_BUDGET_MM2, x1_config: x1Config, x1_evaluation: x1Evaluation, evidence_class: 'interactive reference-informed circuitry with first-order electrical physics; geometry is not GDS and production extraction remains restricted' } : undefined,
+      silicon_macro: view === 'silicon' ? { evidence_class: SILICON_EVIDENCE.class, statement: SILICON_EVIDENCE.statement, die_mm: { width: DIE.width, depth: DIE.depth }, detail_levels: LEVELS.map(({ id, name, chunk, activateAt }) => ({ id, name, chunk_mm: chunk, active_below_mm: activateAt })), focus_stops: FOCUS_STOPS.map(({ id, label, layer, below, floor }) => ({ id, label, layer, below_mm: below, delayer_floor_mm: floor })), vertical_stack_mm: STACK, presets: PRESETS } : undefined,
       activity_log: view === 'activity' ? { this_page: getUiAudit()?.snapshot() ?? null, evidence_class: 'browser-recorded UI audit events; the platform log is authoritative' } : undefined,
     };
     const text = JSON.stringify(snapshot, null, 2);
     const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = view === 'runs' ? 'aimem-tool-runs.json' : view === 'activity' ? 'aimem-activity-log.json' : view === 'twin' ? 'aimem-x1-3d-design-twin.json' : view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
+    anchor.download = view === 'silicon' ? 'aimem-silicon-macro.json' : view === 'runs' ? 'aimem-tool-runs.json' : view === 'activity' ? 'aimem-activity-log.json' : view === 'twin' ? 'aimem-x1-3d-design-twin.json' : view === 'physical' ? 'aimem-physical-implementation-evidence.json' : view === 'digital' ? 'aimem-digital-implementation-evidence.json' : view === 'agents' ? 'aimem-agent-mission-evidence.json' : view === 'x1' ? 'aimem-x1-production-plan.json' : view === 'foundry' ? 'aimem-t1-foundry-readiness.json' : view === 't1' ? 'aimem-t1-snapshot.json' : 'aimem-t0-snapshot.json';
     anchor.click();
     URL.revokeObjectURL(url);
     trackExport(anchor.download, text, { view });
@@ -306,7 +310,7 @@ export default function Home() {
           <div className="chip-mark" aria-hidden="true"><i /><i /><i /><i /></div>
           <div>
             <p className="eyebrow accent">AIMEM Design Studio</p>
-            <h1>{view === 'runs' ? 'Tool Runs' : view === 'activity' ? 'Activity Log' : view === 'twin' ? '3D Design Twin' : view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
+            <h1>{view === 'silicon' ? 'Silicon Macro' : view === 'runs' ? 'Tool Runs' : view === 'activity' ? 'Activity Log' : view === 'twin' ? '3D Design Twin' : view === 'guide' ? 'Platform Guide' : view === 'physical' ? 'Physical Implementation' : view === 'digital' ? 'Digital Implementation' : view === 'agents' ? 'Agent Mission Control' : view === 'x1' ? 'Production X1' : view === 't1' || view === 'foundry' ? 'T1 Pathfinder' : 'T0 Pathfinder'}</h1>
           </div>
         </div>
 
@@ -317,12 +321,12 @@ export default function Home() {
         </nav>
 
         <div className="top-actions">
-          <span className="baseline-status"><i /> {view === 'runs' ? 'Sandboxed · pinned · reproducible' : view === 'activity' ? 'Audit log · append-only · hash-chained' : view === 'twin' ? `X1 package · ${twinStep.short}/12` : view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
+          <span className="baseline-status"><i /> {view === 'silicon' ? 'Illustrative · procedural silicon' : view === 'runs' ? 'Sandboxed · pinned · reproducible' : view === 'activity' ? 'Audit log · append-only · hash-chained' : view === 'twin' ? `X1 package · ${twinStep.short}/12` : view === 'guide' ? 'Guide · 3 levels · 6 roles' : view === 'physical' ? `${physicalEvidence.platform} · ${physicalEvidence.status}` : view === 'digital' ? `${rtlEvidence.tool} · ${rtlEvidence.status}` : view === 'agents' ? `${AGENT_MISSIONS[agentMission].label} · ${agentRunStatus}` : view === 'x1' ? 'Production target · HOLD' : view === 'foundry' ? 'Foundry contract · HOLD' : view === 't1' ? 'T1 · proxy rev 0.3' : 'Spec 0.4.0 · correlated'}</span>
           <button className="ghost-button" onClick={exportSnapshot}>Export evidence</button>
         </div>
       </header>
 
-      {view === 'activity' ? <ActivityWorkspace /> : view === 'runs' ? <RunsWorkspace /> : (
+      {view === 'activity' ? <ActivityWorkspace /> : view === 'runs' ? <RunsWorkspace /> : view === 'silicon' ? <SiliconMacroView /> : (
       <div className="workspace">
         <aside className="left-rail">
           <section className="rail-section">
@@ -745,6 +749,7 @@ function GuideView({ level, setLevel, navigate }: {
   ];
   const workspaceCards: Array<{ view: View; title: string; purpose: string; firstQuestion: string }> = [
     { view: 'twin', title: '3D design twin', purpose: 'Movable full-system build visualization', firstQuestion: 'Where is every stack, die, build stage, and linked evidence value in the complete package?' },
+    { view: 'silicon', title: 'Silicon macro', purpose: 'Illustrative photoreal zoom from the package to single transistors', firstQuestion: 'What does a dense accelerator die look like at every scale, from the power mesh down to fins and gates?' },
     { view: 'readiness', title: 'Readiness', purpose: 'Program-level evidence and blockers', firstQuestion: 'What is actually complete, and what still depends on external proof?' },
     { view: 'architecture', title: 'Architecture', purpose: 'T0 hierarchy and organization', firstQuestion: 'How do lanes, channels, banks, tiers, SRAM, and NoC regions connect?' },
     { view: 'workloads', title: 'Workloads', purpose: 'Deterministic traffic behavior', firstQuestion: 'Which access patterns benefit, stall, or create queue pressure?' },

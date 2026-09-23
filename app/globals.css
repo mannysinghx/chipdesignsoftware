@@ -891,3 +891,45 @@ small { font-size: 10px !important; }
   .runs-files li { grid-template-columns: 50px minmax(0, 1fr); }
   .runs-files li code, .runs-files li small { display: none; }
 }
+
+/* ------------------------------------------------------------------ Silicon macro */
+.silicon-shell { position: relative; height: calc(100vh - 66px); min-height: 560px; overflow: hidden; background: #040507; color: #d9e4ef; isolation: isolate; }
+.silicon-shell:fullscreen, .silicon-shell:-webkit-full-screen, .silicon-shell.fullscreen { width: 100vw; height: 100vh; min-height: 0; }
+.silicon-canvas { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+.silicon-canvas:active { cursor: grabbing; }
+.silicon-canvas canvas { display: block; width: 100%; height: 100%; outline: none; }
+.silicon-top { position: absolute; z-index: 3; top: 14px; right: 14px; left: 14px; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; pointer-events: none; }
+.silicon-top > * { pointer-events: auto; }
+.silicon-toolbar, .silicon-ladder { display: flex; gap: 3px; border: 1px solid rgba(160,190,220,.16); border-radius: 10px; padding: 4px; background: rgba(8,12,18,.74); box-shadow: 0 10px 30px rgba(0,0,0,.35); backdrop-filter: blur(10px); }
+.silicon-toolbar button, .silicon-ladder button { height: 30px; border: 1px solid transparent; border-radius: 7px; padding: 0 10px; background: transparent; color: #b6c6d6; font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer; }
+.silicon-toolbar button:hover, .silicon-ladder button:hover { background: rgba(120,170,220,.12); color: #eef5fb; }
+.silicon-toolbar button.active { border-color: rgba(90,220,255,.42); background: rgba(40,160,210,.18); color: #e2f7ff; }
+.silicon-ladder button i { margin-right: 6px; color: #6f8aa5; font: 600 9px var(--font-geist-mono); font-style: normal; }
+.silicon-ladder button.active { border-color: rgba(255,196,110,.48); background: linear-gradient(180deg, rgba(255,205,120,.2), rgba(255,170,60,.1)); color: #fff2dc; }
+.silicon-ladder button.active i { color: #ffc978; }
+.silicon-help { position: absolute; z-index: 2; top: 62px; left: 16px; max-width: calc(100% - 32px); color: rgba(190,208,226,.62); font: 10px var(--font-geist-mono); pointer-events: none; }
+.silicon-hud { position: absolute; z-index: 3; bottom: 16px; left: 16px; max-width: min(540px, calc(100% - 32px)); border: 1px solid rgba(160,190,220,.14); border-radius: 12px; padding: 12px 14px; background: rgba(6,9,14,.68); pointer-events: none; backdrop-filter: blur(10px); }
+.silicon-kicker { display: block; color: #ffc978; font: 650 9px var(--font-geist-mono); letter-spacing: .14em; text-transform: uppercase; }
+.silicon-hud strong { display: block; margin-top: 5px; color: #eef5fb; font-size: 14px; font-weight: 650; }
+.silicon-hud p { margin: 4px 0 0; color: #93a8bd; font-size: 11px; line-height: 1.45; }
+.silicon-scale { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.silicon-scale i { display: block; height: 6px; border: 1px solid #dfe9f3; border-top: 0; }
+.silicon-scale span { color: #dfe9f3; font: 600 10px var(--font-geist-mono); }
+.silicon-meta { position: absolute; z-index: 3; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.silicon-perf { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 10px; max-width: 430px; border: 1px solid rgba(160,190,220,.12); border-radius: 9px; padding: 7px 10px; background: rgba(6,9,14,.62); color: #8397ab; font: 10px var(--font-geist-mono); }
+.silicon-perf b { color: #7dffb3; font-weight: 650; }
+.silicon-perf b.slow { color: #ffb86b; }
+.silicon-evidence { display: flex; align-items: center; gap: 6px; border-radius: 99px; padding: 5px 10px; background: rgba(6,9,14,.62); color: #a9b9c9; font-size: 10px; pointer-events: auto; }
+.silicon-evidence i { width: 7px; height: 7px; border-radius: 50%; background: #7189a6; }
+.silicon-status { position: absolute; z-index: 4; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 1px solid rgba(160,190,220,.18); border-radius: 10px; padding: 12px 16px; background: rgba(6,9,14,.8); color: #cfe0f0; font: 12px var(--font-geist-mono); text-align: center; }
+.silicon-status.error { max-width: min(480px, calc(100% - 32px)); border-color: rgba(255,150,110,.4); color: #ffd2c2; }
+@media (max-width: 980px) { .silicon-help { display: none; } .silicon-perf span:nth-child(n+4) { display: none; } }
+@media (max-width: 720px) {
+  .silicon-shell { height: calc(100vh - 110px); min-height: 520px; }
+  .silicon-top { top: 10px; right: 10px; left: 10px; }
+  .silicon-toolbar, .silicon-ladder { width: 100%; overflow-x: auto; }
+  .silicon-toolbar button, .silicon-ladder button { flex: 0 0 auto; }
+  .silicon-hud { right: 10px; bottom: 10px; left: 10px; max-width: none; padding: 10px 12px; }
+  .silicon-meta { top: 104px; right: 10px; bottom: auto; }
+  .silicon-perf span { display: none; }
+}
