@@ -5,7 +5,7 @@ import { DIE, PHYS, PRESETS, SILICON_EVIDENCE, TILES } from '@/lib/silicon-macro
 import { legendFor } from '@/lib/silicon-parts';
 import { getUiAudit } from '@/lib/ui-audit';
 import { useTrackedValue } from '@/lib/ui-audit-react';
-import type { LabelMode, SiliconEngine, SiliconHud, SiliconSelection } from './silicon/engine';
+import type { DragMode, LabelMode, SiliconEngine, SiliconHud, SiliconSelection } from './silicon/engine';
 
 // Safari still ships only the prefixed Fullscreen API.
 type FullscreenElement = HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void };
@@ -45,6 +45,7 @@ export default function SiliconMacroView() {
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [destination, setDestination] = useState('die');
   const [labelMode, setLabelMode] = useState<LabelMode>('all');
+  const [dragMode, setDragMode] = useState<DragMode>('rotate');
   // Open by default except on phone-width screens, where it would cover a third of the view.
   const [legendOpen, setLegendOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches);
   const [selection, setSelection] = useState<SiliconSelection | null>(null);
@@ -56,6 +57,7 @@ export default function SiliconMacroView() {
   useTrackedValue('ui.state', 'changed', 'silicon.fullscreen', fullscreen);
   useTrackedValue('ui.state', 'changed', 'silicon.destination', destination);
   useTrackedValue('ui.state', 'changed', 'silicon.labels', labelMode);
+  useTrackedValue('ui.state', 'changed', 'silicon.dragMode', dragMode);
   useTrackedValue('ui.state', 'changed', 'silicon.legend', legendOpen);
   useTrackedValue('ui.state', 'changed', 'silicon.selection', selection ? `${selection.title} (${selection.layer})` : null);
 
@@ -103,6 +105,7 @@ export default function SiliconMacroView() {
   useEffect(() => { engineRef.current?.setSection(section); }, [section, ready]);
   useEffect(() => { engineRef.current?.setAutoRotate(autoRotate); }, [autoRotate, ready]);
   useEffect(() => { engineRef.current?.setLabelMode(labelMode); }, [labelMode, ready]);
+  useEffect(() => { engineRef.current?.setDragMode(dragMode); }, [dragMode, ready]);
 
   useEffect(() => {
     const shell = shellRef.current as FullscreenElement | null;
@@ -145,8 +148,10 @@ export default function SiliconMacroView() {
       <div
         className="silicon-canvas"
         ref={hostRef}
-        role="img"
-        aria-label="Interactive macro view of the accelerator die: a procedurally generated metal stack, standard cells, transistors, TSVs, and deep-trench capacitors that you can zoom from the whole package down to single gates"
+        role="application"
+        tabIndex={0}
+        aria-roledescription="3D chip viewer"
+        aria-label="Interactive macro view of the accelerator die: a procedurally generated metal stack, standard cells, transistors, TSVs, and deep-trench capacitors that you can zoom from the whole package down to single gates. Arrow keys move the view, plus and minus zoom, Escape clears the selection."
       />
 
       <div className="silicon-top">
@@ -155,7 +160,8 @@ export default function SiliconMacroView() {
           <button className={glow ? 'active' : ''} aria-pressed={glow} onClick={() => setGlow((value) => !value)} title="Animated data pulses on active wires">Glow</button>
           <button className={bloom && !hud?.software ? 'active' : ''} aria-pressed={bloom && !hud?.software} disabled={hud?.software} onClick={() => setBloom((value) => !value)} title={hud?.software ? 'Bloom is off on software rendering (no GPU acceleration)' : 'Bloom on the glowing pathways'}>Bloom</button>
           <button className={section ? 'active' : ''} aria-pressed={section} onClick={() => setSection((value) => !value)} title="Cut a vertical section through the target to show the layer stack and deep trenches">Cross-section</button>
-          <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)} title="Turn the chip slowly; drag any time to rotate it yourself">Orbit</button>
+          <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)} title="Spin the chip slowly on its own; drag any time to take over">Spin</button>
+          <button className={dragMode === 'pan' ? 'active' : ''} aria-pressed={dragMode === 'pan'} onClick={() => setDragMode((mode) => (mode === 'pan' ? 'rotate' : 'pan'))} title={dragMode === 'pan' ? 'Dragging moves the view; right-drag rotates. Click to drag-rotate again' : 'Make a plain drag move the view instead of rotating it (right-drag or Shift-drag always moves it)'}>✥ Pan</button>
           <span className="silicon-segment" role="group" aria-label="Labels">
             <em>Labels</em>
             {LABEL_MODES.map((mode) => (
@@ -240,7 +246,7 @@ export default function SiliconMacroView() {
         </div>
       </div>
 
-      <div className="silicon-help">Drag to rotate a full 360°, over the top and underneath · right-drag to pan · scroll or pinch to zoom · hover or click any part to identify it · double-click to dive</div>
+      <div className="silicon-help">{dragMode === 'pan' ? 'Drag to move the view · right-drag to rotate 360°' : 'Drag to rotate 360°, over the top and underneath · right-drag or Shift-drag to move the view'} · scroll or pinch to zoom at the cursor · click any part to identify it · double-click to dive</div>
 
       {!ready && !error && <div className="silicon-status">Growing the silicon…</div>}
       {error && <div className="silicon-status error" role="alert">{error}</div>}

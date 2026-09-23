@@ -929,7 +929,7 @@ small { font-size: 10px !important; }
 .silicon-toolbar .silicon-segment button { padding: 0 8px; }
 .silicon-toolbar .silicon-segment button.active { border-color: rgba(255,196,110,.42); background: rgba(255,190,90,.14); color: #fff2dc; }
 .silicon-labels { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
-.silicon-label { position: absolute; top: 0; left: 0; border: 1px solid rgba(110,215,255,.42); border-radius: 6px; padding: 3px 8px; background: rgba(5,10,16,.82); color: #e4f5ff; font: 600 10.5px/1.35 var(--font-geist-sans), Arial, sans-serif; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; pointer-events: auto; will-change: transform; }
+.silicon-label { position: absolute; top: 0; left: 0; border: 1px solid rgba(110,215,255,.42); border-radius: 6px; padding: 3px 8px; background: rgba(5,10,16,.82); color: #e4f5ff; font: 600 10.5px/1.35 var(--font-geist-sans), Arial, sans-serif; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); pointer-events: none; will-change: transform; }
 .silicon-label::before { position: absolute; top: 100%; left: 6px; width: 1px; height: 14px; background: rgba(110,215,255,.6); content: ''; }
 .silicon-label::after { position: absolute; top: calc(100% + 11px); left: 4px; width: 5px; height: 5px; border-radius: 50%; background: #7fe3ff; box-shadow: 0 0 0 2px rgba(5,10,16,.75); content: ''; }
 .silicon-label[data-tone="region"] { border-color: rgba(255,200,120,.45); color: #fff0da; }
@@ -938,7 +938,11 @@ small { font-size: 10px !important; }
 .silicon-label[data-tone="package"] { border-color: rgba(200,210,225,.45); color: #eef2f7; }
 .silicon-label[data-tone="package"]::before { background: rgba(200,210,225,.6); }
 .silicon-label[data-tone="package"]::after { background: #dfe6ee; }
-.silicon-label:hover, .silicon-label:focus-visible { border-color: #7fe3ff; background: rgba(12,34,48,.94); outline: none; }
+.silicon-label.hovered, .silicon-label:focus-visible { border-color: #7fe3ff; background: rgba(12,34,48,.94); outline: none; }
+.silicon-canvas:focus-visible { outline: 2px solid rgba(90,220,255,.55); outline-offset: -2px; }
+.silicon-canvas.pan-mode { cursor: move; }
+.silicon-canvas.panning, .silicon-canvas.panning:active { cursor: grabbing; }
+.silicon-canvas.over-label { cursor: pointer; }
 .silicon-label.selected { border-color: #43d8ff; background: rgba(18,70,96,.94); color: #fff; }
 .silicon-tooltip { position: absolute; top: 0; left: 0; z-index: 4; max-width: 300px; border: 1px solid rgba(160,200,230,.28); border-radius: 7px; padding: 6px 9px; background: rgba(5,9,14,.92); color: #eaf5ff; box-shadow: 0 8px 24px rgba(0,0,0,.4); pointer-events: none; }
 .silicon-tooltip b { display: block; font-size: 11.5px; font-weight: 650; }

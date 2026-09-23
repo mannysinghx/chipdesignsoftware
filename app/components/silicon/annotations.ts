@@ -22,7 +22,10 @@ export type RulerMark = { id: string; label: string; top: number; bottom: number
 /** Screen box of a label: left, top, right, bottom in CSS pixels. */
 export type LabelBox = [number, number, number, number];
 
-type Slot = { element: HTMLDivElement; text: HTMLSpanElement; anchor: Anchor | null; width: number; shown: boolean };
+/** A label under the pointer. */
+export type LabelHit = { index: number; title: string; detail: string };
+
+type Slot = { element: HTMLDivElement; text: HTMLSpanElement; anchor: Anchor | null; width: number; shown: boolean; box: LabelBox | null };
 
 const POOL = 48;
 const RULER_POOL = 28;
@@ -38,6 +41,8 @@ const TOP_RESERVED = 56;
  * persistent (hidden, never removed), so nothing a user or a test is about to
  * click is detached from the page mid-gesture. Hidden labels drop their
  * data-audit attribute, so audit tooling only ever sees labels on screen.
+ * Labels take no pointer events themselves, so a drag or a zoom can start
+ * anywhere on the view; the engine hit-tests them for hover and click.
  */
 export function createAnnotations(host: HTMLElement) {
   const layer = document.createElement('div');
@@ -54,7 +59,7 @@ export function createAnnotations(host: HTMLElement) {
     const text = document.createElement('span');
     element.appendChild(text);
     layer.appendChild(element);
-    const slot: Slot = { element, text, anchor: null, width: 0, shown: false };
+    const slot: Slot = { element, text, anchor: null, width: 0, shown: false, box: null };
     const activate = (event: Event) => {
       event.stopPropagation();
       slot.anchor?.select();
@@ -116,9 +121,11 @@ export function createAnnotations(host: HTMLElement) {
   const overlaps = (a: LabelBox, b: LabelBox, pad = 0) => a[0] < b[2] + pad && b[0] < a[2] + pad && a[1] < b[3] + pad && b[1] < a[3] + pad;
 
   const hide = (slot: Slot) => {
+    slot.box = null;
     if (slot.shown) {
       slot.element.style.display = 'none';
       slot.element.tabIndex = -1;
+      slot.element.classList.remove('hovered');
       delete slot.element.dataset.audit;
       slot.shown = false;
     }
@@ -213,6 +220,7 @@ export function createAnnotations(host: HTMLElement) {
           continue;
         }
         placed.push(box);
+        slot.box = box;
         slot.element.style.transform = `translate(${Math.round(x - 6)}px, ${Math.round(y - LEADER)}px) translateY(-100%)`;
         if (!slot.shown) {
           slot.element.style.display = 'block';
@@ -221,6 +229,29 @@ export function createAnnotations(host: HTMLElement) {
           slot.shown = true;
         }
       }
+    },
+
+    /** The label whose chip is under a point, in CSS pixels. */
+    labelAt(x: number, y: number): LabelHit | null {
+      for (let index = 0; index < slots.length; index += 1) {
+        const { box, anchor } = slots[index];
+        if (!box || !anchor) continue;
+        if (x >= box[0] - 2 && x <= box[2] + 2 && y >= box[1] - 2 && y <= box[3] + 2) return { index, title: anchor.title, detail: anchor.detail };
+      }
+      return null;
+    },
+
+    setHovered(hit: LabelHit | null) {
+      slots.forEach((slot, index) => {
+        const hovered = hit?.index === index && slot.shown;
+        if (slot.element.classList.contains('hovered') !== hovered) slot.element.classList.toggle('hovered', hovered);
+      });
+    },
+
+    /** Click a label as the user would: selects what it names, and the audit log records the click. */
+    activate(hit: LabelHit) {
+      const slot = slots[hit.index];
+      if (slot?.shown) slot.element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     },
 
     /** Layer names down the left edge in a cross-section (null hides the ruler). */

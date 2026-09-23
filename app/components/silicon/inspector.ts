@@ -195,6 +195,15 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
     return { kind: 'static', key: `static/${hit.object.uuid}/${hit.instanceId ?? '-'}/${part}`, part, box: instanceBox(hit.object, hit.instanceId) };
   }
 
+  /** The drawn surface point under a screen point, or null over empty space. */
+  function pickPoint(ndc: THREE.Vector2): THREE.Vector3 | null {
+    raycaster.setFromCamera(ndc, camera);
+    const origin = raycaster.ray.origin.clone();
+    const dir = raycaster.ray.direction.clone();
+    const hit = castRay(origin, dir);
+    return hit ? origin.addScaledVector(dir, hit.t) : null;
+  }
+
   /** What is drawn under a screen point (normalized device coordinates). */
   function pick(ndc: THREE.Vector2): Target | null {
     raycaster.setFromCamera(ndc, camera);
@@ -420,6 +429,7 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
 
   return {
     pick,
+    pickPoint,
     plan,
     ruler,
     hover(target: Target | null) {

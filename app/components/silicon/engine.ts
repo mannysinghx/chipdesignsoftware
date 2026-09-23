@@ -20,6 +20,9 @@ import { FinishShader, createBackdrop, createChipMaterial, createDieSurfaceMater
 export type { LabelMode } from './annotations';
 export type { SiliconSelection } from './inspector';
 
+/** What a plain left-drag (or one-finger drag) does; the other stays one button away. */
+export type DragMode = 'rotate' | 'pan';
+
 export type SiliconHud = {
   stop: FocusStop;
   location: string[];
@@ -54,6 +57,7 @@ export type SiliconEngine = {
   setSection: (on: boolean) => void;
   setAutoRotate: (on: boolean) => void;
   setLabelMode: (mode: LabelMode) => void;
+  setDragMode: (mode: DragMode) => void;
   clearSelection: () => void;
   zoomToSelection: () => void;
   dispose: () => void;
@@ -78,6 +82,11 @@ const FLOOR_OFF = STACK_MAX * 3;
 const GENERATION_BUDGET_MS = 5;
 const EVICT_AFTER_MS = 1200;
 const MM = SCENE_MM_PER_UNIT;
+// The view roams freely: anywhere over the package plus a view's width
+// beyond it, from below the BGA balls to above the bumps.
+const ROAM_X = (PACKAGE_GEOMETRY.substrate.width * MM) / 2;
+const ROAM_Z = (PACKAGE_GEOMETRY.substrate.depth * MM) / 2;
+const ROAM_FLOOR = -3;
 // Where a cross-section centres vertically at each stop (mm): the metal
 // stack above the surface and the trenches, rails, and TSVs below it.
 const SECTION_FOCUS_Y: Record<FocusStop['id'], number> = { package: 0, die: 0, tile: 0, block: -0.015, routing: 0.0005, cells: 0, devices: -0.00005 };
@@ -408,6 +417,11 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   controls.minPolarAngle = 0;
   controls.maxPolarAngle = Math.PI;
   controls.autoRotateSpeed = 0.35;
+  // Pinches zoom toward the fingers (the mouse wheel is handled below), and
+  // the arrow keys move the view once it has keyboard focus.
+  controls.zoomToCursor = true;
+  controls.keyPanSpeed = 24;
+  controls.listenToKeyEvents(host);
   const orbit = controls.target;
   const initial = PRESETS.find((preset) => preset.id === 'die') ?? PRESETS[0];
   orbit.set(initial.x, 0, initial.z);
@@ -423,11 +437,10 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   let capEps = 0;
   let staticCapsEps = -1;
   let zoomImpulse = 0;
-  const cursor = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
   const scratch = new THREE.Vector3();
   const spherical = new THREE.Spherical();
-  let flight: null | { start: number; duration: number; path: ReturnType<typeof zoomPanPath>; polar: [number, number]; azimuth: [number, number] } = null;
+  let flight: null | { start: number; duration: number; path: ReturnType<typeof zoomPanPath>; polar: [number, number]; azimuth: [number, number]; height: [number, number] | null } = null;
   let view: SiliconHud['view'] = 'top';
 
   // Camera gestures are reported once per burst, like the package twin.
@@ -450,7 +463,43 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     return raycaster.ray.intersectPlane(plane, new THREE.Vector3());
   };
 
-  function zoomAbout(scale: number, ndc: THREE.Vector2) {
+  // Set once the user moves the orbit height by hand (a drag or zoom seen
+  // from the side, a dive from the side or below); the target then keeps
+  // that height instead of easing to the layer of the current scale. Any
+  // fly-to that does not set a height clears it.
+  let freeY = false;
+  let zoomAnchor: THREE.Vector3 | null = null;
+  const clientNdc = (clientX: number, clientY: number) => {
+    const rect = canvas.getBoundingClientRect();
+    return new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+  };
+  /**
+   * The point under the cursor: drawn geometry, else the focus plane, else a
+   * point along the line of sight at the orbit distance. Each lies on the
+   * cursor's ray, so zooming or dragging about it keeps the cursor on it.
+   */
+  const pointUnder = (ndc: THREE.Vector2) => {
+    const distance = camera.position.distanceTo(orbit);
+    const near = (point: THREE.Vector3 | null) => (point && point.distanceTo(camera.position) < distance * 25 ? point : null);
+    const found = near(inspector.pickPoint(ndc)) ?? near(planeHit(ndc));
+    if (found) return found;
+    raycaster.setFromCamera(ndc, camera);
+    return raycaster.ray.at(distance, new THREE.Vector3());
+  };
+  /**
+   * Zoom anchor: the focus plane where the cursor's ray meets it steeply,
+   * else the drawn point under the cursor (side views, where the plane is
+   * seen edge-on, and empty space).
+   */
+  const zoomAnchorAt = (ndc: THREE.Vector2) => {
+    const hit = planeHit(ndc);
+    const normal = sectionOn ? (section.axis === 0 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1)) : new THREE.Vector3(0, 1, 0);
+    const steep = Math.abs(raycaster.ray.direction.dot(normal)) > 0.35;
+    return hit && steep && hit.distanceTo(camera.position) < camera.position.distanceTo(orbit) * 25 ? hit : pointUnder(ndc);
+  };
+  const lineOfSight = new THREE.Vector3();
+
+  function zoomAbout(scale: number) {
     const distance = camera.position.distanceTo(orbit);
     const next = clamp(distance * scale, MIN_DISTANCE, MAX_DISTANCE);
     if (Math.abs(next - distance) < distance * 1e-9) {
@@ -458,10 +507,10 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       return;
     }
     const k = next / distance;
-    const hit = planeHit(ndc);
-    // Scaling camera and target about the point under the cursor keeps that
-    // point fixed on screen: zoom-to-cursor without a target jump.
-    const anchor = hit && hit.distanceTo(camera.position) < distance * 25 ? hit : orbit.clone();
+    // Scaling camera and target about a point on the cursor's line of sight
+    // keeps what is under the cursor fixed on screen: zoom-to-cursor.
+    const anchor = zoomAnchor ?? orbit.clone();
+    if (Math.abs(anchor.y - orbit.y) > distance * 1e-6) freeY = true;
     camera.position.sub(anchor).multiplyScalar(k).add(anchor);
     orbit.sub(anchor).multiplyScalar(k).add(anchor);
   }
@@ -471,13 +520,16 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   /** Camera azimuth that looks straight at the cut from the cleared side. */
   const sectionAzimuth = () => (section.axis === 0 ? (section.keep > 0 ? -Math.PI / 2 : Math.PI / 2) : section.keep > 0 ? Math.PI : 0);
 
-  function flyTo(spec: { x: number; z: number; distance: number; polar?: number; azimuth?: number }) {
+  function flyTo(spec: { x: number; z: number; distance: number; polar?: number; azimuth?: number; y?: number }) {
     spherical.setFromVector3(scratch.copy(camera.position).sub(orbit));
     const path = zoomPanPath({ x: orbit.x, z: orbit.z, width: spherical.radius }, { x: spec.x, z: spec.z, width: spec.distance });
     const polarTarget = clamp(spec.polar ?? spherical.phi, POLAR_MARGIN, Math.PI - POLAR_MARGIN);
     const azimuthTarget = spherical.theta + wrapAngle((spec.azimuth ?? spherical.theta) - spherical.theta);
-    flight = { start: performance.now(), duration: clamp(600 + path.length * 360, 700, 4500), path, polar: [spherical.phi, polarTarget], azimuth: [spherical.theta, azimuthTarget] };
+    const height: [number, number] | null = spec.y === undefined ? null : [orbit.y, spec.y];
+    flight = { start: performance.now(), duration: clamp(600 + path.length * 360, 700, 4500), path, polar: [spherical.phi, polarTarget], azimuth: [spherical.theta, azimuthTarget], height };
+    freeY = height !== null;
     zoomImpulse = 0;
+    zoomAnchor = null;
     controls.enabled = false;
   }
 
@@ -494,6 +546,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     const blend = t * t * (3 - 2 * t);
     orbit.x = point.x;
     orbit.z = point.z;
+    if (flight.height) orbit.y = THREE.MathUtils.lerp(flight.height[0], flight.height[1], blend);
     camera.position.copy(orbit).add(scratch.setFromSphericalCoords(point.width, THREE.MathUtils.lerp(flight.polar[0], flight.polar[1], blend), THREE.MathUtils.lerp(flight.azimuth[0], flight.azimuth[1], blend)));
     camera.lookAt(orbit);
     if (t >= 1) {
@@ -512,27 +565,38 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     else if (event.deltaMode === 2) delta *= 400;
     // Trackpad pinches arrive as small ctrl+wheel deltas.
     zoomImpulse += clamp(delta * (event.ctrlKey ? 0.012 : 0.0022), -1.4, 1.4);
-    const rect = canvas.getBoundingClientRect();
-    cursor.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    // Anywhere on the view, from any angle: the anchor is fixed per wheel step.
+    zoomAnchor = zoomAnchorAt(clientNdc(event.clientX, event.clientY));
     noteGesture();
   };
   const onDoubleClick = (event: MouseEvent) => {
-    const rect = canvas.getBoundingClientRect();
-    const hit = planeHit(new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1));
+    const point = pointUnder(clientNdc(event.clientX, event.clientY));
     const distance = camera.position.distanceTo(orbit);
     spherical.setFromVector3(scratch.copy(camera.position).sub(orbit));
-    flyTo({ x: hit?.x ?? orbit.x, z: hit?.z ?? orbit.z, distance: distance * (event.shiftKey ? 3.2 : 0.3), polar: spherical.phi, azimuth: spherical.theta });
-    if (sectionOn && hit) sectionFocusY = hit.y;
+    // From above, the target then descends to the layer of the new scale;
+    // from the side or below it keeps the height of the point dived into.
+    const sideways = Math.abs(camera.getWorldDirection(scratch).y) < 0.35 || camera.position.y < orbit.y;
+    flyTo({ x: point.x, z: point.z, y: sideways && !sectionOn ? point.y : undefined, distance: distance * (event.shiftKey ? 3.2 : 0.3), polar: spherical.phi, azimuth: spherical.theta });
+    if (sectionOn) sectionFocusY = point.y;
     noteGesture();
   };
   // Capture on the host so a drag during a fly-through both cancels it and
-  // reaches OrbitControls as a normal gesture.
-  const onPointerDown = () => cancelFlight();
+  // reaches the controls as a normal gesture; drags that move the view are
+  // taken here, before OrbitControls sees them.
+  const onPointerDown = (event: PointerEvent) => {
+    cancelFlight();
+    beginPan(event);
+  };
   const onControlsEnd = () => noteGesture();
+  // A rotation moves the cursor off the last zoom anchor.
+  const onControlsStart = () => {
+    zoomAnchor = null;
+  };
   host.addEventListener('wheel', onWheel, { passive: false, capture: true });
   host.addEventListener('pointerdown', onPointerDown, { capture: true });
   canvas.addEventListener('dblclick', onDoubleClick);
   controls.addEventListener('end', onControlsEnd);
+  controls.addEventListener('start', onControlsStart);
   let contextLost = false;
   const onContextLost = (event: Event) => {
     event.preventDefault();
@@ -674,19 +738,119 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const onCanvasDown = (event: PointerEvent) => {
     pointer.down = event.button === 0 ? { x: event.clientX, y: event.clientY, at: performance.now() } : null;
   };
-  // A click (not a drag) names what is under the cursor; empty space clears.
+  // A click (not a drag) names what is under the cursor: a label if one is
+  // there (labels take no pointer events of their own), else the scene.
+  // Empty space clears the selection.
+  function clickAt(clientX: number, clientY: number) {
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const label = annotations.labelAt(x, y);
+    if (label) annotations.activate(label);
+    else selectTarget(inspector.pick(ndcAt(x, y)));
+  }
   const onCanvasUp = (event: PointerEvent) => {
     const down = pointer.down;
     pointer.down = null;
     if (!down || event.button !== 0) return;
     if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5 || performance.now() - down.at > 600) return;
-    const rect = canvas.getBoundingClientRect();
-    selectTarget(inspector.pick(ndcAt(event.clientX - rect.left, event.clientY - rect.top)));
+    clickAt(event.clientX, event.clientY);
   };
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('pointerdown', onCanvasDown);
   canvas.addEventListener('pointerup', onCanvasUp);
+
+  // ------------------------------------------------------ moving the view
+  // Drag to move: the point grabbed stays under the cursor, as when dragging
+  // a map. Right- or middle-drag, Shift/Ctrl/Cmd-drag, or a plain drag in
+  // Pan mode. The drag runs in the horizontal plane through the grabbed
+  // point when looking down or up, and parallel to the screen from the side,
+  // where a horizontal plane is seen edge-on.
+  let dragMode: DragMode = 'rotate';
+  let pan: { pointerId: number; plane: THREE.Plane; grab: THREE.Vector3; x: number; y: number; moved: boolean } | null = null;
+  const applyDragMode = () => {
+    // Whichever drag is the plain one, the other stays one button away.
+    controls.mouseButtons = dragMode === 'pan'
+      ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
+      : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    controls.touches = dragMode === 'pan' ? { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE } : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    host.classList.toggle('pan-mode', dragMode === 'pan');
+  };
+  applyDragMode();
+  const wantsPan = (event: PointerEvent) => {
+    // Touch stays with the controls (one finger per the mode, two to pinch and move).
+    if (event.pointerType === 'touch' || event.target !== canvas) return false;
+    if (event.button === 1) return true;
+    const modified = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (event.button === 0) return (dragMode === 'pan') !== modified;
+    return event.button === 2 && dragMode === 'rotate';
+  };
+  function beginPan(event: PointerEvent) {
+    if (pan || !wantsPan(event)) return;
+    // Keep the controls and the click handlers out of this gesture.
+    event.preventDefault();
+    event.stopPropagation();
+    zoomAnchor = null;
+    const grab = pointUnder(clientNdc(event.clientX, event.clientY));
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    const plane = Math.abs(forward.y) > 0.35 ? new THREE.Plane(new THREE.Vector3(0, 1, 0), -grab.y) : new THREE.Plane().setFromNormalAndCoplanarPoint(forward.negate(), grab);
+    pan = { pointerId: event.pointerId, plane, grab, x: event.clientX, y: event.clientY, moved: false };
+    host.setPointerCapture(event.pointerId);
+    document.addEventListener('pointermove', onPanMove);
+    document.addEventListener('pointerup', onPanEnd);
+    document.addEventListener('pointercancel', onPanEnd);
+    host.classList.add('panning');
+  }
+  const onPanMove = (event: PointerEvent) => {
+    if (!pan || event.pointerId !== pan.pointerId) return;
+    // A few pixels of slack, so a click in Pan mode stays a click.
+    if (!pan.moved && Math.hypot(event.clientX - pan.x, event.clientY - pan.y) < 4) return;
+    pan.moved = true;
+    raycaster.setFromCamera(clientNdc(event.clientX, event.clientY), camera);
+    const hit = raycaster.ray.intersectPlane(pan.plane, new THREE.Vector3());
+    if (!hit) return;
+    const delta = pan.grab.clone().sub(hit);
+    // Near the horizon a small cursor move reaches far along the plane: cap each step.
+    const distance = camera.position.distanceTo(orbit);
+    if (delta.length() > distance * 2) delta.setLength(distance * 2);
+    camera.position.add(delta);
+    orbit.add(delta);
+    camera.updateMatrixWorld();
+    if (Math.abs(delta.y) > distance * 1e-6) freeY = true;
+  };
+  const endPan = () => {
+    if (!pan) return;
+    if (host.hasPointerCapture(pan.pointerId)) host.releasePointerCapture(pan.pointerId);
+    document.removeEventListener('pointermove', onPanMove);
+    document.removeEventListener('pointerup', onPanEnd);
+    document.removeEventListener('pointercancel', onPanEnd);
+    host.classList.remove('panning');
+    pan = null;
+  };
+  const onPanEnd = (event: PointerEvent) => {
+    if (!pan || event.pointerId !== pan.pointerId) return;
+    const click = !pan.moved && event.type === 'pointerup' && event.button === 0;
+    endPan();
+    // In Pan mode a plain click still identifies what is under it.
+    if (click) clickAt(event.clientX, event.clientY);
+    else noteGesture();
+  };
+  // Keyboard, once the view has focus: arrows move it (OrbitControls), + and -
+  // zoom at the centre, Escape clears the selection.
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.target !== host) return;
+    const zoom = event.key === '+' || event.key === '=' ? -0.5 : event.key === '-' || event.key === '_' ? 0.5 : 0;
+    if (zoom !== 0) {
+      cancelFlight();
+      zoomAnchor = null;
+      zoomImpulse += zoom;
+      noteGesture();
+    } else if (event.key === 'Escape' && inspector.selected) selectTarget(null);
+    else return;
+    event.preventDefault();
+  };
+  host.addEventListener('keydown', onKeyDown);
 
   let hoverAt = 0;
   let hoverText: [string, string] | null = null;
@@ -710,19 +874,30 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       movedAt = now;
     }
     // Hover read-out: at most ~16 picks a second, none while dragging or flying.
-    if (pointer.inside && !pointer.dragging && !flight) {
+    // Over a label it names what the label points at; elsewhere, the scene.
+    if (pointer.inside && !pointer.dragging && !flight && !pan) {
       if ((pointer.dirty || moved) && now > hoverAt) {
         hoverAt = now + 60;
         pointer.dirty = false;
-        const target = inspector.pick(ndcAt(pointer.x, pointer.y));
-        inspector.hover(target);
-        hoverText = target && target.kind !== 'region' ? [PARTS[target.part].title, PARTS[target.part].layer] : null;
+        const label = annotations.labelAt(pointer.x, pointer.y);
+        annotations.setHovered(label);
+        host.classList.toggle('over-label', Boolean(label));
+        if (label) {
+          inspector.hover(null);
+          hoverText = [label.title, label.detail];
+        } else {
+          const target = inspector.pick(ndcAt(pointer.x, pointer.y));
+          inspector.hover(target);
+          hoverText = target && target.kind !== 'region' ? [PARTS[target.part].title, PARTS[target.part].layer] : null;
+        }
       }
       annotations.tooltip(hoverText?.[0] ?? null, hoverText?.[1], pointer.x, pointer.y);
     } else if (hoverText || pointer.dirty) {
       pointer.dirty = false;
       hoverText = null;
       inspector.hover(null);
+      annotations.setHovered(null);
+      host.classList.remove('over-label');
       annotations.tooltip(null);
     }
 
@@ -816,18 +991,31 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     stop = focusStopFor(distance, stop.id);
     // The orbit target descends through the stack as you zoom, so orbiting
     // pivots on the layer in view.
-    const focusY = sectionOn ? sectionFocusY : stop.targetY;
+    const focusY = sectionOn ? sectionFocusY : freeY ? null : stop.targetY;
     if (focusY !== null) {
       const dy = (focusY - orbit.y) * (1 - Math.exp(-dt * 6));
-      orbit.y += dy;
-      camera.position.y += dy;
+      // After a zoom at the cursor, slide along the line of sight to the zoom
+      // anchor, so what is under the cursor stays put; otherwise straight
+      // down, which seen from above is along the line of sight anyway.
+      lineOfSight.copy(zoomAnchor ?? orbit).sub(camera.position).normalize();
+      if (zoomAnchor && Math.abs(lineOfSight.y) > 0.35) {
+        lineOfSight.multiplyScalar(dy / lineOfSight.y);
+        orbit.add(lineOfSight);
+        camera.position.add(lineOfSight);
+      } else {
+        orbit.y += dy;
+        camera.position.y += dy;
+      }
     }
-    const margin = Math.max(1.5, distance * 0.6);
-    const cx = clamp(orbit.x, -DIE.width / 2 - margin, DIE.width / 2 + margin) - orbit.x;
-    const cz = clamp(orbit.z, -DIE.depth / 2 - margin, DIE.depth / 2 + margin) - orbit.z;
+    // Free roaming, within the package and a view's width around it.
+    const cx = clamp(orbit.x, -ROAM_X - distance, ROAM_X + distance) - orbit.x;
+    const cy = clamp(orbit.y, ROAM_FLOOR - distance, STACK_MAX + distance) - orbit.y;
+    const cz = clamp(orbit.z, -ROAM_Z - distance, ROAM_Z + distance) - orbit.z;
     orbit.x += cx;
+    orbit.y += cy;
     orbit.z += cz;
     camera.position.x += cx;
+    camera.position.y += cy;
     camera.position.z += cz;
     const planes = clipPlanesFor(distance);
     camera.near = planes.near;
@@ -894,7 +1082,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       if (Math.abs(zoomImpulse) > 1e-5) {
         const step = zoomImpulse * (1 - Math.exp(-dt * 12));
         zoomImpulse -= step;
-        zoomAbout(Math.exp(step), cursor);
+        zoomAbout(Math.exp(step));
       }
       controls.update(dt);
     }
@@ -1055,12 +1243,17 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
         sectionFocusY = SECTION_FOCUS_Y[stop.id];
       } else {
         sectionFocusY = null;
+        freeY = false;
         rebuildStaticCaps();
         for (const record of resident.values()) capsFor(record);
       }
     },
     setAutoRotate(on) {
       controls.autoRotate = on;
+    },
+    setDragMode(mode) {
+      dragMode = mode;
+      applyDragMode();
     },
     setLabelMode(mode) {
       labelMode = mode;
@@ -1077,19 +1270,19 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       const center = new THREE.Vector3();
       const size = new THREE.Vector3();
       if (target.kind === 'primitive') {
-        center.set(target.ref.x, 0, target.ref.z);
+        center.set(target.ref.x, (target.ref.y0 + target.ref.y1) / 2, target.ref.z);
         size.set(target.ref.sx, target.ref.y1 - target.ref.y0, target.ref.sz);
       } else if (target.kind === 'static') {
         target.box.getCenter(center);
         target.box.getSize(size);
       } else {
         const r = target.label.rect;
-        center.set((r.x0 + r.x1) / 2, 0, (r.z0 + r.z1) / 2);
+        center.set((r.x0 + r.x1) / 2, target.label.y, (r.z0 + r.z1) / 2);
         size.set(r.x1 - r.x0, 0, r.z1 - r.z0);
       }
       spherical.setFromVector3(scratch.copy(camera.position).sub(orbit));
-      // Frame the whole part, keeping the current viewing angle.
-      flyTo({ x: center.x, z: center.z, distance: clamp(Math.max(size.x, size.y, size.z) * 1.8, MIN_DISTANCE * 3, 150), polar: spherical.phi, azimuth: spherical.theta });
+      // Frame the whole part at its own height, keeping the viewing angle.
+      flyTo({ x: center.x, z: center.z, y: sectionOn ? undefined : center.y, distance: clamp(Math.max(size.x, size.y, size.z) * 1.8, MIN_DISTANCE * 3, 150), polar: spherical.phi, azimuth: spherical.theta });
     },
     dispose() {
       disposed = true;
@@ -1101,10 +1294,13 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       host.removeEventListener('pointerdown', onPointerDown, { capture: true });
       canvas.removeEventListener('webglcontextlost', onContextLost);
       controls.removeEventListener('end', onControlsEnd);
+      controls.removeEventListener('start', onControlsStart);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('pointerdown', onCanvasDown);
       canvas.removeEventListener('pointerup', onCanvasUp);
+      host.removeEventListener('keydown', onKeyDown);
+      endPan();
       controls.dispose();
       planner = null;
       annotations.dispose();
