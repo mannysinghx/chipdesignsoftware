@@ -24,7 +24,11 @@ from fastapi.testclient import TestClient
 
 from aimem_platform import cli
 from aimem_platform.app import create_app
+from aimem_platform.audit.context import ActorRef
 from aimem_platform.operations import coverage_report
+from aimem_platform.runs.reproduce import reproduce_run
+from aimem_platform.runs.runners import LocalRunner
+from aimem_platform.runs.service import run_worker, toolchains_for
 from aimem_platform.services import Services, build_services
 
 from conftest import PlatformEnv, events_since, head_seq, upgrade
@@ -144,6 +148,78 @@ def artifact_list(ctx: Ctx) -> None:
     assert ctx.client.get("/api/artifacts", headers=ctx.login("viewer")).status_code == 200
 
 
+def _completed_run(ctx: Ctx) -> str:
+    created = ctx.client.post("/api/runs", headers=ctx.login("engineer"), json={"adapter": "platform.selftest"})
+    assert created.status_code == 201, created.text
+    run_worker(ctx.services, LocalRunner(), once=True)
+    return created.json()["run"]["run_id"]
+
+
+def run_catalog(ctx: Ctx) -> None:
+    assert ctx.client.get("/api/adapters", headers=ctx.login("viewer")).status_code == 200
+
+
+def run_submit(ctx: Ctx) -> None:
+    _completed_run(ctx)
+
+
+def run_query(ctx: Ctx) -> None:
+    run_id = _completed_run(ctx)
+    viewer = ctx.login("viewer")
+    assert ctx.client.get("/api/runs", headers=viewer).status_code == 200
+    assert ctx.client.get(f"/api/runs/{run_id}", headers=viewer).status_code == 200
+    assert ctx.client.get(f"/api/runs/{run_id}/log", headers=viewer).status_code == 200
+
+
+def run_cancel(ctx: Ctx) -> None:
+    engineer = ctx.login("engineer")
+    created = ctx.client.post("/api/runs", headers=engineer, json={"adapter": "platform.selftest"})
+    assert ctx.client.post(f"/api/runs/{created.json()['run']['run_id']}/cancel", headers=engineer).status_code == 200
+
+
+def run_reconstruct(ctx: Ctx) -> None:
+    run_id = _completed_run(ctx)
+    assert ctx.client.get(f"/api/runs/{run_id}/reconstruction", headers=ctx.login("viewer")).json()["consistent"] is True
+
+
+def evidence_query(ctx: Ctx) -> None:
+    assert ctx.client.get("/api/evidence", headers=ctx.login("viewer")).status_code == 200
+
+
+def run_lifecycle(ctx: Ctx) -> None:
+    _completed_run(ctx)
+
+
+def worker_lifecycle(ctx: Ctx) -> None:
+    run_worker(ctx.services, LocalRunner(), once=True)
+
+
+def run_reproduce(ctx: Ctx) -> None:
+    run_id = _completed_run(ctx)
+    actor = ActorRef("human", ctx.env.emails["engineer"], None, authenticated=True, role="engineer")
+    assert reproduce_run(ctx.services, LocalRunner(), run_id, actor=actor)["identical"] is True
+
+
+class _PresentDocker:
+    """Docker stand-in where every pinned toolchain is already installed."""
+
+    def __init__(self, marker: str):
+        self.marker = marker
+
+    def run(self, *args, check=False, input_text=None):
+        import subprocess
+
+        stdout = self.marker if args[:1] == ("run",) else ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+
+def toolchain_provision(ctx: Ctx) -> None:
+    toolchains = toolchains_for(ctx.services)
+    marker = next(iter(toolchains.bundles.values())).sha256
+    result = toolchains.ensure(ctx.services, _PresentDocker(marker), allow_download=False)
+    assert all(action["action"] == "present" for action in result["actions"])
+
+
 SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "system.lifecycle": lifecycle,
     "system.migrate": migrate,
@@ -162,6 +238,16 @@ SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "artifact.read": artifact_read,
     "artifact.list": artifact_list,
     "cli.command": cli_command,
+    "run.catalog": run_catalog,
+    "run.submit": run_submit,
+    "run.query": run_query,
+    "run.cancel": run_cancel,
+    "run.reconstruct": run_reconstruct,
+    "evidence.query": evidence_query,
+    "run.lifecycle": run_lifecycle,
+    "worker.lifecycle": worker_lifecycle,
+    "run.reproduce": run_reproduce,
+    "toolchain.provision": toolchain_provision,
     **{feature_id: (lambda ctx, feature_id=feature_id: ui(ctx, feature_id)) for feature_id in (
         "ui.session", "ui.interaction", "ui.view", "ui.state", "ui.param",
         "ui.export", "ui.sweep", "ui.agent_replay", "ui.twin", "ui.error",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 import re
 import traceback
 
@@ -174,4 +175,14 @@ def download_artifact(sha256: str, _: CurrentUser = Depends(require_role("viewer
         evidence_class=artifact.evidence_class,
         details={"name": artifact.name, "size_bytes": artifact.size_bytes},
     )
-    return FileResponse(services.artifacts.path_for(sha256), media_type=artifact.media_type, filename=artifact.name)
+    media_type = artifact.media_type
+    if media_type == "application/octet-stream":
+        # Blobs registered before their type was known (e.g. layout images) still render inline.
+        media_type = mimetypes.guess_type(artifact.name)[0] or media_type
+    inline = media_type.startswith("image/")
+    return FileResponse(
+        services.artifacts.path_for(sha256),
+        media_type=media_type,
+        filename=artifact.name,
+        content_disposition_type="inline" if inline else "attachment",
+    )

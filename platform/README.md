@@ -59,6 +59,35 @@ says so in the Activity view.
 | `aimem-platform tail --limit 50` | Print the latest events |
 | `aimem-platform coverage` | Compare the log with `features.yaml` |
 
+## Tool runs (Phase 1)
+
+A **run** executes one adapter's pinned tools in a sandbox and records everything about it.
+
+| Adapter | Tools | Evidence |
+| --- | --- | --- |
+| `platform.selftest` | python3 in the pinned image | The sandbox really has no network, a read-only root filesystem and inputs, and a non-root user |
+| `rtl.lint` | Verilator 5.053 `-Wall` | Lint of the full T0 hierarchy and each block |
+| `rtl.sim` | cocotb 2.1 + Icarus 14 | Seeded regression against independent Python reference models (`verification/cocotb/`) |
+| `formal.sby` | SymbiYosys 0.69 + Bitwuzla | SECDED proofs for any data word, channel k-induction proof, cover checks, protocol contract (`formal/*.sby`) |
+| `physical.orfs` | OpenROAD-flow-scripts, OpenSTA, KLayout | `aimem_t0_channel` → sky130hd GDS, KLayout DRC and LVS, timing at the 800 MHz contract clock |
+
+**Pinned toolchains** (`toolchains.lock.json`): the `openroad/orfs` image by digest, and the OSS CAD Suite by SHA-256 in a read-only Docker volume. `aimem-platform toolchain install` is the only step that downloads anything.
+
+**Sandbox** (`runs/runners.py`, DockerRunner): `--network none`, read-only root filesystem, every capability dropped, `no-new-privileges`, non-root user, CPU/memory/PID limits, wall-clock timeout, and only `/work/in` (read-only), `/work/out`, and toolchain volumes mounted. The host environment is not passed in. The self-test adapter checks all of this on every machine.
+
+**Identity**: a run's spec hash covers the image digest, toolchain hashes, command, environment, and every input file's SHA-256 (inputs are snapshotted into the artifact store at submission). Limits are recorded but excluded, because they bound a run rather than define it.
+
+**Audit**: `run.lifecycle` records `queued` (with the complete spec), `claimed`, `started` (committed before the sandbox launches), `outputs_recorded` (every kept output by hash, plus normalized hashes for comparison), and `finished` / `errored` / `timed_out` / `cancelled`, all in one trace. `aimem-platform reconstruct <run>` and the Runs workspace rebuild a run from those events alone and compare them with the `runs` table.
+
+**Reproducibility**: `aimem-platform reproduce <run>` re-executes the spec recovered from the audit log and compares normalized outputs (GDSII dates zeroed; timing and memory keys removed from JSON). `manifest` and `compare-manifests` compare runs across machines; CI's `eda-runs` job is the second machine.
+
+```bash
+platform/.venv/bin/aimem-platform toolchain install      # pinned image + hash-verified bundle
+npm run platform:worker                                   # executes queued runs in the sandbox
+platform/.venv/bin/aimem-platform run rtl.sim             # or submit from the Runs workspace
+platform/.venv/bin/aimem-platform reproduce <run-id>
+```
+
 ## Adding a feature
 
 1. Register it in `features.yaml` with the actions it must emit (`events`) and may emit (`may_emit`).

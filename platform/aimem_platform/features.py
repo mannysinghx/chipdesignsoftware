@@ -10,7 +10,7 @@ import yaml
 
 FEATURE_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 ACTION_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-KINDS = frozenset({"api", "ui", "system", "cli"})
+KINDS = frozenset({"api", "ui", "system", "cli", "worker"})
 HTTP_REQUEST = "http_request"
 
 

@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 import sys
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -71,11 +72,131 @@ def cmd_coverage(args: argparse.Namespace, services: Services, step: StepHandle)
     return 0 if not report["undeclared"] else 3
 
 
+def _runner(args: argparse.Namespace, services: Services):
+    from .runs.runners import make_runner
+
+    return make_runner(args.runner or services.settings.runner, services.settings.docker_bin)
+
+
+def cmd_toolchain(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .runs.service import toolchains_for
+    from .runs.toolchains import DockerCLI
+
+    toolchains = toolchains_for(services)
+    docker = DockerCLI(services.settings.docker_bin)
+    if not docker.available():
+        print("Docker is not running.", file=sys.stderr)
+        return 2
+    if args.action == "status":
+        status = toolchains.status(docker)
+        step.details["status"] = status
+        print(json.dumps({"lock_digest": toolchains.lock_digest, **status}, indent=2))
+        return 0 if all(status["images"].values()) and all(status["bundles"].values()) else 1
+    result = toolchains.ensure(services, docker, allow_download=not args.offline)
+    step.details["actions"] = result["actions"]
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_worker(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .runs.service import docker_container_alive, run_worker
+
+    runner = _runner(args, services)
+    alive = docker_container_alive(services.settings.docker_bin) if runner.name == "docker" else None
+    try:
+        executed = run_worker(services, runner, once=args.once, poll_s=args.poll, container_alive=alive)
+    except KeyboardInterrupt:
+        executed = -1
+    step.details["executed"] = executed
+    return 0
+
+
+def _parse_params(pairs: list[str]) -> dict:
+    params = {}
+    for pair in pairs:
+        key, _, value = pair.partition("=")
+        params[key] = json.loads(value) if value[:1] in "[{0123456789-" or value in ("true", "false", "null") else value
+    return params
+
+
+def cmd_run(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .api.runs import serialize_run
+    from .audit.context import cli_actor
+    from .runs.reproduce import run_inline
+    from .runs.service import submit_run
+
+    runner = _runner(args, services)
+    run = submit_run(services, args.adapter, _parse_params(args.param), actor=cli_actor())
+    step.target = ("run", str(run.run_id))
+    finished = run_inline(services, runner, run)
+    payload = serialize_run(finished)
+    step.details.update({"run_id": payload["run_id"], "status": payload["status"], "output_manifest_hash": payload["output_manifest_hash"]})
+    print(json.dumps(payload, indent=2))
+    return 0 if finished.status in ("succeeded", "failed") else 1
+
+
+def cmd_reproduce(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .audit.context import cli_actor
+    from .runs.reproduce import reproduce_run
+
+    result = reproduce_run(services, _runner(args, services), args.run_id, actor=cli_actor())
+    step.target = ("run", args.run_id)
+    step.details.update({"identical": result["identical"], "reproduction_run": result["reproduction_run"]})
+    print(json.dumps(result, indent=2))
+    return 0 if result["identical"] else 4
+
+
+def cmd_reconstruct(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .runs.reconstruct import compare_with_record
+
+    result = compare_with_record(services, args.run_id)
+    step.target = ("run", args.run_id)
+    step.details["consistent"] = result["consistent"]
+    print(json.dumps({"checks": result["checks"], "consistent": result["consistent"], "problems": result["reconstructed"]["problems"]}, indent=2))
+    return 0 if result["consistent"] else 5
+
+
+def cmd_manifest(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .runs.reconstruct import reconstruct_run
+
+    rebuilt = reconstruct_run(services, args.run_id)
+    step.target = ("run", args.run_id)
+    outputs = rebuilt["outputs"] or {}
+    print(json.dumps({
+        "run_id": args.run_id,
+        "adapter": rebuilt["adapter"],
+        "spec_hash": rebuilt["spec_hash"],
+        "status": (rebuilt["final"] or {}).get("status"),
+        "output_manifest_hash": outputs.get("output_manifest_hash"),
+        "reproducible": outputs.get("reproducible", {}),
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_compare_manifests(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .runs.reconstruct import compare_manifests
+
+    first = json.loads(Path(args.first).read_text())
+    second = json.loads(Path(args.second).read_text())
+    result = compare_manifests(first.get("reproducible", first), second.get("reproducible", second))
+    result["spec_hash_equal"] = first.get("spec_hash") == second.get("spec_hash")
+    step.details.update({"identical": result["identical"], "spec_hash_equal": result["spec_hash_equal"]})
+    print(json.dumps(result, indent=2))
+    return 0 if result["identical"] and result["spec_hash_equal"] else 4
+
+
 COMMANDS = {
     "create-user": cmd_create_user,
     "verify-chain": cmd_verify_chain,
     "tail": cmd_tail,
     "coverage": cmd_coverage,
+    "toolchain": cmd_toolchain,
+    "worker": cmd_worker,
+    "run": cmd_run,
+    "reproduce": cmd_reproduce,
+    "reconstruct": cmd_reconstruct,
+    "manifest": cmd_manifest,
+    "compare-manifests": cmd_compare_manifests,
 }
 
 
@@ -92,6 +213,34 @@ def build_parser() -> argparse.ArgumentParser:
     tail.add_argument("--limit", type=int, default=25)
     tail.add_argument("--feature")
     commands.add_parser("coverage", help="Compare the log with the feature registry")
+
+    toolchain = commands.add_parser("toolchain", help="Check or install the pinned tool images and bundles")
+    toolchain.add_argument("action", choices=["status", "install"])
+    toolchain.add_argument("--offline", action="store_true", help="Fail instead of downloading")
+
+    worker = commands.add_parser("worker", help="Execute queued runs in the sandbox")
+    worker.add_argument("--once", action="store_true", help="Exit when the queue is empty")
+    worker.add_argument("--poll", type=float, default=1.0)
+    worker.add_argument("--runner", choices=["docker", "local"])
+
+    run = commands.add_parser("run", help="Submit a run and execute it in this process")
+    run.add_argument("adapter")
+    run.add_argument("--param", action="append", default=[], help="key=value (repeatable)")
+    run.add_argument("--runner", choices=["docker", "local"])
+
+    reproduce = commands.add_parser("reproduce", help="Re-execute a run from its audit record and compare outputs")
+    reproduce.add_argument("run_id")
+    reproduce.add_argument("--runner", choices=["docker", "local"])
+
+    reconstruct = commands.add_parser("reconstruct", help="Rebuild a run from the audit log and compare it with the runs table")
+    reconstruct.add_argument("run_id")
+
+    manifest = commands.add_parser("manifest", help="Print a run's reproducible-output manifest (from the audit log)")
+    manifest.add_argument("run_id")
+
+    compare = commands.add_parser("compare-manifests", help="Compare two manifest files, e.g. from two machines")
+    compare.add_argument("first")
+    compare.add_argument("second")
     return parser
 
 

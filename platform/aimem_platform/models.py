@@ -105,6 +105,67 @@ class UserSession(Base):
     user_agent: Mapped[str | None] = mapped_column(Text)
 
 
+RUN_STATUSES = ("queued", "running", "succeeded", "failed", "errored", "timed_out", "cancelled")
+RUN_FILE_ROLES = ("input", "output", "log")
+
+
+class Run(Base):
+    """One sandboxed tool execution. The authoritative history is its run.lifecycle audit events;
+    this row is the queryable current state and must always agree with them."""
+
+    __tablename__ = "runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued','running','succeeded','failed','errored','timed_out','cancelled')", name="status"
+        ),
+        CheckConstraint("spec_hash ~ '^[0-9a-f]{64}$'", name="spec_hash_format"),
+        CheckConstraint("trace_id ~ '^[0-9a-f]{32}$'", name="trace_id_format"),
+        Index("ix_runs_status_queued_at", "status", "queued_at"),
+        Index("ix_runs_adapter_queued_at", "adapter", "queued_at"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    adapter: Mapped[str] = mapped_column(Text, nullable=False)
+    adapter_version: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    verdict: Mapped[str | None] = mapped_column(Text)
+    spec_json: Mapped[str] = mapped_column(Text, nullable=False)
+    spec_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    trace_id: Mapped[str] = mapped_column(Text, nullable=False)
+    git_json: Mapped[str | None] = mapped_column(Text)
+    reproduction_of: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_id: Mapped[str | None] = mapped_column(Text)
+    runner: Mapped[str | None] = mapped_column(Text)
+    exit_code: Mapped[int | None] = mapped_column(BigInteger)
+    summary_json: Mapped[str | None] = mapped_column(Text)
+    output_manifest_hash: Mapped[str | None] = mapped_column(Text)
+    evidence_class: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class RunFile(Base):
+    """A file a run consumed or produced, by content hash. Bytes live in the artifact store."""
+
+    __tablename__ = "run_files"
+    __table_args__ = (
+        CheckConstraint("role IN ('input','output','log')", name="role"),
+        CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_format"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("runs.run_id"), primary_key=True)
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    normalized_sha256: Mapped[str | None] = mapped_column(Text)
+
+
 class Artifact(Base):
     """Metadata for a content-addressed blob. The bytes live under var/artifacts/sha256/."""
 

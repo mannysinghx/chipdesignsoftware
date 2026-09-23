@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "comment": "Pinned tool environments for sandboxed runs. A run's identity includes these digests, so changing one is a new toolchain, never a silent upgrade.",
+  "images": {
+    "orfs": {
+      "ref": "openroad/orfs:26Q3-605-g2d29bdaf8",
+      "digest": "sha256:a2e2672dde26721a0a6c4c9f8d9c9238143813d1729cfc7d669ab6eef3681199",
+      "platform": "linux/amd64",
+      "provides": ["openroad", "opensta", "yosys 0.68", "klayout 0.30.12", "openroad-flow-scripts", "python3.10", "g++ 11.4", "perl", "make"]
+    }
+  },
+  "bundles": {
+    "oss-cad-suite": {
+      "release": "2026-09-22",
+      "url": "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-09-22/oss-cad-suite-linux-x64-20260922.tgz",
+      "sha256": "8b989606925c642da3ea78d7beda2972106ba66a9cdf507c9ba4c0a4d718d012",
+      "size_bytes": 742014227,
+      "volume": "aimem-oss-cad-suite-20260922",
+      "mount": "/opt/eda",
+      "bin": "/opt/eda/oss-cad-suite/bin",
+      "host_image": "orfs",
+      "provides": ["verilator 5.053", "iverilog 14.0", "yosys 0.69", "sby 0.69", "cocotb 2.1.0.dev0", "bitwuzla", "boolector", "yices", "z3", "cvc5"]
+    }
+  }
+}

@@ -18,7 +18,12 @@ PACKAGE = PLATFORM_DIR / "aimem_platform"
 #   artifacts.py        the content-addressed blob store (its callers write the audit event)
 #   audit/writer.py     the fallback log, used only when the database write failed
 #   audit/verifier.py   the external anchor file
-FILE_WRITERS = {"artifacts.py", "audit/writer.py", "audit/verifier.py"}
+#   runs/service.py     run workspaces: inputs materialized by hash, removed after finalize (audited lifecycle)
+#   runs/toolchains.py  hash-verified bundle downloads inside the audited toolchain.provision step
+#   runs/drivers/*      execute inside the sandbox and write only to the run's /work/out, which is
+#                       recorded file-by-file in the run's outputs_recorded event
+FILE_WRITERS = {"artifacts.py", "audit/writer.py", "audit/verifier.py", "runs/service.py", "runs/toolchains.py"}
+SANDBOX_DRIVERS = "runs/drivers/"
 DML = re.compile(r"\b(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE|GRANT|REVOKE)\b", re.IGNORECASE)
 WRITE_MODES = re.compile(r"[wax+]")
 
@@ -47,7 +52,7 @@ def test_no_raw_sql_writes_in_application_code():
 def test_files_are_written_only_by_allowlisted_modules():
     offenders = []
     for name, tree in modules():
-        if name in FILE_WRITERS:
+        if name in FILE_WRITERS or name.startswith(SANDBOX_DRIVERS):
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

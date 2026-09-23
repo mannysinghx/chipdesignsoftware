@@ -121,12 +121,78 @@ features:
     title: Artifact listing
     events: [http_request]
 
+  # ---- api: runs (Phase 1) ------------------------------------------------
+  - id: run.catalog
+    kind: api
+    phase: 1
+    owner: platform
+    title: List tool adapters and their parameters
+    events: [http_request]
+  - id: run.submit
+    kind: api
+    phase: 1
+    owner: platform
+    title: Submit a sandboxed tool run
+    events: [http_request]
+  - id: run.query
+    kind: api
+    phase: 1
+    owner: platform
+    title: List runs, read run detail, and tail run logs
+    events: [http_request]
+  - id: run.cancel
+    kind: api
+    phase: 1
+    owner: platform
+    title: Cancel a queued or running tool run
+    events: [http_request, cancel_requested]
+  - id: run.reconstruct
+    kind: api
+    phase: 1
+    owner: platform
+    title: Rebuild a run from the audit log and compare it with the runs table
+    events: [http_request]
+  - id: evidence.query
+    kind: api
+    phase: 1
+    owner: platform
+    title: Latest executed evidence per adapter, with reproduction status
+    events: [http_request]
+
+  # ---- worker (Phase 1) ----------------------------------------------------
+  - id: run.lifecycle
+    kind: worker
+    phase: 1
+    owner: platform
+    title: Run lifecycle (queued events carry the complete spec; outputs are recorded by hash)
+    events: [queued, claimed, started, outputs_recorded, finished]
+    may_emit: [errored, timed_out, cancelled, abandoned]
+  - id: worker.lifecycle
+    kind: worker
+    phase: 1
+    owner: platform
+    title: Run worker start and stop
+    events: [started, stopped]
+
   # ---- cli -----------------------------------------------------------------
   - id: cli.command
     kind: cli
     phase: 0
     owner: platform
     title: Platform CLI invocations
+    events: [started, finished]
+    may_emit: [failed]
+  - id: run.reproduce
+    kind: cli
+    phase: 1
+    owner: platform
+    title: Re-execute a run from its audit record and compare normalized outputs
+    events: [compared]
+  - id: toolchain.provision
+    kind: cli
+    phase: 1
+    owner: platform
+    title: Pull pinned images and install hash-verified tool bundles
     events: [started, finished]
     may_emit: [failed]
 

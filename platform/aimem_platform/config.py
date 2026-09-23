@@ -45,6 +45,14 @@ class Settings(BaseSettings):
 
     otel_console: bool = False
 
+    # Phase 1 runs
+    repo_root: Path = PLATFORM_ROOT.parent
+    toolchains_path: Path = PLATFORM_ROOT / "toolchains.lock.json"
+    runner: str = "docker"  # docker (sandboxed) or local (tests only; no isolation)
+    docker_bin: str = "docker"
+    keep_run_workspaces: bool = False
+    run_log_chunk_bytes: int = 262_144
+
     @property
     def artifact_root(self) -> Path:
         return self.var_dir / "artifacts"
