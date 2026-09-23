@@ -1,7 +1,7 @@
 # AIMEM Design Studio: Self-Improving AI Chip Design Platform
 
 **Plan date:** 22 September 2026
-**Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phase 1 built and executed the same day (see [Phase 1 status](#phase-1-status-2026-09-22)). Phases 2 to 6 are proposed.
+**Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phase 1 built and executed the same day, with all three exit criteria met (see [Phase 1 status](#phase-1-status-2026-09-22)). Phases 2 to 6 are proposed.
 **Extends:** `../AIMEM_X1_AI_DESIGN_PLATFORM_DEVELOPMENT_PLAN.md` (31 Aug 2026). That plan defines the product, evidence classes, and agent authority boundaries. This plan adds three things: a working backend and real agents, **recursive self-improvement (RSI)**, and **mandatory logging of every action and feature**.
 
 ---
@@ -190,9 +190,9 @@ Every phase has testable exit criteria. Durations assume 2–3 engineers plus ag
 
 | Exit criterion | Evidence |
 | --- | --- |
-| `aimem_t0_channel` reaches a DRC/LVS-clean sky130 GDS with OpenSTA timing, labeled `executed (public PDK)` | Run `6f3d41e1` (physical.orfs, sandboxed, 6.4 min): **DRC 0 violations, LVS match**, GDS written; OpenSTA: fmax **169.5 MHz**, setup WNS −4.65 ns / TNS −630 ns at the 1.25 ns (800 MHz) contract clock, hold met; 4,883 cells, 95,861 µm² die. Evidence class `executed`, limitation "public PDK (sky130hd) proxy; not signoff and not the production node" |
-| Same inputs reproduce the same output hashes on two machines | Same machine: selftest, lint, and sim re-executed from their audit records with **identical** normalized outputs (formal and physical reproductions pending at the time of writing). Second machine: CI job `eda-runs` executes the same specs on native x86; comparison recorded in the ops log |
-| Every run is fully reconstructable from `audit_events` alone | `aimem-platform reconstruct` / the Runs workspace rebuild each run from its `run.lifecycle` events: all 7 checks (spec, spec hash, inputs, input availability, status, outputs, output manifest hash) consistent for every executed run; a test edits a `runs` row directly and the rebuild reports the disagreement |
+| `aimem_t0_channel` reaches a DRC/LVS-clean sky130 GDS with OpenSTA timing, labeled `executed (public PDK)` | **Met.** Run `6f3d41e1` (physical.orfs, sandboxed, 6.4 min): **DRC 0 violations, LVS match**, GDS written; OpenSTA: fmax **169.5 MHz**, setup WNS −4.65 ns / TNS −630 ns at the 1.25 ns (800 MHz) contract clock, hold met; 4,883 cells, 95,861 µm² die. Evidence class `executed`, limitation "public PDK (sky130hd) proxy; not signoff and not the production node" |
+| Same inputs reproduce the same output hashes on two machines | **Met.** Same machine (Apple M4 Max; the amd64 image under Rosetta): all five adapters re-executed from their audit records with **identical** normalized outputs. Second machine (CI job `eda-runs`, run 35805452190, GitHub ubuntu-24.04, native x86-64): the same five specs (equal spec hashes) produced **identical** output manifests, 8/8 files. The physical flow's GDS matches with only BGNLIB/BGNSTR dates zeroed, and its DEF and netlist match byte for byte. The JSON outputs were compared whole: the normalizer dropped no keys from them. Compared with `aimem-platform compare-manifests` and recorded in the ops log. Two machines, one sample each |
+| Every run is fully reconstructable from `audit_events` alone | **Met.** `aimem-platform reconstruct` / the Runs workspace rebuild each run from its `run.lifecycle` events: all 7 checks (spec, spec hash, inputs, input availability, status, outputs, output manifest hash) consistent for every executed run, locally and in CI; a test edits a `runs` row directly and the rebuild reports the disagreement |
 
 **What the tools found (executed evidence, not models):**
 - `aimem_t0_channel` reports `ecc_corrected` / `ecc_uncorrectable` in the cycle *before* `rsp_valid` and clears them when `rsp_valid` rises, so a consumer sampling response fields never sees ECC status. Found by simulation (`ecc_status_is_valid_with_the_response`, 20/21 tests pass) and independently by formal (`channel_protocol.sby` FAIL with a counterexample). Not fixed: RTL changes need the owner's approval.
