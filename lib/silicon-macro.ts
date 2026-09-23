@@ -19,6 +19,7 @@
 
 import { ACCELERATOR_FLOORPLAN, OPEN_TITAN_REFERENCE } from './reference-microchip.ts';
 import { PACKAGE_GEOMETRY, SCENE_MM_PER_UNIT, STACK_PLACEMENTS, acceleratorPhyAnchor, type StackSide } from './package-connectors.ts';
+import { FLOW, packPhase, type Flow, type PartId } from './silicon-part-ids.ts';
 
 export const um = (value: number) => value * 1e-3;
 export const nm = (value: number) => value * 1e-6;
@@ -347,6 +348,10 @@ export function describeLocation(x: number, z: number): string[] {
 type Band = readonly [number, number];
 const band = (y0Um: number, y1Um: number): Band => [um(y0Um), um(y1Um)];
 
+// Every metal layer reaches the next one through a via band, so a net can
+// climb from a transistor to a bump. Some via bands stand in for layers the
+// view does not draw: V3 is the stacked-via column through the thin upper
+// local layers (M4-M7 on a real die) between M3 and Mx1.
 export const STACK = {
   fin: band(0, 0.05),
   gate: band(0, 0.08),
@@ -359,6 +364,7 @@ export const STACK = {
   m2: band(0.205, 0.235),
   v2: band(0.235, 0.262),
   m3: band(0.262, 0.3),
+  v3: band(0.306, 0.8),
   mx1: band(0.8, 1.1),
   vx1: band(1.1, 1.4),
   mx2: band(1.4, 1.72),
@@ -366,15 +372,26 @@ export const STACK = {
   mx3: band(2.1, 2.5),
   vx3: band(2.5, 2.8),
   mx4: band(2.8, 3.2),
+  vx4: band(3.23, 3.7),
   sysH: band(3.7, 4.1),
+  vs: band(4.1, 4.15),
   sysV: band(4.15, 4.5),
+  vy0: band(4.5, 4.6),
   my1: band(4.6, 5.4),
   vy1: band(5.4, 6.2),
   my2: band(6.2, 7.0),
+  vc0: band(7.0, 7.05),
   chanH: band(7.05, 7.3),
+  vc1: band(7.3, 7.32),
   chanV: band(7.32, 7.55),
+  vn: band(7.55, 7.6),
   noc: band(7.6, 8.4),
+  nocH: band(7.6, 7.95),
+  vnj: band(7.95, 8.05),
+  nocV: band(8.05, 8.4),
+  vr: band(8.4, 8.5),
   ring: band(8.5, 9.1),
+  vz0: band(9.1, 9.2),
   mz1: band(9.2, 10.8),
   vz1: band(10.8, 11.4),
   mz2: band(11.4, 13.0),
@@ -383,6 +400,7 @@ export const STACK = {
   pillar: band(14.62, 20.5),
   solder: band(20.5, 23.0),
   bpr: band(-0.05, -0.012),
+  vbpr: band(-0.012, 0.062),
   nanoTsv: band(-0.6, -0.05),
   backside: band(-0.68, -0.6),
   dtc: band(-1.6, 0.002),
@@ -409,14 +427,20 @@ export type LevelSpec = {
   fullAt: number;
   /** Glow pulses: spacing and speed along a wire, in µm and µm/s. */
   pulse: { period: number; speed: number };
+  /**
+   * Vias are far shorter than wires, so a pulse climbing one would flash by
+   * unseen. Along a vertical conductor the pulse path counts each µm of
+   * height this many times: pulses visibly climb and descend between layers.
+   */
+  viaStretch: number;
 };
 
 export const LEVELS: LevelSpec[] = [
-  { id: 0, name: 'Global metal', chunk: 0, radius: 0, activateAt: Infinity, fullAt: Infinity, pulse: { period: 1500, speed: 1500 } },
-  { id: 1, name: 'Semi-global metal', chunk: 0.5, radius: 3, activateAt: 6, fullAt: 4.4, pulse: { period: 150, speed: 150 } },
-  { id: 2, name: 'Intermediate metal', chunk: 0.1, radius: 2, activateAt: 0.45, fullAt: 0.33, pulse: { period: 28, speed: 26 } },
-  { id: 3, name: 'Local interconnect', chunk: 0.003, radius: 2, activateAt: 0.014, fullAt: 0.0105, pulse: { period: 1.8, speed: 1.4 } },
-  { id: 4, name: 'Front-end devices', chunk: 0.001, radius: 2, activateAt: 0.0046, fullAt: 0.0034, pulse: { period: 40, speed: 12 } },
+  { id: 0, name: 'Global metal', chunk: 0, radius: 0, activateAt: Infinity, fullAt: Infinity, pulse: { period: 1500, speed: 1500 }, viaStretch: 200 },
+  { id: 1, name: 'Semi-global metal', chunk: 0.5, radius: 3, activateAt: 6, fullAt: 4.4, pulse: { period: 150, speed: 150 }, viaStretch: 16 },
+  { id: 2, name: 'Intermediate metal', chunk: 0.1, radius: 2, activateAt: 0.45, fullAt: 0.33, pulse: { period: 28, speed: 26 }, viaStretch: 8 },
+  { id: 3, name: 'Local interconnect', chunk: 0.003, radius: 2, activateAt: 0.014, fullAt: 0.0105, pulse: { period: 1.8, speed: 1.4 }, viaStretch: 8 },
+  { id: 4, name: 'Front-end devices', chunk: 0.001, radius: 2, activateAt: 0.0046, fullAt: 0.0034, pulse: { period: 40, speed: 12 }, viaStretch: 1 },
 ];
 
 export function levelFade(level: LevelSpec, distance: number): number {
@@ -463,11 +487,42 @@ export const MATERIAL_KEYS: MaterialKey[] = ['copper', 'gold', 'tungsten', 'gate
 
 /**
  * Packed per instance: offset xyz (chunk-local), size xyz, then
- * data = [tint + axis flag, path start (µm), glow, pulse phase].
- * tint is in [0, 1); +2 marks a box whose glow path runs along z.
- * glow > 0 pulses forward along the path, < 0 backward.
+ * data = [tint + axis flag, path start (µm), glow, packed phase].
+ * tint is in [0, 1); the flag adds 2 when the glow path runs along z and 4
+ * when it runs along y (a via). glow > 0 pulses forward along the path,
+ * < 0 backward. The packed phase carries the part and flow in its integer
+ * part (see silicon-part-ids.ts); its fraction is the pulse phase.
  */
 export const FLOATS_PER_INSTANCE = 10;
+
+/** Axis a primitive's glow path runs along, from its packed tint. */
+export const pathAxis = (tintAndFlag: number): 'x' | 'z' | 'y' => {
+  const flag = Math.floor(tintAndFlag / 2);
+  return flag === 0 ? 'x' : flag === 1 ? 'z' : 'y';
+};
+
+export { FLOW, type Flow };
+
+/**
+ * How a conductor is drawn and what it carries. `arc` and `entry` place it
+ * on a continuous pulse path: `arc` is the path length (µm, vias stretched)
+ * where the pulse enters, at the `entry` end of the primitive along its
+ * axis, so pulses run unbroken from one primitive of a net into the next.
+ */
+export type Emit = {
+  part?: PartId;
+  flow?: Flow;
+  glow?: number;
+  phase?: number;
+  arc?: number;
+  entry?: 'min' | 'max';
+  /** Glow-path axis; 'y' for vias. Default: the longer horizontal side. */
+  axis?: 'x' | 'y' | 'z';
+  /** Raise the top face by a tint-dependent sliver so coplanar shapes never z-fight. Default: on for wires, off for vias. */
+  lift?: boolean;
+  /** Fixes the tint for wires whose unclipped extent differs by chunk. */
+  seed?: number;
+};
 
 export type Batch = { material: MaterialKey; shape: ShapeKey; data: Float32Array; count: number };
 
@@ -492,14 +547,16 @@ export class ChunkBuilder {
   readonly bounds: Rect;
   readonly ox: number;
   readonly oz: number;
+  readonly level: number;
   private readonly buffers = new Map<string, number[]>();
   yMin = Infinity;
   yMax = -Infinity;
 
-  constructor(bounds: Rect, origin: [number, number]) {
+  constructor(bounds: Rect, origin: [number, number], level = 0) {
     this.bounds = bounds;
     this.ox = origin[0];
     this.oz = origin[1];
+    this.level = level;
   }
 
   private push(material: MaterialKey, shape: ShapeKey, values: number[]) {
@@ -516,29 +573,67 @@ export class ChunkBuilder {
    * `seed` fixes the tint for wires whose unclipped extent differs by chunk.
    */
   box(material: MaterialKey, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, glow = 0, phase = 0, seed?: number) {
+    this.seg(material, x0, x1, y0, y1, z0, z1, { glow, phase, seed });
+  }
+
+  /** A conductor or other box, with what it carries and its place on a pulse path. */
+  seg(material: MaterialKey, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, emit: Emit = {}) {
     const b = this.bounds;
     const cx0 = Math.max(x0, b.x0);
     const cx1 = Math.min(x1, b.x1);
     const cz0 = Math.max(z0, b.z0);
     const cz1 = Math.min(z1, b.z1);
     if (cx0 >= cx1 || cz0 >= cz1 || y0 >= y1) return;
-    const alongX = x1 - x0 >= z1 - z0;
+    const axis = emit.axis ?? (x1 - x0 >= z1 - z0 ? 'x' : 'z');
     // Tint comes from the unclipped box, so a wire split across chunks keeps
     // one colour. Shapes on one layer overlap where they cross; a small
     // tint-driven lift keeps their top faces from z-fighting.
-    const tint = seed === undefined ? rand(nmIndex(x0), nmIndex(z0), nmIndex(y0 * 10), 17) : rand(seed, 23);
-    const top = y1 + (y1 - y0) * 0.04 * tint;
-    // The pulse path coordinate is the absolute position along the wire (µm),
-    // so pulses stay continuous however the wire is clipped.
-    const start = glow === 0 ? 0 : (alongX ? cx0 : cz0) * 1000;
-    this.push(material, 'box', [(cx0 + cx1) / 2 - this.ox, (y0 + top) / 2, (cz0 + cz1) / 2 - this.oz, cx1 - cx0, top - y0, cz1 - cz0, tint + (alongX ? 0 : 2), start, glow, phase]);
+    const tint = emit.seed === undefined ? rand(nmIndex(x0), nmIndex(z0), nmIndex(y0 * 10), 17) : rand(emit.seed, 23);
+    const top = emit.lift ?? axis !== 'y' ? y1 + (y1 - y0) * 0.04 * tint : y1;
+    let glow = emit.glow ?? 0;
+    let start = 0;
+    if (glow !== 0) {
+      if (emit.arc !== undefined) {
+        // Continuous path: the pulse enters at the `entry` end with path length `arc`.
+        const stretch = axis === 'y' ? LEVELS[this.level].viaStretch : 1;
+        const [a0, a1, c0] = axis === 'x' ? [x0, x1, cx0] : axis === 'z' ? [z0, z1, cz0] : [y0, y1, y0];
+        if ((emit.entry ?? 'min') === 'min') {
+          start = emit.arc + (c0 - a0) * 1000 * stretch;
+          glow = Math.abs(glow);
+        } else {
+          start = -(emit.arc + (a1 - c0) * 1000 * stretch);
+          glow = -Math.abs(glow);
+        }
+      } else {
+        // The pulse path coordinate is the absolute position along the wire
+        // (µm), so pulses stay continuous however the wire is clipped.
+        start = (axis === 'x' ? cx0 : axis === 'z' ? cz0 : y0) * 1000;
+      }
+    }
+    const flag = axis === 'x' ? 0 : axis === 'z' ? 2 : 4;
+    this.push(material, 'box', [(cx0 + cx1) / 2 - this.ox, (y0 + top) / 2, (cz0 + cz1) / 2 - this.oz, cx1 - cx0, top - y0, cz1 - cz0, tint + flag, start, glow, packPhase(emit.part, emit.flow ?? FLOW.data, emit.phase ?? 0)]);
+  }
+
+  /**
+   * A via: a vertical conductor centred at (x, z) whose glow path climbs (entry 'min')
+   * or descends (entry 'max') between y0 and y1.
+   */
+  via(material: MaterialKey, x: number, z: number, halfX: number, halfZ: number, y0: number, y1: number, emit: Emit = {}) {
+    this.seg(material, x - halfX, x + halfX, y0, y1, z - halfZ, z + halfZ, { lift: false, ...emit, axis: 'y' });
   }
 
   /** Vertical cylinder, kept by the chunk that contains its axis. */
-  cyl(material: MaterialKey, cx: number, cz: number, radius: number, y0: number, y1: number, glow = 0, phase = 0) {
+  cyl(material: MaterialKey, cx: number, cz: number, radius: number, y0: number, y1: number, glow = 0, phase = 0, emit: Emit = {}) {
     if (!insideRect(this.bounds, cx, cz) || y0 >= y1) return;
     const tint = rand(nmIndex(cx), nmIndex(cz), nmIndex(y0 * 10), 29);
-    this.push(material, 'cyl', [cx - this.ox, (y0 + y1) / 2, cz - this.oz, radius * 2, y1 - y0, radius * 2, tint, 0, glow, phase]);
+    const stretch = LEVELS[this.level].viaStretch;
+    let start = 0;
+    let g = emit.glow ?? glow;
+    if (g !== 0 && emit.arc !== undefined) {
+      start = (emit.entry ?? 'min') === 'min' ? emit.arc : -(emit.arc + (y1 - y0) * 1000 * stretch);
+      g = (emit.entry ?? 'min') === 'min' ? Math.abs(g) : -Math.abs(g);
+    }
+    this.push(material, 'cyl', [cx - this.ox, (y0 + y1) / 2, cz - this.oz, radius * 2, y1 - y0, radius * 2, tint + (g !== 0 ? 4 : 0), start, g, packPhase(emit.part, emit.flow ?? FLOW.data, emit.phase ?? phase)]);
   }
 
   finish(level: number, ix: number, iz: number): ChunkData {
@@ -637,44 +732,8 @@ function mazeRuns(layer: MazeLayer, bounds: Rect, leaves: LeafCache): Run[] {
   return runs;
 }
 
-function emitRuns(builder: ChunkBuilder, layer: MazeLayer, runs: Run[]) {
-  for (const run of runs) {
-    const across = (run.track + 0.5) * layer.pitch;
-    const half = layer.width / 2;
-    const active = rand(layer.salt + 3, run.track, run.start) < layer.glowChance;
-    const glow = active ? (rand(layer.salt + 4, run.track, run.start) < 0.5 ? 1 : -1) : 0;
-    const phase = rand(layer.salt + 5, run.track, run.start);
-    if (layer.horizontal) builder.box(layer.material, run.lo, run.hi, layer.y[0], layer.y[1], across - half, across + half, glow, phase);
-    else builder.box(layer.material, across - half, across + half, layer.y[0], layer.y[1], run.lo, run.hi, glow, phase);
-  }
-}
-
-/** Vias where a horizontal and a vertical run cross, thinned by hash. */
-function emitVias(builder: ChunkBuilder, horizontal: { layer: MazeLayer; runs: Run[] }, vertical: { layer: MazeLayer; runs: Run[] }, y: Band, size: number, chance: number, material: MaterialKey = 'tungsten') {
-  const byTrack = new Map<number, Run[]>();
-  for (const run of vertical.runs) {
-    const list = byTrack.get(run.track);
-    if (list) list.push(run);
-    else byTrack.set(run.track, [run]);
-  }
-  const vPitch = vertical.layer.pitch;
-  for (const hRun of horizontal.runs) {
-    const z = (hRun.track + 0.5) * horizontal.layer.pitch;
-    const first = Math.ceil(hRun.lo / vPitch - 0.5);
-    const last = Math.floor(hRun.hi / vPitch - 0.5);
-    for (let track = first; track <= last; track += 1) {
-      const runs = byTrack.get(track);
-      if (!runs) continue;
-      const x = (track + 0.5) * vPitch;
-      if (!runs.some((run) => z > run.lo && z < run.hi)) continue;
-      if (rand(horizontal.layer.salt + 7, hRun.track, track, vertical.layer.salt) >= chance) continue;
-      builder.box(material, x - size / 2, x + size / 2, y[0], y[1], z - size / 2, z + size / 2);
-    }
-  }
-}
-
 /** Plain straps across a chunk, broken wherever `allowed` rejects the region. */
-function emitStraps(builder: ChunkBuilder, leaves: LeafCache, options: { horizontal: boolean; pitch: number; offset: number; width: number; y: Band; material: MaterialKey; sample: number; allowed: (leaf: Leaf) => boolean; glowChance?: number; salt?: number }) {
+function emitStraps(builder: ChunkBuilder, leaves: LeafCache, options: { horizontal: boolean; pitch: number; offset: number; width: number; y: Band; material: MaterialKey; sample: number; allowed: (leaf: Leaf) => boolean; glowChance?: number; salt?: number; part?: PartId; flowOf?: (index: number) => Flow }) {
   const b = builder.bounds;
   const across0 = options.horizontal ? b.z0 : b.x0;
   const across1 = options.horizontal ? b.z1 : b.x1;
@@ -685,13 +744,16 @@ function emitStraps(builder: ChunkBuilder, leaves: LeafCache, options: { horizon
   for (let k = first; options.offset + k * options.pitch < across1; k += 1) {
     const across = options.offset + k * options.pitch;
     const seed = hash(salt, k, Math.round(across * 1e6));
-    const glow = rand(salt, k) < (options.glowChance ?? 0) ? (k % 2 === 0 ? 1 : -1) : 0;
+    // Power straps carry their supply; the flow toggle shows it moving.
+    const flow = options.flowOf?.(k);
+    const glow = flow !== undefined ? POWER_GLOW * (k % 2 === 0 ? 1 : -1) : rand(salt, k) < (options.glowChance ?? 0) ? (k % 2 === 0 ? 1 : -1) : 0;
     const phase = rand(salt + 1, k);
     let runStart: number | null = null;
     const flush = (end: number) => {
       if (runStart === null) return;
-      if (options.horizontal) builder.box(options.material, runStart, end, options.y[0], options.y[1], across - options.width / 2, across + options.width / 2, glow, phase, seed);
-      else builder.box(options.material, across - options.width / 2, across + options.width / 2, options.y[0], options.y[1], runStart, end, glow, phase, seed);
+      const emit: Emit = { glow, phase, seed, part: options.part, flow };
+      if (options.horizontal) builder.seg(options.material, runStart, end, options.y[0], options.y[1], across - options.width / 2, across + options.width / 2, emit);
+      else builder.seg(options.material, across - options.width / 2, across + options.width / 2, options.y[0], options.y[1], runStart, end, emit);
       runStart = null;
     };
     const s0 = Math.floor(along0 / options.sample);
@@ -729,9 +791,66 @@ function squareSpiral(builder: ChunkBuilder, cx: number, cz: number, size: numbe
   builder.box('copper', cx - size / 2 - um(40), cx - half, STACK.my2[0], STACK.my2[1], cz - width / 2, cz + width / 2);
 }
 
+/** The global power mesh: Mz2 straps along z at xs, Mz1 straps along x at zs; each alternates VDD, VSS by index. */
+export const GLOBAL_MESH = (() => {
+  const pitch = 0.6;
+  const hx = DIE.width / 2;
+  const hz = DIE.depth / 2;
+  const core = rect(-hx + DIE.ioBand, -hz + DIE.ioBand, hx - DIE.ioBand, hz - DIE.ioBand);
+  const xs: number[] = [];
+  const zs: number[] = [];
+  for (let x = core.x0 + pitch / 2; x < core.x1; x += pitch) xs.push(x);
+  for (let z = core.z0 + pitch / 2; z < core.z1; z += pitch) zs.push(z);
+  return { pitch, width: um(24), core, xs, zs };
+})();
+
+/** On-die network geometry, shared by the global level (lanes, junctions) and level 1 (drops into routers and PHY lanes). */
+export const NOC = (() => {
+  const a = TILE_ARRAY_RECT;
+  const margin = 0.26;
+  const columnEdges = distinct(TILES.map((tile) => tile.rect.x0));
+  const columnRight = distinct(TILES.map((tile) => tile.rect.x1));
+  const rowTop = distinct(TILES.map((tile) => tile.rect.z0));
+  const rowBottom = distinct(TILES.map((tile) => tile.rect.z1));
+  // Lanes in every channel, plus the two edge lanes that close the network
+  // around the array (the east and west PHYs join the network there).
+  const vertical: number[] = [a.x0 - margin];
+  for (let k = 0; k < columnEdges.length - 1; k += 1) {
+    const gapStart = columnRight[k];
+    const gapEnd = columnEdges[k + 1];
+    // The SRAM strip sits in the widest gap: one lane each side of it.
+    if (gapEnd - gapStart > 1) vertical.push((gapStart + SRAM_STRIP.rect.x0) / 2, (SRAM_STRIP.rect.x1 + gapEnd) / 2);
+    else vertical.push((gapStart + gapEnd) / 2);
+  }
+  vertical.push(a.x1 + margin);
+  const horizontal = [a.z0 - margin, ...rowBottom.slice(0, -1).map((z, k) => (z + rowTop[k + 1]) / 2), a.z1 + margin];
+  const span = { x0: a.x0 - margin, x1: a.x1 + margin, z0: a.z0 - margin, z1: a.z1 + margin };
+  const lane = { lines: 4, width: um(14), pitch: um(34) };
+  // Links run past the far line of the lane they join, so they meet every line.
+  const overhang = um(60);
+  const routerLane = (tile: Tile) => {
+    const [x] = rectCenter(tile.router);
+    const nearest = horizontal.reduce((best, z) => (Math.abs(z - tile.router.z1) < Math.abs(best - tile.router.z1) ? z : best), horizontal[0]);
+    const start = tile.router.z0 + 0.05;
+    return { x, lane: nearest, start, from: Math.min(start, nearest - overhang), to: Math.max(start, nearest + overhang) };
+  };
+  const phyBundles = (phy: Phy) => {
+    const d = phy.drivers;
+    return [0.25, 0.5, 0.75].map((f) => {
+      if (phy.side === 'west' || phy.side === 'east') {
+        const laneX = phy.side === 'west' ? a.x0 - margin : a.x1 + margin;
+        return { horizontal: true, across: phy.rect.z0 + (phy.rect.z1 - phy.rect.z0) * f, from: phy.side === 'west' ? d.x0 : laneX - overhang, to: phy.side === 'west' ? laneX + overhang : d.x1, lane: laneX, lines: 8, width: um(12), pitch: um(26) };
+      }
+      const laneZ = phy.side === 'north' ? a.z0 - margin : a.z1 + margin;
+      return { horizontal: false, across: phy.rect.x0 + (phy.rect.x1 - phy.rect.x0) * f, from: phy.side === 'north' ? d.z0 : laneZ - overhang, to: phy.side === 'north' ? laneZ + overhang : d.z1, lane: laneZ, lines: 8, width: um(12), pitch: um(26) };
+    });
+  };
+  return { vertical, horizontal, span, lane, routerLane, phyBundles };
+})();
+
 export function generateGlobal(): ChunkData {
   const pad = 1;
-  const builder = new ChunkBuilder(rect(DIE_RECT.x0 - pad, DIE_RECT.z0 - pad, DIE_RECT.x1 + pad, DIE_RECT.z1 + pad), [0, 0]);
+  const builder = new ChunkBuilder(rect(DIE_RECT.x0 - pad, DIE_RECT.z0 - pad, DIE_RECT.x1 + pad, DIE_RECT.z1 + pad), [0, 0], 0);
   const hx = DIE.width / 2;
   const hz = DIE.depth / 2;
 
@@ -775,21 +894,36 @@ export function generateGlobal(): ChunkData {
     builder.box('copper', r.x0 - frame, r.x1 + frame, STACK.mz2[0], STACK.mz2[1], r.z1, r.z1 + frame);
     const lead = um(22);
     const [cx, cz] = rectCenter(r);
-    if (padItem.side === 'north') builder.box('copper', cx - lead / 2, cx + lead / 2, STACK.mz1[0], STACK.mz1[1], r.z1, -hz + DIE.ioBand);
-    if (padItem.side === 'south') builder.box('copper', cx - lead / 2, cx + lead / 2, STACK.mz1[0], STACK.mz1[1], hz - DIE.ioBand, r.z0);
-    if (padItem.side === 'west') builder.box('copper', r.x1, -hx + DIE.ioBand, STACK.mz1[0], STACK.mz1[1], cz - lead / 2, cz + lead / 2);
-    if (padItem.side === 'east') builder.box('copper', hx - DIE.ioBand, r.x0, STACK.mz1[0], STACK.mz1[1], cz - lead / 2, cz + lead / 2);
+    // Leads stop short of the core, clear of the mesh straps that start there.
+    const leadEnd = DIE.ioBand - um(30);
+    if (padItem.side === 'north') builder.box('copper', cx - lead / 2, cx + lead / 2, STACK.mz1[0], STACK.mz1[1], r.z1, -hz + leadEnd);
+    if (padItem.side === 'south') builder.box('copper', cx - lead / 2, cx + lead / 2, STACK.mz1[0], STACK.mz1[1], hz - leadEnd, r.z0);
+    if (padItem.side === 'west') builder.box('copper', r.x1, -hx + leadEnd, STACK.mz1[0], STACK.mz1[1], cz - lead / 2, cz + lead / 2);
+    if (padItem.side === 'east') builder.box('copper', hx - leadEnd, r.x0, STACK.mz1[0], STACK.mz1[1], cz - lead / 2, cz + lead / 2);
+    // The pad's frame joins its lead, and the lead drops through a via stack
+    // onto the nearest ESD finger of its I/O cell (level 1 draws the cells).
+    const horizontal = padItem.side === 'north' || padItem.side === 'south';
+    const inward = padItem.side === 'north' || padItem.side === 'west' ? 1 : -1;
+    const edgeFrom = horizontal ? (padItem.side === 'north' ? r.z1 : r.z0) : padItem.side === 'west' ? r.x1 : r.x0;
+    const deep = (horizontal ? (padItem.side === 'north' ? -hz : hz) : padItem.side === 'west' ? -hx : hx) + inward * (DIE.ioBand - um(80));
+    const along = horizontal ? cx : cz;
+    const cell = Math.floor(along / um(60));
+    const finger = Math.min(5, Math.max(0, Math.round((along - (cell + 0.5) * um(60) + um(22)) / um(8.8))));
+    const fingerAt = (cell + 0.5) * um(60) - um(22) + finger * um(8.8);
+    const emit: Emit = { part: 'pad-stack', glow: rand(221, padItem.index, padItem.side.length) < 0.25 ? 1 : 0, phase: rand(222, padItem.index) };
+    if (horizontal) {
+      builder.via('tungsten', cx, edgeFrom + inward * um(5), lead / 2 - um(2), um(4), STACK.vz1[0], STACK.vz1[1], emit);
+      builder.via('tungsten', fingerAt, deep, um(1.4), um(4), STACK.my2[1], STACK.mz1[0], { ...emit, entry: 'max', arc: 0 });
+    } else {
+      builder.via('tungsten', edgeFrom + inward * um(5), cz, um(4), lead / 2 - um(2), STACK.vz1[0], STACK.vz1[1], emit);
+      builder.via('tungsten', deep, fingerAt, um(4), um(1.4), STACK.my2[1], STACK.mz1[0], { ...emit, entry: 'max', arc: 0 });
+    }
   }
 
-  // Global power mesh: gold straps in both directions, broken over the PHY
-  // bump fields, with via stacks at every crossing.
-  const strapPitch = 0.6;
-  const strapWidth = um(24);
-  const core = rect(-hx + DIE.ioBand, -hz + DIE.ioBand, hx - DIE.ioBand, hz - DIE.ioBand);
-  const xs: number[] = [];
-  const zs: number[] = [];
-  for (let x = core.x0 + strapPitch / 2; x < core.x1; x += strapPitch) xs.push(x);
-  for (let z = core.z0 + strapPitch / 2; z < core.z1; z += strapPitch) zs.push(z);
+  // Global power mesh: gold straps in both directions, alternating VDD and
+  // VSS, broken over the PHY bump fields. Via stacks join crossing straps of
+  // the same supply, and power bumps feed the mesh from the package.
+  const { xs, zs, core, width: strapWidth } = GLOBAL_MESH;
   const strapRuns = (fixed: number, from: number, to: number, vertical: boolean) => {
     const runs: Array<[number, number]> = [];
     let start: number | null = null;
@@ -804,73 +938,83 @@ export function generateGlobal(): ChunkData {
     }
     return runs;
   };
-  for (const x of xs) for (const [a, b] of strapRuns(x, core.z0, core.z1, true)) builder.box('gold', x - strapWidth / 2, x + strapWidth / 2, STACK.mz2[0], STACK.mz2[1], a, b);
-  for (const z of zs) for (const [a, b] of strapRuns(z, core.x0, core.x1, false)) builder.box('gold', a, b, STACK.mz1[0], STACK.mz1[1], z - strapWidth / 2, z + strapWidth / 2);
-  for (const x of xs) for (const z of zs) {
-    if (inAnyPhy(x, z)) continue;
-    builder.box('tungsten', x - strapWidth / 2, x + strapWidth / 2, STACK.vz1[0], STACK.vz1[1], z - strapWidth / 2, z + strapWidth / 2);
-  }
+  xs.forEach((x, i) => {
+    for (const [a, b] of strapRuns(x, core.z0, core.z1, true)) builder.seg('gold', x - strapWidth / 2, x + strapWidth / 2, STACK.mz2[0], STACK.mz2[1], a, b, { part: 'global-strap', flow: strapFlow(i), glow: POWER_GLOW * (i % 2 === 0 ? 1 : -1), phase: rand(211, i) });
+  });
+  zs.forEach((z, j) => {
+    for (const [a, b] of strapRuns(z, core.x0, core.x1, false)) builder.seg('gold', a, b, STACK.mz1[0], STACK.mz1[1], z - strapWidth / 2, z + strapWidth / 2, { part: 'global-strap', flow: strapFlow(j), glow: POWER_GLOW * (j % 2 === 0 ? 1 : -1), phase: rand(212, j) });
+  });
+  xs.forEach((x, i) => zs.forEach((z, j) => {
+    const flow = strapFlow(i);
+    if (flow !== strapFlow(j) || inAnyPhy(x, z)) return;
+    const down = flow === FLOW.vdd;
+    builder.via('tungsten', x, z, strapWidth / 2, strapWidth / 2, STACK.vz1[0], STACK.vz1[1], { part: 'top-via', flow, glow: POWER_GLOW, phase: rand(213, i, j), entry: down ? 'max' : 'min', arc: 0 });
+    if ((i + j) % 4 !== 0) return;
+    // A power bump on every fourth same-supply crossing.
+    const emit: Emit = { part: 'power-bump', flow, glow: POWER_GLOW, phase: rand(214, i, j) };
+    builder.seg('gold', x - um(14), x + um(14), STACK.ubm[0], STACK.ubm[1], z - um(14), z + um(14), emit);
+    builder.cyl('copper', x, z, um(10.5), STACK.pillar[0], STACK.pillar[1], 0, 0, { ...emit, entry: down ? 'max' : 'min', arc: 0 });
+    builder.cyl('solder', x, z, um(11), STACK.solder[0], STACK.solder[1], 0, 0, { ...emit, glow: 0 });
+  }));
 
-  // Tile power rings.
+  // Tile power rings (VDD), fed from the mesh straps that cross their sides.
   for (const tile of TILES) {
     const r = tile.rect;
     const w = um(36);
-    builder.box('gold', r.x0, r.x1, STACK.ring[0], STACK.ring[1], r.z0, r.z0 + w);
-    builder.box('gold', r.x0, r.x1, STACK.ring[0], STACK.ring[1], r.z1 - w, r.z1);
-    builder.box('gold', r.x0, r.x0 + w, STACK.ring[0], STACK.ring[1], r.z0 + w, r.z1 - w);
-    builder.box('gold', r.x1 - w, r.x1, STACK.ring[0], STACK.ring[1], r.z0 + w, r.z1 - w);
+    const emit: Emit = { part: 'tile-ring', flow: FLOW.vdd, glow: POWER_GLOW, phase: rand(215, tile.index) };
+    builder.seg('gold', r.x0, r.x1, STACK.ring[0], STACK.ring[1], r.z0, r.z0 + w, emit);
+    builder.seg('gold', r.x0, r.x1, STACK.ring[0], STACK.ring[1], r.z1 - w, r.z1, emit);
+    builder.seg('gold', r.x0, r.x0 + w, STACK.ring[0], STACK.ring[1], r.z0 + w, r.z1 - w, emit);
+    builder.seg('gold', r.x1 - w, r.x1, STACK.ring[0], STACK.ring[1], r.z0 + w, r.z1 - w, emit);
+    zs.forEach((z, j) => {
+      if (strapFlow(j) !== FLOW.vdd || z < r.z0 + w || z > r.z1 - w) return;
+      for (const x of [r.x0 + w / 2, r.x1 - w / 2]) {
+        if (inAnyPhy(x, z)) continue;
+        builder.via('tungsten', x, z, um(12), um(10), STACK.vz0[0], STACK.vz0[1], { part: 'ring-stack', flow: FLOW.vdd, glow: POWER_GLOW, phase: rand(216, tile.index, j), entry: 'max', arc: 0 });
+      }
+    });
   }
 
-  // Network-on-chip: glowing lanes along every routing channel.
-  const lane = (horizontal: boolean, across: number, from: number, to: number, lines: number, width: number, pitch: number, salt: number, y: Band = STACK.noc) => {
+  // Network-on-chip: horizontal links on one layer, vertical links on the
+  // next, joined by junction vias wherever the network branches: between
+  // lanes, at every tile router, and at every PHY bundle.
+  const lane = (horizontal: boolean, across: number, from: number, to: number, lines: number, width: number, pitch: number, salt: number, y: Band, part: PartId = 'noc-lane') => {
     for (let line = 0; line < lines; line += 1) {
       const offset = (line - (lines - 1) / 2) * pitch;
-      const glow = line % 2 === 0 ? 0.6 : -0.6;
-      const phase = rand(salt, line, Math.round(across * 1000));
-      if (horizontal) builder.box('copper', from, to, y[0], y[1], across + offset - width / 2, across + offset + width / 2, glow, phase);
-      else builder.box('copper', across + offset - width / 2, across + offset + width / 2, y[0], y[1], from, to, glow, phase);
+      const emit: Emit = { part, glow: line % 2 === 0 ? 0.6 : -0.6, phase: rand(salt, line, Math.round(across * 1000)) };
+      if (horizontal) builder.seg('copper', from, to, y[0], y[1], across + offset - width / 2, across + offset + width / 2, emit);
+      else builder.seg('copper', across + offset - width / 2, across + offset + width / 2, y[0], y[1], from, to, emit);
     }
   };
-  const columnEdges = distinct(TILES.map((tile) => tile.rect.x0));
-  const columnRight = distinct(TILES.map((tile) => tile.rect.x1));
-  const rowTop = distinct(TILES.map((tile) => tile.rect.z0));
-  const rowBottom = distinct(TILES.map((tile) => tile.rect.z1));
-  const a = TILE_ARRAY_RECT;
-  const verticalLanes: number[] = [];
-  for (let k = 0; k < columnEdges.length - 1; k += 1) {
-    const gapStart = columnRight[k];
-    const gapEnd = columnEdges[k + 1];
-    if (gapEnd - gapStart > 1) {
-      // The SRAM strip sits in this gap: one lane each side of it.
-      verticalLanes.push((gapStart + SRAM_STRIP.rect.x0) / 2, (SRAM_STRIP.rect.x1 + gapEnd) / 2);
-    } else verticalLanes.push((gapStart + gapEnd) / 2);
+  const junction = (x: number, z: number) => builder.via('tungsten', x, z, um(5), um(5), STACK.vnj[0], STACK.vnj[1], { part: 'noc-junction' });
+  const { span, lane: noc } = NOC;
+  const lineOffset = (line: number, lines: number, pitch: number) => (line - (lines - 1) / 2) * pitch;
+  for (const x of NOC.vertical) lane(false, x, span.z0, span.z1, noc.lines, noc.width, noc.pitch, 301, STACK.nocV);
+  for (const z of NOC.horizontal) lane(true, z, span.x0, span.x1, noc.lines, noc.width, noc.pitch, 302, STACK.nocH);
+  for (const x of NOC.vertical) for (const z of NOC.horizontal) {
+    for (let line = 0; line < noc.lines; line += 1) junction(x + lineOffset(line, noc.lines, noc.pitch), z + lineOffset(line, noc.lines, noc.pitch));
   }
-  for (const x of verticalLanes) lane(false, x, a.z0 - 0.26, a.z1 + 0.26, 4, um(14), um(34), 301);
-  const horizontalLanes = [a.z0 - 0.26, ...rowBottom.slice(0, -1).map((z, k) => (z + rowTop[k + 1]) / 2), a.z1 + 0.26];
-  for (const z of horizontalLanes) lane(true, z, a.x0 - 0.26, a.x1 + 0.26, 4, um(14), um(34), 302);
-  // SRAM strip spine over the TSV column.
-  lane(false, 0, SRAM_STRIP.rect.z0, SRAM_STRIP.rect.z1, 6, um(10), um(24), 303, STACK.ring);
+  // SRAM strip spine over the TSV column, joined to each lane that crosses the strip.
+  lane(false, 0, SRAM_STRIP.rect.z0, SRAM_STRIP.rect.z1, 6, um(10), um(24), 303, STACK.ring, 'sram-spine');
+  for (const z of NOC.horizontal) {
+    if (z < SRAM_STRIP.rect.z0 || z > SRAM_STRIP.rect.z1) continue;
+    for (let line = 0; line < noc.lines; line += 1) builder.via('tungsten', lineOffset(line + 1, 6, um(24)), z + lineOffset(line, noc.lines, noc.pitch), um(4), um(4), STACK.nocH[1], STACK.ring[0], { part: 'spine-drop' });
+  }
   // Tile routers onto the nearest horizontal lane.
   for (const tile of TILES) {
-    const [rx] = rectCenter(tile.router);
-    const nearest = horizontalLanes.reduce((best, z) => (Math.abs(z - tile.router.z1) < Math.abs(best - tile.router.z1) ? z : best), horizontalLanes[0]);
-    lane(false, rx, Math.min(tile.router.z0 + 0.05, nearest), Math.max(tile.router.z0 + 0.05, nearest), 4, um(10), um(24), 304 + tile.index);
+    const route = NOC.routerLane(tile);
+    lane(false, route.x, route.from, route.to, 4, um(10), um(24), 304 + tile.index, STACK.nocV);
+    for (let line = 0; line < 4; line += 1) junction(route.x + lineOffset(line, 4, um(24)), route.lane + lineOffset(line, noc.lines, noc.pitch));
   }
-  // Memory PHYs: three lane bundles from the driver strip to the array edge.
+  // Memory PHYs: three lane bundles from the driver strip to the network's edge lanes.
   for (const phy of PHYS) {
-    const horizontal = phy.side === 'west' || phy.side === 'east';
-    const d = phy.drivers;
-    for (const f of [0.25, 0.5, 0.75]) {
-      if (horizontal) {
-        const z = phy.rect.z0 + (phy.rect.z1 - phy.rect.z0) * f;
-        const from = phy.side === 'west' ? d.x0 : a.x1 + 0.26;
-        const to = phy.side === 'west' ? a.x0 - 0.26 : d.x1;
-        lane(true, z, Math.min(from, to), Math.max(from, to), 8, um(12), um(26), 401 + phy.index);
-      } else {
-        const x = phy.rect.x0 + (phy.rect.x1 - phy.rect.x0) * f;
-        const from = phy.side === 'north' ? d.z0 : a.z1 + 0.26;
-        const to = phy.side === 'north' ? a.z0 - 0.26 : d.z1;
-        lane(false, x, Math.min(from, to), Math.max(from, to), 8, um(12), um(26), 401 + phy.index);
+    for (const bundle of NOC.phyBundles(phy)) {
+      lane(bundle.horizontal, bundle.across, bundle.from, bundle.to, bundle.lines, bundle.width, bundle.pitch, 401 + phy.index, bundle.horizontal ? STACK.nocH : STACK.nocV);
+      for (let line = 0; line < bundle.lines; line += 1) {
+        const own = bundle.across + lineOffset(line, bundle.lines, bundle.pitch);
+        const other = bundle.lane + lineOffset(line % noc.lines, noc.lines, noc.pitch);
+        if (bundle.horizontal) junction(other, own);
+        else junction(own, other);
       }
     }
   }
@@ -916,39 +1060,246 @@ export const CHANNEL_RECTS: Array<{ rect: Rect; horizontal: boolean }> = (() => 
 })();
 const ALL_MACROS: SramMacro[] = [...SRAM_STRIP.macros, ...TILES.flatMap((tile) => tile.sram), ...EDGE_BLOCKS.flatMap((block) => block.sram)];
 
+// Data paths of a compute tile. Weights leave the tile SRAM macros into the
+// top of each PE column, activations leave the router up a trunk on the
+// left and into each PE row, operands pass PE to PE on the systolic buses,
+// and partial sums drain from the bottom row into the vector unit (or, under
+// the router's columns, the router), which returns results to the router.
+// Every bus line ends in a via stack dropping into the logic it connects:
+// the stacks stand between the Mx4 power straps (mid-gap x) and land on an
+// Mx3 track.
+// Bus lines sit on grids that keep their drops in the gaps of every layer
+// below: horizontal lines and vertical drops at multiples of 3 µm (between
+// the Mx1 and Mx3 tracks), vertical lines at odd micrometres beside the
+// middle of an Mx4 gap (between the Mx2 tracks and clear of the straps).
+const SYS = { lines: 6, hSpacing: um(3), vSpacing: um(2), half: um(0.8), overlap: um(30), reach: um(16) } as const;
+const mx4Gap = (x: number) => Math.round(x / MX4.pitch) * MX4.pitch;
+const busZ = (z: number) => Math.round(z / um(3)) * um(3);
+const bundleCenterZ = (z: number) => Math.round((z - um(1.5)) / um(3)) * um(3) + um(1.5);
+const lineOffset = (line: number, lines: number, spacing: number) => (line - (lines - 1) / 2) * spacing;
+const peCenter = (tile: Tile, i: number, j: number) => rectCenter(peRect(tile, i, j));
+/** Systolic wavefront phase of PE (i, j): anti-diagonals pulse together. */
+const wave = (tile: Tile, i: number, j: number) => ((((i + j) * 0.055 + tile.index * 0.137) % 1) + 1) % 1;
+
+type Bus = { part: PartId; axis: 'x' | 'z'; across: number[]; from: number; to: number; dir: 1 | -1; phase: number; drops: Array<{ at: number; up: boolean }> };
+
+/** The buses of one tile, as bundles of lines along x or z with drops at given positions. */
+function tileBuses(tile: Tile): Bus[] {
+  const buses: Bus[] = [];
+  const horizontalLines = (cz: number) => Array.from({ length: SYS.lines }, (_, line) => bundleCenterZ(cz) + lineOffset(line, SYS.lines, SYS.hSpacing));
+  const verticalLines = (cx: number) => Array.from({ length: SYS.lines }, (_, line) => mx4Gap(cx) + lineOffset(line, SYS.lines, SYS.vSpacing));
+  for (let i = 0; i < PE_COLUMNS; i += 1) for (let j = 0; j < PE_ROWS; j += 1) {
+    const pe = peRect(tile, i, j);
+    const [cx, cz] = rectCenter(pe);
+    const phase = wave(tile, i, j);
+    if (i + 1 < PE_COLUMNS) buses.push({ part: 'systolic-bus', axis: 'x', across: horizontalLines(cz), from: pe.x1 - SYS.overlap, to: pe.x1 + PE_GAP + SYS.overlap, dir: 1, phase, drops: [{ at: mx4Gap(pe.x1 - SYS.reach), up: true }, { at: mx4Gap(pe.x1 + PE_GAP + SYS.reach), up: false }] });
+    if (j + 1 < PE_ROWS) buses.push({ part: 'systolic-bus', axis: 'z', across: verticalLines(cx), from: pe.z1 - SYS.overlap, to: pe.z1 + PE_GAP + SYS.overlap, dir: 1, phase, drops: [{ at: busZ(pe.z1 - SYS.reach), up: true }, { at: busZ(pe.z1 + PE_GAP + SYS.reach), up: false }] });
+  }
+  // Weights: each SRAM macro feeds the four PE columns under it.
+  for (let i = 0; i < PE_COLUMNS; i += 1) {
+    const macro = tile.sram[Math.min(tile.sram.length - 1, Math.floor((i * tile.sram.length) / PE_COLUMNS))];
+    const pe = peRect(tile, i, 0);
+    const [cx] = rectCenter(pe);
+    buses.push({ part: 'weight-bus', axis: 'z', across: verticalLines(cx), from: macro.rect.z1 - um(20), to: pe.z0 + SYS.overlap, dir: 1, phase: wave(tile, i, -1), drops: [{ at: busZ(macro.rect.z1 - um(12)), up: true }, { at: busZ(pe.z0 + SYS.reach), up: false }] });
+  }
+  // Activations: a trunk up the left corridor from the router, tapped by a branch into each PE row.
+  const trunkX = tile.rect.x0 + TILE_RING + (tile.peArray.x0 - tile.rect.x0 - TILE_RING) / 2;
+  const [, topZ] = peCenter(tile, 0, 0);
+  buses.push({ part: 'activation-bus', axis: 'z', across: verticalLines(trunkX), from: topZ - SYS.hSpacing * 3, to: tile.router.z0 + um(20), dir: -1, phase: wave(tile, -1, -1), drops: [{ at: busZ(tile.router.z0 + um(12)), up: true }] });
+  for (let j = 0; j < PE_ROWS; j += 1) {
+    const pe = peRect(tile, 0, j);
+    const [, cz] = rectCenter(pe);
+    buses.push({ part: 'activation-bus', axis: 'x', across: horizontalLines(cz), from: mx4Gap(trunkX) - SYS.vSpacing * 3, to: pe.x0 + SYS.overlap, dir: 1, phase: wave(tile, -1, j), drops: [{ at: mx4Gap(pe.x0 + SYS.reach), up: false }] });
+  }
+  // Partial sums: down out of the bottom row into the vector unit or the router.
+  for (let i = 0; i < PE_COLUMNS; i += 1) {
+    const pe = peRect(tile, i, PE_ROWS - 1);
+    const [cx] = rectCenter(pe);
+    const into = mx4Gap(cx) >= tile.vector.x0 + um(8) ? tile.vector : tile.router;
+    buses.push({ part: 'result-bus', axis: 'z', across: verticalLines(cx), from: pe.z1 - SYS.overlap, to: into.z0 + um(24), dir: 1, phase: wave(tile, i, PE_ROWS), drops: [{ at: busZ(pe.z1 - SYS.reach), up: true }, { at: busZ(into.z0 + um(16)), up: false }] });
+  }
+  // Results back from the vector unit to the router.
+  const vz = (tile.vector.z0 + tile.vector.z1) / 2;
+  buses.push({ part: 'result-bus', axis: 'x', across: horizontalLines(vz), from: tile.router.x1 - um(30), to: tile.vector.x0 + um(30), dir: -1, phase: wave(tile, PE_COLUMNS, PE_ROWS), drops: [{ at: mx4Gap(tile.vector.x0 + um(18)), up: true }, { at: mx4Gap(tile.router.x1 - um(18)), up: false }] });
+  return buses;
+}
+
+/** Taps where the activation branches meet the trunk lines (line k to line k). */
+function activationTaps(tile: Tile): Array<{ x: number; z: number }> {
+  const taps: Array<{ x: number; z: number }> = [];
+  const trunkX = mx4Gap(tile.rect.x0 + TILE_RING + (tile.peArray.x0 - tile.rect.x0 - TILE_RING) / 2);
+  for (let j = 0; j < PE_ROWS; j += 1) {
+    const [, cz] = peCenter(tile, 0, j);
+    for (let line = 0; line < SYS.lines; line += 1) taps.push({ x: trunkX + lineOffset(line, SYS.lines, SYS.vSpacing), z: bundleCenterZ(cz) + lineOffset(line, SYS.lines, SYS.hSpacing) });
+  }
+  return taps;
+}
+
+const BUSES = new Map<number, Bus[]>();
+const busesOf = (tile: Tile) => {
+  let buses = BUSES.get(tile.index);
+  if (!buses) BUSES.set(tile.index, (buses = tileBuses(tile)));
+  return buses;
+};
+
+/** Where each bus line's drop lands on the cells: the thin via stack under it. */
+function busDrops(bus: Bus): RouteEnd[] {
+  const ends: RouteEnd[] = [];
+  const top = STACK.mx1[0];
+  bus.across.forEach((across, line) => {
+    for (const drop of bus.drops) {
+      const [x, z] = bus.axis === 'x' ? [drop.at, across] : [across, drop.at];
+      ends.push({ x: m3Near(2, x), z, top, up: drop.up, active: true, phase: bus.phase + line * 0.004, drop: true });
+    }
+  });
+  return ends;
+}
+
+// Bus drops of each tile, bucketed by cell row: level 3 asks per row block.
+const BUS_DROPS = new Map<number, Map<number, RouteEnd[]>>();
+function busDropsByRow(tile: Tile) {
+  let rows = BUS_DROPS.get(tile.index);
+  if (rows) return rows;
+  rows = new Map();
+  for (const bus of busesOf(tile)) {
+    for (const end of busDrops(bus)) {
+      const row = Math.floor(end.z / ROW);
+      const list = rows.get(row);
+      if (list) list.push(end);
+      else rows.set(row, [end]);
+    }
+  }
+  BUS_DROPS.set(tile.index, rows);
+  return rows;
+}
+
+/** Bus drops of every tile landing inside `rect`. */
+function busEndsIn(rect: Rect): RouteEnd[] {
+  const ends: RouteEnd[] = [];
+  for (const tile of TILES) {
+    if (!rectsOverlap(rect, tile.rect)) continue;
+    const rows = busDropsByRow(tile);
+    for (let row = Math.floor(rect.z0 / ROW); row <= Math.floor(rect.z1 / ROW); row += 1) {
+      for (const end of rows.get(row) ?? []) if (insideRect(rect, end.x, end.z)) ends.push(end);
+    }
+  }
+  return ends;
+}
+
+const BUS_ZONES = new Map<number, Rect[]>();
+/** Plan-view areas the buses and their drops occupy in a tile (for keeping power stacks clear). */
+function busZones(tile: Tile): Rect[] {
+  let zones = BUS_ZONES.get(tile.index);
+  if (zones) return zones;
+  zones = busesOf(tile).map((bus) => {
+    const lo = Math.min(...bus.across) - SYS.half;
+    const hi = Math.max(...bus.across) + SYS.half;
+    const a = Math.min(bus.from, bus.to);
+    const b = Math.max(bus.from, bus.to);
+    return bus.axis === 'x' ? rect(a, lo, b, hi) : rect(lo, a, hi, b);
+  });
+  BUS_ZONES.set(tile.index, zones);
+  return zones;
+}
+
+/** Whether a point is clear of every systolic and feed bus (by `margin`). */
+function systolicClear(x: number, z: number, margin: number) {
+  const tile = tileAt(x, z);
+  if (!tile) return true;
+  return busZones(tile).every((zone) => x < zone.x0 - margin || x > zone.x1 + margin || z < zone.z0 - margin || z > zone.z1 + margin);
+}
+
+/** TSV risers stay clear of the NoC lanes and channel buses that cross the SRAM strip. */
+const tsvRiserClear = (z: number) => NOC.horizontal.every((lane) => Math.abs(z - lane) > um(90)) && CHANNEL_RECTS.every((c) => !c.horizontal || z < c.rect.z0 - um(20) || z > c.rect.z1 + um(20));
+
+function emitBus(builder: ChunkBuilder, bus: Bus) {
+  const stretch = LEVELS[1].viaStretch;
+  const onSysH = bus.axis === 'x';
+  const y = onSysH ? STACK.sysH : STACK.sysV;
+  const glow = bus.dir;
+  bus.across.forEach((across, line) => {
+    const phase = bus.phase + line * 0.004;
+    if (onSysH) builder.seg('copper', Math.min(bus.from, bus.to), Math.max(bus.from, bus.to), y[0], y[1], across - SYS.half, across + SYS.half, { part: bus.part, glow, phase, axis: 'x' });
+    else builder.seg('copper', across - SYS.half, across + SYS.half, y[0], y[1], Math.min(bus.from, bus.to), Math.max(bus.from, bus.to), { part: bus.part, glow, phase, axis: 'z' });
+    for (const drop of bus.drops) {
+      // The line's own pulse coordinate at the drop, so the pulse runs on into it.
+      const at = glow * drop.at * 1000;
+      const x = onSysH ? drop.at : across;
+      const z = onSysH ? across : drop.at;
+      // A wide stack through the gaps of Mx4-Mx1, then a thin V3 stack onto
+      // an M3 pad, where level 3 wires it to a pin of the PE's cells.
+      const wide = (y[0] - STACK.mx1[0]) * 1000 * stretch;
+      const thin = (STACK.v3[1] - STACK.v3[0]) * 1000 * LEVELS[1].viaStretch;
+      const xs = m3Near(2, x);
+      if (drop.up) {
+        builder.via('tungsten', xs, z, DROP_HALF, DROP_HALF, STACK.v3[0], STACK.v3[1], { part: 'v3', glow: 1, phase, entry: 'min', arc: at - wide - thin });
+        builder.via('tungsten', x, z, um(0.2), um(0.2), STACK.mx1[0], y[0], { part: 'pe-pins', glow: 1, phase, entry: 'min', arc: at - wide });
+      } else {
+        builder.via('tungsten', x, z, um(0.2), um(0.2), STACK.mx1[0], y[0], { part: 'pe-pins', glow: 1, phase, entry: 'max', arc: at });
+        builder.via('tungsten', xs, z, DROP_HALF, DROP_HALF, STACK.v3[0], STACK.v3[1], { part: 'v3', glow: 1, phase, entry: 'max', arc: at + wide });
+      }
+    }
+  });
+}
+
 function level1(builder: ChunkBuilder) {
   const b = builder.bounds;
   const leaves = new LeafCache(um(10));
+  const stretch = LEVELS[1].viaStretch;
 
-  emitStraps(builder, leaves, { horizontal: true, pitch: um(60), offset: um(30), width: um(5), y: STACK.my1, material: 'copper', sample: um(20), allowed: STRAP_ALLOWED });
-  emitStraps(builder, leaves, { horizontal: false, pitch: um(60), offset: um(30), width: um(5), y: STACK.my2, material: 'copper', sample: um(20), allowed: STRAP_ALLOWED });
-  // Vias at strap crossings.
-  for (let x = Math.ceil((b.x0 - um(30)) / um(60)) * um(60) + um(30); x < b.x1; x += um(60)) {
-    for (let z = Math.ceil((b.z0 - um(30)) / um(60)) * um(60) + um(30); z < b.z1; z += um(60)) {
-      if (!STRAP_ALLOWED(leaves.at(x, z))) continue;
-      builder.box('tungsten', x - um(2.5), x + um(2.5), STACK.vy1[0], STACK.vy1[1], z - um(2.5), z + um(2.5));
+  // Semi-global power grid: My1 along x, My2 along z, alternating VDD and
+  // VSS, with vias only where straps of the same supply cross.
+  emitStraps(builder, leaves, { horizontal: true, pitch: MY.pitch, offset: MY.offset, width: um(5), y: STACK.my1, material: 'copper', sample: um(20), allowed: STRAP_ALLOWED, part: 'semi-global-strap', flowOf: strapFlow });
+  emitStraps(builder, leaves, { horizontal: false, pitch: MY.pitch, offset: MY.offset, width: um(5), y: STACK.my2, material: 'copper', sample: um(20), allowed: STRAP_ALLOWED, part: 'semi-global-strap', flowOf: strapFlow });
+  for (let k = Math.ceil((b.x0 - MY.offset) / MY.pitch); MY.offset + k * MY.pitch < b.x1; k += 1) {
+    for (let m = Math.ceil((b.z0 - MY.offset) / MY.pitch); MY.offset + m * MY.pitch < b.z1; m += 1) {
+      const x = MY.offset + k * MY.pitch;
+      const z = MY.offset + m * MY.pitch;
+      const flow = strapFlow(k);
+      if (flow !== strapFlow(m) || !STRAP_ALLOWED(leaves.at(x, z))) continue;
+      builder.via('tungsten', x, z, um(2.5), um(2.5), STACK.vy1[0], STACK.vy1[1], { part: 'strap-via', flow, glow: POWER_GLOW, phase: rand(1601, k, m), entry: flow === FLOW.vdd ? 'max' : 'min', arc: 0 });
     }
   }
 
-  // Systolic buses between neighbouring PEs; pulses sweep the anti-diagonals.
+  // Tiles: data paths, router drops into the crossbar, and power feeds.
   for (const tile of TILES) {
-    if (!rectsOverlap(tile.peArray, b)) continue;
-    const i0 = Math.max(0, Math.floor((b.x0 - tile.peArray.x0) / tile.pePitchX) - 1);
-    const i1 = Math.min(PE_COLUMNS - 1, Math.floor((b.x1 - tile.peArray.x0) / tile.pePitchX) + 1);
-    const j0 = Math.max(0, Math.floor((b.z0 - tile.peArray.z0) / tile.pePitchZ) - 1);
-    const j1 = Math.min(PE_ROWS - 1, Math.floor((b.z1 - tile.peArray.z0) / tile.pePitchZ) + 1);
-    for (let i = i0; i <= i1; i += 1) for (let j = j0; j <= j1; j += 1) {
-      const pe = peRect(tile, i, j);
-      const [cx, cz] = rectCenter(pe);
-      const wave = ((i + j) * 0.055 + tile.index * 0.137) % 1;
-      for (let line = 0; line < 6; line += 1) {
-        const offset = (line - 2.5) * um(3.2);
-        if (i + 1 < PE_COLUMNS) builder.box('copper', pe.x1 - um(30), pe.x1 + PE_GAP + um(30), STACK.sysH[0], STACK.sysH[1], cz + offset - um(0.8), cz + offset + um(0.8), 1, wave + line * 0.004);
-        if (j + 1 < PE_ROWS) builder.box('copper', cx + offset - um(0.8), cx + offset + um(0.8), STACK.sysV[0], STACK.sysV[1], pe.z1 - um(30), pe.z1 + PE_GAP + um(30), 1, wave + line * 0.004);
+    const near = rect(tile.rect.x0 - 0.05, tile.rect.z0 - 0.05, tile.rect.x1 + 0.05, tile.rect.z1 + 0.05);
+    if (!rectsOverlap(near, b)) continue;
+    for (const bus of busesOf(tile)) {
+      const lo = Math.min(...bus.across) - SYS.half;
+      const hi = Math.max(...bus.across) + SYS.half;
+      const zone = bus.axis === 'x' ? rect(Math.min(bus.from, bus.to), lo, Math.max(bus.from, bus.to), hi) : rect(lo, Math.min(bus.from, bus.to), hi, Math.max(bus.from, bus.to));
+      if (rectsOverlap(zone, b)) emitBus(builder, bus);
+    }
+    for (const tap of activationTaps(tile)) if (insideRect(b, tap.x, tap.z)) builder.via('tungsten', tap.x, tap.z, um(0.7), um(0.7), STACK.sysH[1], STACK.sysV[0], { part: 'activation-bus' });
+
+    // NoC drops: each router lane line comes down onto a crossbar wire.
+    const route = NOC.routerLane(tile);
+    const r = tile.router;
+    for (let line = 0; line < 4; line += 1) {
+      const lx = route.x + lineOffset(line, 4, um(24));
+      const x = r.x0 + um(8) + Math.round((lx - r.x0 - um(8)) / um(6)) * um(6);
+      builder.via('tungsten', x, route.start - um(0.01), um(1.2), um(3), STACK.my2[1], STACK.nocV[0], { part: 'noc-drop', glow: line % 2 === 0 ? 0.6 : -0.6, phase: rand(1611, tile.index, line), entry: line % 2 === 0 ? 'max' : 'min', arc: 0 });
+    }
+
+    // Power: VDD straps under the tile ring's top and bottom sides rise into
+    // it, and straps of either supply reach the mesh straps above directly.
+    const w = um(36);
+    const clearOfRouter = (x: number) => Math.abs(x - route.x) > um(80);
+    for (let k = Math.ceil((tile.rect.x0 + w - MY.offset) / MY.pitch); MY.offset + k * MY.pitch < tile.rect.x1 - w; k += 1) {
+      const x = MY.offset + k * MY.pitch;
+      if (!clearOfRouter(x)) continue;
+      if (strapFlow(k) === FLOW.vdd) {
+        for (const z of [tile.rect.z0 + w / 2, tile.rect.z1 - w / 2]) {
+          if (STRAP_ALLOWED(leaves.at(x, z))) builder.via('tungsten', x, z, um(2), um(8), STACK.my2[1], STACK.ring[0], { part: 'strap-stack', flow: FLOW.vdd, glow: POWER_GLOW, phase: rand(1612, k, Math.round(z * 1e3)), entry: 'max', arc: 0 });
+        }
       }
-      // PE pin stripes: the bus fans into the datapath.
-      builder.box('copper', pe.x0 + um(70), pe.x1 - um(34), STACK.sysH[0], STACK.sysH[1], cz - um(12.5), cz - um(11));
-      builder.box('copper', pe.x0 + um(70), pe.x1 - um(34), STACK.sysH[0], STACK.sysH[1], cz + um(11), cz + um(12.5));
+      GLOBAL_MESH.zs.forEach((z, j) => {
+        const flow = strapFlow(j);
+        if (flow !== strapFlow(k) || z < tile.rect.z0 + um(90) || z > tile.rect.z1 - um(90) || inAnyPhy(x, z)) return;
+        if (!STRAP_ALLOWED(leaves.at(x, z)) || leaves.at(x, z) === 'channel') return;
+        builder.via('tungsten', x, z, um(2), um(2), STACK.my2[1], STACK.mz1[0], { part: 'mesh-stack', flow, glow: POWER_GLOW, phase: rand(1613, k, j), entry: flow === FLOW.vdd ? 'max' : 'min', arc: -(STACK.mz1[0] - STACK.my2[1]) * 1000 * stretch * 0.5 });
+      });
     }
   }
 
@@ -966,7 +1317,8 @@ function level1(builder: ChunkBuilder) {
   }
 
   // TSV column in the shared SRAM strip: copper core, oxide liner, landing
-  // pad, and the via stack up to the semi-global straps.
+  // pad, and the via stack up to the semi-global straps. The outer columns
+  // rise on into the SRAM spine, carrying the stacked die's data to the L2.
   const band = SRAM_STRIP.tsvBand;
   if (rectsOverlap(band, b)) {
     for (let column = -2; column <= 2; column += 1) {
@@ -984,11 +1336,17 @@ function level1(builder: ChunkBuilder) {
         builder.box('copper', x - um(4), x + um(4), STACK.m3[0], STACK.m3[1], z - um(4), z + um(4));
         builder.box('tungsten', x - um(1.4), x + um(1.4), STACK.m3[1] + um(0.012), STACK.my1[0], z - um(1.4), z + um(1.4));
         builder.box('copper', x - um(4.5), x + um(4.5), STACK.my1[0], STACK.my1[1], z - um(4.5), z + um(4.5));
+        if (Math.abs(column) === 2 && n % 3 === 0 && tsvRiserClear(z)) {
+          const active = rand(1621, column, n) < 0.35;
+          builder.via('tungsten', x, z, um(2), um(2), STACK.my1[1], STACK.ring[0], { part: 'tsv-riser', glow: active ? 1 : 0, phase: rand(1622, column, n), entry: 'min', arc: 0 });
+        }
       }
     }
   }
 
-  // PHY microbump fields and lane drivers.
+  // PHY microbump fields: every bump's via stack drops to the driver or
+  // receiver directly beneath it (every third bump carries power), and the
+  // NoC bundle lines drop into the lanes of the driver strip.
   for (const phy of PHYS) {
     if (rectsOverlap(phy.bumps, b)) {
       const pitch = um(45);
@@ -1004,9 +1362,15 @@ function level1(builder: ChunkBuilder) {
           const x = f.x0 + um(24) + stagger + col * pitch;
           if (x >= Math.min(b.x1, f.x1 - um(20))) break;
           if (!insideRect(b, x, z)) continue;
-          builder.box('gold', x - um(14), x + um(14), STACK.ubm[0], STACK.ubm[1], z - um(14), z + um(14));
-          builder.cyl('copper', x, z, um(10.5), STACK.pillar[0], STACK.pillar[1]);
-          builder.cyl('solder', x, z, um(11), STACK.solder[0], STACK.solder[1]);
+          const power = (row + col) % 3 === 0;
+          const flow: Flow = power ? (row % 2 === 0 ? FLOW.vdd : FLOW.vss) : FLOW.data;
+          const glow = power ? POWER_GLOW : rand(1631, phy.index, row, col) < 0.08 ? 1 : 0;
+          const emit: Emit = { flow, glow, phase: rand(1632, phy.index, row, col) };
+          builder.seg('gold', x - um(14), x + um(14), STACK.ubm[0], STACK.ubm[1], z - um(14), z + um(14), { ...emit, part: 'ubm', glow: 0 });
+          builder.cyl('copper', x, z, um(10.5), STACK.pillar[0], STACK.pillar[1], 0, 0, { ...emit, part: 'pillar', entry: flow === FLOW.vss ? 'min' : 'max', arc: 0 });
+          builder.cyl('solder', x, z, um(11), STACK.solder[0], STACK.solder[1], 0, 0, { part: 'solder-cap' });
+          builder.via('copper', x, z, um(3), um(3), STACK.my2[1], STACK.ubm[0], { ...emit, part: 'bump-stack', entry: flow === FLOW.vss ? 'min' : 'max', arc: 0 });
+          builder.seg('copper', x - um(6), x + um(6), STACK.my2[0], STACK.my2[1], z - um(6), z + um(6), { ...emit, part: 'io-pad', glow: 0 });
         }
       }
     }
@@ -1017,12 +1381,26 @@ function level1(builder: ChunkBuilder) {
       if (horizontal) {
         for (let z = Math.ceil((Math.max(b.z0, d.z0) - d.z0) / lanePitch) * lanePitch + d.z0 + um(9); z < Math.min(b.z1, d.z1); z += lanePitch) {
           const k = Math.round((z - d.z0) / lanePitch);
-          builder.box('copper', d.x0, d.x1, STACK.my1[0], STACK.my1[1], z - um(1.25), z + um(1.25), k % 3 === 0 ? (phy.side === 'west' ? 1 : -1) : 0, rand(501, phy.index, k));
+          builder.seg('copper', d.x0, d.x1, STACK.my1[0], STACK.my1[1], z - um(1.25), z + um(1.25), { part: 'phy-lane', glow: k % 3 === 0 ? (phy.side === 'west' ? 1 : -1) : 0, phase: rand(501, phy.index, k) });
         }
       } else {
         for (let x = Math.ceil((Math.max(b.x0, d.x0) - d.x0) / lanePitch) * lanePitch + d.x0 + um(9); x < Math.min(b.x1, d.x1); x += lanePitch) {
           const k = Math.round((x - d.x0) / lanePitch);
-          builder.box('copper', x - um(1.25), x + um(1.25), STACK.my2[0], STACK.my2[1], d.z0, d.z1, k % 3 === 0 ? (phy.side === 'north' ? 1 : -1) : 0, rand(502, phy.index, k));
+          builder.seg('copper', x - um(1.25), x + um(1.25), STACK.my2[0], STACK.my2[1], d.z0, d.z1, { part: 'phy-lane', glow: k % 3 === 0 ? (phy.side === 'north' ? 1 : -1) : 0, phase: rand(502, phy.index, k) });
+        }
+      }
+      for (const bundle of NOC.phyBundles(phy)) {
+        for (let line = 0; line < bundle.lines; line += 1) {
+          const across = bundle.across + lineOffset(line, bundle.lines, bundle.pitch);
+          const along = horizontal ? (d.x0 + d.x1) / 2 : (d.z0 + d.z1) / 2;
+          // The nearest driver lane, reached by a short stub on the lane layer.
+          const laneAt = (horizontal ? d.z0 : d.x0) + um(9) + Math.round((across - (horizontal ? d.z0 : d.x0) - um(9)) / lanePitch) * lanePitch;
+          const [x, z] = horizontal ? [along, across] : [across, along];
+          const laneY = horizontal ? STACK.my1 : STACK.my2;
+          const emit: Emit = { part: 'lane-drop', glow: line % 2 === 0 ? 0.6 : -0.6, phase: rand(1641, phy.index, line) };
+          builder.via('tungsten', x, z, um(2), um(2), laneY[1], horizontal ? STACK.nocH[0] : STACK.nocV[0], { ...emit, entry: line % 2 === 0 ? 'max' : 'min', arc: 0 });
+          if (horizontal) builder.seg('copper', x - um(2.5), x + um(2.5), laneY[0], laneY[1], Math.min(z, laneAt) - um(2.5), Math.max(z, laneAt) + um(2.5), { ...emit, axis: 'z' });
+          else builder.seg('copper', Math.min(x, laneAt) - um(2.5), Math.max(x, laneAt) + um(2.5), laneY[0], laneY[1], z - um(2.5), z + um(2.5), { ...emit, axis: 'x' });
         }
       }
     }
@@ -1084,28 +1462,210 @@ function level1(builder: ChunkBuilder) {
 }
 
 // ---------------------------------------------------------------------------
-// Level 2: intermediate routing maze
+// Level 2: intermediate routing
 // ---------------------------------------------------------------------------
 
 const DENSITY: Partial<Record<Leaf, number>> = { logic: 0.5, router: 0.62, 'sram-periph': 0.4, channel: 0.3, analog: 0.18, 'phy-drivers': 0.34, 'phy-bumps': 0.24, io: 0.22 };
 const mazeDensity = (scale: number) => (leaf: Leaf) => (DENSITY[leaf] ?? 0) * scale;
 
 const L2_LAYERS: MazeLayer[] = [
-  { salt: 1101, horizontal: true, pitch: um(1.0), width: um(0.42), y: STACK.mx1, cell: um(8), material: 'copper', occupancy: mazeDensity(1), glowChance: 0.035 },
-  { salt: 1201, horizontal: false, pitch: um(1.0), width: um(0.42), y: STACK.mx2, cell: um(8), material: 'copper', occupancy: mazeDensity(0.95), glowChance: 0.035 },
-  { salt: 1301, horizontal: true, pitch: um(1.5), width: um(0.62), y: STACK.mx3, cell: um(12), material: 'copper', occupancy: mazeDensity(0.8), glowChance: 0.05 },
+  { salt: 1101, horizontal: true, pitch: um(1.0), width: um(0.42), y: STACK.mx1, cell: um(13), material: 'copper', occupancy: mazeDensity(0.86), glowChance: 0.06 },
+  { salt: 1201, horizontal: false, pitch: um(1.0), width: um(0.42), y: STACK.mx2, cell: um(13), material: 'copper', occupancy: mazeDensity(0.82), glowChance: 0.06 },
+  { salt: 1301, horizontal: true, pitch: um(1.5), width: um(0.62), y: STACK.mx3, cell: um(19), material: 'copper', occupancy: mazeDensity(0.7), glowChance: 0.07 },
 ];
+
+// Every route on Mx1-Mx3 belongs to a net with one driver, and every end
+// goes somewhere. An Mx2 or Mx3 route starts on a track centre of the layer
+// below; if a route of that layer passes there, the two join through a via
+// (Vx1 or Vx2) and this route is a branch of that net, flowing away from the
+// junction. Every other end drops a V3 via stack to the cells, where level 3
+// lands it on an M3 pad and wires it to a cell pin: the end the cells drive
+// ("up") and the end that drives the cells. Drops from Mx2 and Mx3 ends pass
+// the lower layers between their tracks, so they never touch another net.
+const MX_PITCH = um(1);
+const onTrack = (value: number, pitch: number) => (Math.round(value / pitch - 0.5) + 0.5) * pitch;
+const onGap = (value: number, pitch: number) => Math.round(value / pitch) * pitch;
+const DROP_HALF = um(0.025);
+
+// Local M3 tracks come in four classes, x = (4m + class + 0.5) gate pitches:
+// classes 0 and 1 carry nets between neighbouring rows (alternating by row
+// pair), class 2 the drops from the intermediate layers, and class 3 the
+// power ladders. No two uses ever share a track.
+const m3Track = (cls: number, m: number) => (4 * m + cls + 0.5) * CPP;
+const m3Near = (cls: number, x: number) => m3Track(cls, Math.round((x / CPP - cls - 0.5) / 4));
+const m3From = (cls: number, x: number) => m3Track(cls, Math.ceil((x / CPP - cls - 0.5) / 4));
+const m3To = (cls: number, x: number) => m3Track(cls, Math.floor((x / CPP - cls - 0.5) / 4));
+
+type RouteRun = Run & { layer: 0 | 1 | 2; across: number; dir: 1 | -1; active: boolean; phase: number; joined: boolean };
+
+/** One end of a route or bus line where a via stack meets the cells. `up`: a cell drives the net from here. */
+export type RouteEnd = { x: number; z: number; top: number; up: boolean; active: boolean; phase: number; drop: boolean };
+
+/** Where the lo end of an Mx2 (layer 1) or Mx3 (layer 2) route meets the layer below. */
+const loDropAt = (run: { layer: number; across: number; lo: number }): [number, number] => (run.layer === 1 ? [m3Near(2, run.across), run.lo] : [m3Near(2, run.lo), run.across]);
+
+function routeRuns(layerIndex: 0 | 1 | 2, bounds: Rect, leaves: LeafCache, joins = true): RouteRun[] {
+  const layer = L2_LAYERS[layerIndex];
+  const runs: RouteRun[] = [];
+  for (const run of mazeRuns(layer, bounds, leaves)) {
+    // Mx2/Mx3: the lo end on a track centre of the layer below, the hi end between its tracks.
+    const lo = layerIndex === 0 ? run.lo : onTrack(run.lo, MX_PITCH);
+    const hi = layerIndex === 0 ? run.hi : onGap(run.hi, MX_PITCH);
+    if (hi - lo < MX_PITCH * 0.49) continue;
+    const across = (run.track + 0.5) * layer.pitch;
+    let joined = false;
+    if (joins && layerIndex > 0) {
+      const [x, z] = loDropAt({ layer: layerIndex, across, lo });
+      joined = routeCovers(layerIndex === 1 ? 0 : 1, x, z, leaves);
+    }
+    runs.push({
+      ...run, lo, hi, layer: layerIndex, across, joined,
+      dir: joined || rand(layer.salt + 4, run.track, run.start) < 0.5 ? 1 : -1,
+      active: rand(layer.salt + 3, run.track, run.start) < layer.glowChance,
+      phase: rand(layer.salt + 5, run.track, run.start),
+    });
+  }
+  return runs;
+}
+
+/** Whether a route of Mx1 (0) or Mx2 (1) is drawn at a point, or close enough that a via stack there would touch it. */
+function routeCovers(layerIndex: 0 | 1, x: number, z: number, leaves: LeafCache): boolean {
+  const e = um(0.02);
+  const reach = layerIndex === 0 ? 0 : um(0.15);
+  const margin = um(0.08);
+  const along = layerIndex === 0 ? x : z;
+  return routeRuns(layerIndex, { x0: x - e, x1: x + e, z0: z - e, z1: z + e }, leaves, false).some((run) => along >= run.lo - reach - margin && along <= run.hi + reach + margin);
+}
+
+function routeEnds(run: RouteRun): [RouteEnd, RouteEnd] {
+  const common = { top: L2_LAYERS[run.layer].y[0], active: run.active, phase: run.phase };
+  if (run.layer === 0) {
+    const z = run.across;
+    return [{ ...common, x: m3From(2, run.lo + um(0.03)), z, up: run.dir > 0, drop: true }, { ...common, x: m3To(2, run.hi - um(0.03)), z, up: run.dir < 0, drop: true }];
+  }
+  const [lx, lz] = loDropAt(run);
+  const [hx, hz] = run.layer === 1 ? [m3Near(2, run.across), run.hi] : [m3Near(2, run.hi), run.across];
+  return [{ ...common, x: lx, z: lz, up: run.dir > 0, drop: !run.joined }, { ...common, x: hx, z: hz, up: run.dir < 0, drop: true }];
+}
+
+/** Via stacks from routes and bus lines that land inside `rect`, in a fixed order. */
+function routeEndsIn(rect: Rect, leaves: LeafCache): RouteEnd[] {
+  const pad = um(0.7);
+  const ends: RouteEnd[] = [];
+  const queries: Array<[0 | 1 | 2, Rect]> = [
+    [0, { x0: rect.x0 - pad, x1: rect.x1 + pad, z0: rect.z0, z1: rect.z1 }],
+    [1, { x0: rect.x0 - pad, x1: rect.x1 + pad, z0: rect.z0 - pad, z1: rect.z1 + pad }],
+    [2, { x0: rect.x0 - pad, x1: rect.x1 + pad, z0: rect.z0, z1: rect.z1 }],
+  ];
+  for (const [layer, bounds] of queries) for (const run of routeRuns(layer, bounds, leaves)) for (const end of routeEnds(run)) if (end.drop && insideRect(rect, end.x, end.z)) ends.push(end);
+  ends.push(...busEndsIn(rect));
+  return ends.sort((a, b) => a.x - b.x || a.z - b.z);
+}
+
+function emitRoute(builder: ChunkBuilder, run: RouteRun) {
+  const layer = L2_LAYERS[run.layer];
+  const half = layer.width / 2;
+  // Mx2 and Mx3 ends overhang the track they land on, as a via landing does.
+  const reach = run.layer === 0 ? 0 : um(0.15);
+  const glow = run.active ? run.dir : 0;
+  const part: PartId = run.layer === 0 ? 'mx1' : run.layer === 1 ? 'mx2' : 'mx3';
+  if (layer.horizontal) builder.seg(layer.material, run.lo - reach, run.hi + reach, layer.y[0], layer.y[1], run.across - half, run.across + half, { glow, phase: run.phase, part });
+  else builder.seg(layer.material, run.across - half, run.across + half, layer.y[0], layer.y[1], run.lo - reach, run.hi + reach, { glow, phase: run.phase, part });
+  const stretch = LEVELS[2].viaStretch;
+  for (const end of routeEnds(run)) {
+    if (!end.drop) {
+      // A branch: this route turns off the route below through one via.
+      const y = run.layer === 1 ? STACK.vx1 : STACK.vx2;
+      builder.via('tungsten', end.x, end.z, um(0.19), um(0.19), y[0], y[1], { part: run.layer === 1 ? 'vx1' : 'vx2', glow: glow === 0 ? 0 : 1, phase: run.phase, entry: 'min', arc: run.dir * (layer.horizontal ? end.x : end.z) * 1000 - (y[1] - y[0]) * 1000 * stretch });
+      continue;
+    }
+    // The route's own pulse coordinate where the stack meets it, so the
+    // pulse runs on unbroken into (or out of) the stack.
+    const at = run.dir * (layer.horizontal ? end.x : end.z) * 1000;
+    const height = (end.top - STACK.v3[0]) * 1000 * stretch;
+    builder.via('tungsten', end.x, end.z, DROP_HALF, DROP_HALF, STACK.v3[0], end.top, {
+      part: 'v3', glow: glow === 0 ? 0 : 1, phase: run.phase,
+      ...(end.up ? { entry: 'min' as const, arc: at - height } : { entry: 'max' as const, arc: at }),
+    });
+  }
+}
+
+// Power: Mx4 straps alternate VDD and VSS. Via ladders carry each supply
+// down to the M0 rails of the same supply, at spots chosen in the gaps
+// between the Mx1-Mx3 tracks (every 6 µm near a rail, every other strap), and
+// via stacks join the straps to the My1 straps above them.
+const MX4 = { pitch: um(14), offset: um(7) } as const;
+const LADDER_SPACING = um(6);
+const MX4_ALLOWED = (leaf: Leaf) => leaf in DENSITY || leaf === 'decap' || leaf === 'sram';
+const MY = { pitch: um(60), offset: um(30) } as const;
+/** Straps of every power grid alternate VDD, VSS by index. */
+const strapFlow = (index: number): Flow => (((index % 2) + 2) % 2 === 0 ? FLOW.vdd : FLOW.vss);
+const supplyFlow = (row: number): Flow => (railSupply(row) === 'VDD' ? FLOW.vdd : FLOW.vss);
+/** Region the way a generator with a leaf cache of `step` sees it. */
+const leafAtStep = (x: number, z: number, step: number) => leafAt((Math.floor(x / step) + 0.5) * step, (Math.floor(z / step) + 0.5) * step);
+export const POWER_GLOW = 0.32;
+
+export type Ladder = { x: number; z: number; row: number; flow: Flow };
+
+/** Power ladders whose foot (on an M0 rail) lies inside `rect`. */
+export function laddersIn(rect: Rect): Ladder[] {
+  const ladders: Ladder[] = [];
+  const k0 = Math.ceil((rect.x0 - um(0.2) - MX4.offset) / MX4.pitch);
+  const k1 = Math.floor((rect.x1 + um(0.2) - MX4.offset) / MX4.pitch);
+  const n0 = Math.ceil((rect.z0 - um(0.2)) / LADDER_SPACING);
+  const n1 = Math.floor((rect.z1 + um(0.2)) / LADDER_SPACING);
+  for (let k = k0; k <= k1; k += 1) for (let n = n0; n <= n1; n += 1) {
+    const row = Math.round((n * LADDER_SPACING) / ROW);
+    const flow = supplyFlow(row);
+    if (flow !== strapFlow(k)) continue;
+    const strap = MX4.offset + k * MX4.pitch;
+    const x = m3Near(3, strap);
+    const z = row * ROW;
+    if (!insideRect(rect, x, z)) continue;
+    if (!ROW_LEAVES.includes(rowBlockLeaf(row, Math.floor(x / BLOCK))) || !MX4_ALLOWED(leafAtStep(strap, z, um(4)))) continue;
+    ladders.push({ x, z, row, flow });
+  }
+  return ladders;
+}
+
+/** Stacks from Mx4 straps up to My1 straps of the same supply, clear of the systolic buses. */
+function strapStacksIn(rect: Rect): Array<{ x: number; z: number; flow: Flow }> {
+  const stacks: Array<{ x: number; z: number; flow: Flow }> = [];
+  const k0 = Math.ceil((rect.x0 - MX4.offset) / MX4.pitch);
+  const k1 = Math.floor((rect.x1 - MX4.offset) / MX4.pitch);
+  const m0 = Math.ceil((rect.z0 - MY.offset) / MY.pitch);
+  const m1 = Math.floor((rect.z1 - MY.offset) / MY.pitch);
+  for (let k = k0; k <= k1; k += 1) for (let m = m0; m <= m1; m += 1) {
+    const flow = strapFlow(k);
+    if (flow !== strapFlow(m)) continue;
+    const x = MX4.offset + k * MX4.pitch;
+    const z = MY.offset + m * MY.pitch;
+    // Both straps are drawn there (each generator samples regions its own way).
+    if (!MX4_ALLOWED(leafAtStep(x, z, um(4)))) continue;
+    const sample = um(20);
+    if (!STRAP_ALLOWED(leafAtStep((Math.floor(x / sample) + 0.5) * sample, z, um(10)))) continue;
+    if (!systolicClear(x, z, um(3))) continue;
+    stacks.push({ x, z, flow });
+  }
+  return stacks;
+}
 
 function level2(builder: ChunkBuilder) {
   const b = builder.bounds;
   const leaves = new LeafCache(um(4));
-  const runs = L2_LAYERS.map((layer) => mazeRuns(layer, b, leaves));
-  L2_LAYERS.forEach((layer, index) => emitRuns(builder, layer, runs[index]));
-  emitVias(builder, { layer: L2_LAYERS[0], runs: runs[0] }, { layer: L2_LAYERS[1], runs: runs[1] }, STACK.vx1, um(0.38), 0.07);
-  emitVias(builder, { layer: L2_LAYERS[2], runs: runs[2] }, { layer: L2_LAYERS[1], runs: runs[1] }, STACK.vx2, um(0.38), 0.06);
+  const runs = ([0, 1, 2] as const).map((layer) => routeRuns(layer, b, leaves));
+  for (const list of runs) for (const run of list) emitRoute(builder, run);
 
   // Power straps on the top intermediate layer over all logic.
-  emitStraps(builder, leaves, { horizontal: false, pitch: um(14), offset: um(7), width: um(1.8), y: STACK.mx4, material: 'copper', sample: um(4), allowed: (leaf) => leaf in DENSITY || leaf === 'decap' || leaf === 'sram' });
+  emitStraps(builder, leaves, { horizontal: false, pitch: MX4.pitch, offset: MX4.offset, width: um(1.8), y: STACK.mx4, material: 'copper', sample: um(4), allowed: MX4_ALLOWED, part: 'mx4-strap', flowOf: strapFlow });
+  const stretch = LEVELS[2].viaStretch;
+  for (const ladder of laddersIn(b)) {
+    // VDD flows down the ladder to the rail; VSS returns up it.
+    builder.via('tungsten', ladder.x, ladder.z, um(0.05), um(0.05), STACK.v3[0], STACK.mx4[0], { part: 'power-ladder', flow: ladder.flow, glow: POWER_GLOW, phase: rand(1501, Math.round(ladder.x * 1e4), ladder.row), entry: ladder.flow === FLOW.vdd ? 'max' : 'min', arc: 0 });
+  }
+  for (const stack of strapStacksIn(b)) {
+    builder.via('tungsten', stack.x, stack.z, um(0.6), um(0.6), STACK.mx4[1], STACK.my1[0], { part: 'vx4', flow: stack.flow, glow: POWER_GLOW, phase: rand(1502, Math.round(stack.x * 1e4), Math.round(stack.z * 1e4)), entry: stack.flow === FLOW.vdd ? 'max' : 'min', arc: -(STACK.my1[0] - STACK.mx4[1]) * 1000 * stretch * 0.5 });
+  }
 
   // SRAM arrays: global bit lines, word-line straps, and read bursts.
   emitStraps(builder, leaves, { horizontal: false, pitch: um(0.9), offset: 0, width: um(0.34), y: STACK.mx2, material: 'copper', sample: um(4), allowed: (leaf) => leaf === 'sram', glowChance: 0.02, salt: 1401 });
@@ -1219,61 +1779,489 @@ export function cellAt(x: number, z: number): CellHit | null {
 /** Supply carried by the rail on a row boundary (the rail below row `row`). */
 export const railSupply = (row: number): 'VDD' | 'VSS' => (rowFlipped(row) ? 'VDD' : 'VSS');
 
+/** [lower, upper] z of a span given as offsets from a row's VSS edge. */
+const zSpan = (row: number, a: number, b: number): [number, number] => {
+  const za = rowOffset(row, a);
+  const zb = rowOffset(row, b);
+  return za < zb ? [za, zb] : [zb, za];
+};
+
+// ---------------------------------------------------------------------------
+// Standard-cell layouts: pins, contacts, and the wiring inside each cell
+// ---------------------------------------------------------------------------
+//
+// Every logic cell has a fixed layout, shared by the transistors (level 4)
+// and the local wiring (level 3), so the two always meet:
+//   * input pins on M1 drop through V0 to an M0 wire and a gate contact;
+//   * the output pin on M1 joins the NMOS and PMOS drains through V0 and M0;
+//   * source contacts reach the supply rails at the cell edges and, through
+//     vias, the buried power rails below the fins;
+//   * multi-stage cells route internal nodes to the gates of later stages.
+// Positions count gate pitches from the cell's left edge: source/drain
+// position k sits at x = k CPP, gate column n at x = (n + 0.5) CPP.
+
+/** M0 track offsets from a row's VSS edge: 0 over the NMOS fins, 3 over the PMOS fins, 1-2 in between. */
+const M0_TRACKS = [0.054, 0.09, 0.126, 0.162].map(um);
+/** Source/drain contact extents from the VSS edge, over the NMOS and the PMOS fins. */
+const MD_N: Band = [um(0.038), um(0.079)];
+const MD_P: Band = [um(0.137), um(0.178)];
+
+type CellIo = { inputs: string[]; outputs: string[]; clock?: string; stages?: boolean };
+const CELL_IO: Partial<Record<CellType, CellIo>> = {
+  INV: { inputs: ['A'], outputs: ['Y'] },
+  BUF: { inputs: ['A'], outputs: ['Y'], stages: true },
+  NAND2: { inputs: ['A', 'B'], outputs: ['Y'] },
+  NOR2: { inputs: ['A', 'B'], outputs: ['Y'] },
+  NAND3: { inputs: ['A', 'B', 'C'], outputs: ['Y'] },
+  AOI21: { inputs: ['A1', 'A2', 'B'], outputs: ['Y'] },
+  OAI22: { inputs: ['A1', 'A2', 'B1', 'B2'], outputs: ['Y'] },
+  XOR2: { inputs: ['A', 'B'], outputs: ['Y'], stages: true },
+  MUX2: { inputs: ['A', 'B', 'S'], outputs: ['Y'], stages: true },
+  FA: { inputs: ['A', 'B', 'CI'], outputs: ['S', 'CO'], stages: true },
+  DFF: { inputs: ['D'], outputs: ['Q'], clock: 'CK', stages: true },
+};
+
+export type CellPin = { name: string; dir: 'in' | 'out' | 'clk'; k: number };
+export type CellLayout = {
+  /** Pins: vertical M1 bars at source/drain positions. */
+  pins: CellPin[];
+  /** Gate contacts on gate column n, under M0 track `track`. */
+  gateContacts: Array<{ n: number; track: number }>;
+  /** Source/drain contacts: tied to the rails, drains on an output, or an internal node spanning both devices. */
+  contacts: Array<{ k: number; role: 'power' | 'out' | 'int' }>;
+  /** M0 wires from k0 to k1 gate pitches along a track. */
+  m0: Array<{ track: number; k0: number; k1: number; pin?: string }>;
+  v0: Array<{ k: number; track: number }>;
+};
+
+const LAYOUTS = new Map<CellType, CellLayout | null>();
+
+/** Layout of a cell type, in gate pitches from the cell's left edge (null for taps, fillers, and decaps). */
+export function cellLayout(type: CellType): CellLayout | null {
+  const cached = LAYOUTS.get(type);
+  if (cached !== undefined) return cached;
+  const io = CELL_IO[type];
+  if (!io) {
+    LAYOUTS.set(type, null);
+    return null;
+  }
+  const w = CELL_WIDTH[type];
+  const outs = io.outputs.length > 1 ? [w - 4, w - 1] : [w - 1];
+  const role = (k: number): 'power' | 'out' | 'int' | null => {
+    if (outs.includes(k)) return 'out';
+    if (k === 0) return 'power';
+    if (!io.stages) return k % 2 === 0 ? 'power' : null;
+    return k % 2 === 1 ? 'int' : 'power';
+  };
+  // Inputs spread over the positions left of the first output; in
+  // multi-stage cells they avoid the internal nodes (odd positions).
+  const inputs = [...io.inputs, ...(io.clock ? [io.clock] : [])];
+  const spacing = inputs.length > 1 ? (outs[0] - 1) / (inputs.length - 1) : 0;
+  const taken = new Set<number>();
+  const pins: CellPin[] = inputs.map((name, index) => {
+    let k = Math.round(index * spacing);
+    if (io.stages && k % 2 === 1) k -= 1;
+    while (taken.has(k)) k += io.stages ? 2 : 1;
+    taken.add(k);
+    return { name, dir: name === io.clock ? 'clk' as const : 'in' as const, k };
+  });
+  io.outputs.forEach((name, index) => pins.push({ name, dir: 'out', k: outs[index] }));
+
+  const contacts: CellLayout['contacts'] = [];
+  for (let k = 0; k < w; k += 1) {
+    const r = role(k);
+    if (r) contacts.push({ k, role: r });
+  }
+  // M0 wires: drains on tracks 0 and 3, inputs and internal nodes on 1 and 2.
+  const lanes: Array<Array<[number, number]>> = [[], [], [], []];
+  const free = (track: number, a: number, b: number) => lanes[track].every(([c, d]) => b + 0.2 <= c || d + 0.2 <= a);
+  const m0: CellLayout['m0'] = [];
+  const v0: CellLayout['v0'] = [];
+  const gateContacts: CellLayout['gateContacts'] = [];
+  for (const pin of pins) {
+    if (pin.dir !== 'out') continue;
+    // The drain contact spans both devices; one M0 wire and V0 lift it to the pin.
+    lanes[0].push([pin.k - 0.3, pin.k + 0.3]);
+    m0.push({ track: 0, k0: pin.k - 0.3, k1: pin.k + 0.3, pin: pin.name });
+    v0.push({ k: pin.k, track: 0 });
+  }
+  const driven = new Set<number>();
+  pins.filter((pin) => pin.dir !== 'out').forEach((pin, index) => {
+    // Pin k feeds the gate just to its right.
+    const a = pin.k - 0.25;
+    const b = pin.k + 0.75;
+    const track = (index % 2 === 0 ? [1, 2] : [2, 1]).find((t) => free(t, a, b));
+    if (track === undefined) return;
+    lanes[track].push([a, b]);
+    m0.push({ track, k0: a, k1: b, pin: pin.name });
+    v0.push({ k: pin.k, track });
+    gateContacts.push({ n: pin.k, track });
+    driven.add(pin.k);
+  });
+  if (io.stages) {
+    // Each internal node (odd position) drives the free gates either side of it with one wire.
+    for (let k = 1; k < w - 1; k += 2) {
+      if (role(k) !== 'int') continue;
+      const gates = [k - 1, k].filter((n) => n >= 0 && n <= w - 2 && !driven.has(n));
+      if (gates.length === 0) continue;
+      const a = Math.min(k, ...gates.map((n) => n + 0.5)) - 0.15;
+      const b = Math.max(k, ...gates.map((n) => n + 0.5)) + 0.15;
+      const track = [1, 2].find((t) => free(t, a, b));
+      if (track === undefined) continue;
+      lanes[track].push([a, b]);
+      m0.push({ track, k0: a, k1: b });
+      for (const n of gates) {
+        gateContacts.push({ n, track });
+        driven.add(n);
+      }
+    }
+  }
+  const layout = { pins, gateContacts, contacts, m0, v0 };
+  LAYOUTS.set(type, layout);
+  return layout;
+}
+
+/** Whether a standard cell switches in the animation (its gates and output light up). */
+const cellActive = (row: number, cell: PlacedCell) => rand(4003, row, cell.start) < 0.18;
+
+// ---------------------------------------------------------------------------
+// Local routing: nets between cell pins on M2 and M3
+// ---------------------------------------------------------------------------
+//
+// Every local net joins an output pin to input pins through V1 and M2 and,
+// between rows, V2 and M3. Routing is decided per row block, so any chunk
+// rebuilds exactly the nets it shows, and nothing crosses a block edge:
+//   * nets inside a row block run on M2 tracks 2-3 of the row;
+//   * nets between a row and the row above use M2 track 4 of the lower row,
+//     track 1 of the upper row, and an M3 track of class (row mod 2);
+//   * via stacks from the intermediate layers land on class-2 M3 pads and
+//     join a pin on tracks 2-3; power ladders use class-3 tracks at the rails.
+// Tracks 0 and 5 stay free: pins reach only tracks 1-4.
+
+const M2_PITCH = um(0.036);
+const m2Z = (row: number, j: number) => rowZ(row) + (j + 0.5) * M2_PITCH;
+const M2_HALF = um(0.009);
+const M3_HALF = um(0.013);
+const V_HALF = um(0.01);
+/** How far a wire runs past the via at each of its ends. */
+const REACH = um(0.014);
+const LANE_GAP = um(0.02);
+
+type PinAt = { row: number; k: number; x: number; name: string; dir: 'in' | 'out' | 'clk'; cell: PlacedCell };
+type Piece = { kind: 'm2' | 'm3' | 'v1' | 'v2' | 'pad'; x0: number; x1: number; z0: number; z1: number; arc: number; entry: 'min' | 'max' };
+type LocalNet = { flow: Flow; active: boolean; phase: number; pieces: Piece[] };
+type Port = RouteEnd & { pin: PinAt | null };
+type InputClass = 'row' | 'below' | 'above' | 'port' | 'clock' | 'none';
+
+const viaSpan = (band: Band) => (band[1] - band[0]) * 1000 * LEVELS[3].viaStretch;
+
+/** Builds the pieces of one net in order, keeping the pulse path length. */
+class Trace {
+  readonly pieces: Piece[];
+  arc: number;
+  constructor(pieces: Piece[], arc = 0) {
+    this.pieces = pieces;
+    this.arc = arc;
+  }
+  fork() {
+    return new Trace(this.pieces, this.arc);
+  }
+  via(kind: 'v1' | 'v2', x: number, z: number, up: boolean) {
+    this.pieces.push({ kind, x0: x - V_HALF, x1: x + V_HALF, z0: z - V_HALF, z1: z + V_HALF, arc: this.arc, entry: up ? 'min' : 'max' });
+    this.arc += viaSpan(kind === 'v1' ? STACK.v1 : STACK.v2);
+    return this;
+  }
+  /** M2 along x from `from` to `to`, reaching past both ends. */
+  m2(z: number, from: number, to: number) {
+    const forward = to >= from;
+    this.pieces.push({ kind: 'm2', x0: Math.min(from, to) - REACH, x1: Math.max(from, to) + REACH, z0: z - M2_HALF, z1: z + M2_HALF, arc: this.arc - REACH * 1000, entry: forward ? 'min' : 'max' });
+    this.arc += Math.abs(to - from) * 1000;
+    return this;
+  }
+  /** M3 along z from `from` to `to`. */
+  m3(x: number, from: number, to: number) {
+    const forward = to >= from;
+    this.pieces.push({ kind: 'm3', x0: x - M3_HALF, x1: x + M3_HALF, z0: Math.min(from, to) - REACH, z1: Math.max(from, to) + REACH, arc: this.arc - REACH * 1000, entry: forward ? 'min' : 'max' });
+    this.arc += Math.abs(to - from) * 1000;
+    return this;
+  }
+  pad(x: number, z: number) {
+    const half = um(0.027);
+    this.pieces.push({ kind: 'pad', x0: x - half, x1: x + half, z0: z - half, z1: z + half, arc: this.arc, entry: 'min' });
+    return this;
+  }
+}
+
+/**
+ * From a source pin along M2 on `z` to every sink, branching both ways from
+ * the source, then down a V1 into each sink pin.
+ */
+function fanOut(trace: Trace, z: number, from: number, sinks: number[]) {
+  const left = sinks.filter((x) => x < from);
+  const right = sinks.filter((x) => x >= from);
+  const start = trace.arc;
+  if (left.length > 0) trace.fork().m2(z, from, Math.min(...left));
+  if (right.length > 0) trace.fork().m2(z, from, Math.max(...right));
+  for (const x of sinks) new Trace(trace.pieces, start + Math.abs(x - from) * 1000).via('v1', x, z, false);
+}
+
+function nearestPin(pins: PinAt[], x: number, accept: (pin: PinAt) => boolean) {
+  let best: PinAt | null = null;
+  for (const pin of pins) if (accept(pin) && (!best || Math.abs(pin.x - x) < Math.abs(best.x - x))) best = pin;
+  return best;
+}
+
+/** Row-block routing with memoized pins and drops, for one chunk's generation. */
+function localRouter() {
+  const leaves = new LeafCache(um(4));
+  const pinMemo = new Map<string, PinAt[]>();
+  const portMemo = new Map<string, Port[]>();
+  const claimMemo = new Map<string, Set<number>>();
+
+  const pins = (row: number, block: number): PinAt[] => {
+    const key = `${row}:${block}`;
+    let found = pinMemo.get(key);
+    if (found) return found;
+    found = [];
+    const leaf = rowBlockLeaf(row, block);
+    if (ROW_LEAVES.includes(leaf)) {
+      for (const cell of blockCells(row, block, leaf)) {
+        const layout = cellLayout(cell.type);
+        if (!layout) continue;
+        for (const pin of layout.pins) found.push({ row, k: cell.start + pin.k, x: (cell.start + pin.k) * CPP, name: pin.name, dir: pin.dir, cell });
+      }
+    }
+    pinMemo.set(key, found);
+    return found;
+  };
+
+  // Drops from the intermediate layers: a stack the cells drive leaves from
+  // the nearest output pin; a stack that drives the cells feeds the nearest
+  // free input pin, which then takes no other net.
+  const ports = (row: number, block: number): Port[] => {
+    const key = `${row}:${block}`;
+    let found = portMemo.get(key);
+    if (found) return found;
+    const rect = { x0: block * BLOCK, x1: (block + 1) * BLOCK, z0: rowZ(row), z1: rowZ(row) + ROW };
+    const here = pins(row, block);
+    const claimed = new Set<number>();
+    found = routeEndsIn(rect, leaves).map((end) => {
+      const pin = nearestPin(here, end.x, (candidate) => (end.up ? candidate.dir === 'out' : candidate.dir === 'in' && !claimed.has(candidate.k)));
+      if (pin && !end.up) claimed.add(pin.k);
+      return { ...end, pin };
+    });
+    portMemo.set(key, found);
+    claimMemo.set(key, claimed);
+    return found;
+  };
+
+  const inputClass = (pin: PinAt, block: number): InputClass => {
+    if (pin.dir === 'clk') return 'clock';
+    ports(pin.row, block);
+    if (claimMemo.get(`${pin.row}:${block}`)?.has(pin.k)) return 'port';
+    const h = rand(5101, pin.row, pin.k);
+    return h < 0.5 ? 'row' : h < 0.72 ? 'below' : h < 0.94 ? 'above' : 'none';
+  };
+
+  const netState = (key: number, salt: number) => ({ active: rand(5201, key, salt) < 0.2, phase: rand(5202, key, salt) });
+
+  /** Nets inside one row block, and the drops that land in it. */
+  function rowNets(row: number, block: number): LocalNet[] {
+    const here = pins(row, block);
+    const nets: LocalNet[] = [];
+    const lanes: Record<2 | 3, Array<[number, number]>> = { 2: [], 3: [] };
+    const place = (a: number, b: number): 2 | 3 | null => {
+      for (const j of [2, 3] as const) {
+        if (lanes[j].every(([c, d]) => b + LANE_GAP <= c || d + LANE_GAP <= a)) {
+          lanes[j].push([a, b]);
+          return j;
+        }
+      }
+      return null;
+    };
+    for (const port of ports(row, block)) {
+      const pieces: Piece[] = [];
+      const net: LocalNet = { flow: FLOW.data, active: port.active, phase: port.phase, pieces };
+      nets.push(net);
+      const pin = port.pin;
+      const j = pin ? place(Math.min(pin.x, port.x) - REACH, Math.max(pin.x, port.x) + REACH) : null;
+      if (!pin || j === null) {
+        new Trace(pieces).pad(port.x, port.z);
+        continue;
+      }
+      const z = m2Z(row, j);
+      if (port.up) new Trace(pieces).via('v1', pin.x, z, true).m2(z, pin.x, port.x).via('v2', port.x, z, true).m3(port.x, z, port.z).pad(port.x, port.z);
+      else new Trace(pieces).pad(port.x, port.z).m3(port.x, port.z, z).via('v2', port.x, z, false).m2(z, port.x, pin.x).via('v1', pin.x, z, false);
+    }
+    // Clock pins take the block's clock buffer; other inputs the nearest output in the row.
+    const outs = here.filter((pin) => pin.dir === 'out');
+    const clockBuffer = outs.find((pin) => pin.cell.type === 'BUF' || pin.cell.type === 'INV') ?? null;
+    const groups = new Map<number, { source: PinAt; sinks: PinAt[]; flow: Flow }>();
+    for (const pin of here) {
+      if (pin.dir === 'out') continue;
+      const cls = inputClass(pin, block);
+      let source: PinAt | null = null;
+      if (cls === 'clock') source = clockBuffer && clockBuffer.cell !== pin.cell ? clockBuffer : null;
+      else if (cls === 'row') {
+        source = nearestPin(outs, pin.x - CPP * 3, (out) => out.cell !== pin.cell && out !== clockBuffer);
+      }
+      if (!source) continue;
+      const group = groups.get(source.k) ?? { source, sinks: [], flow: cls === 'clock' ? FLOW.clock : FLOW.data };
+      group.sinks.push(pin);
+      groups.set(source.k, group);
+    }
+    for (const group of [...groups.values()].sort((a, b) => a.source.x - b.source.x)) {
+      const xs = group.sinks.map((pin) => pin.x);
+      const j = place(Math.min(group.source.x, ...xs) - REACH, Math.max(group.source.x, ...xs) + REACH);
+      if (j === null) continue;
+      const z = m2Z(row, j);
+      const state = netState(row * 4099 + group.source.k, 1);
+      const pieces: Piece[] = [];
+      nets.push({ flow: group.flow, active: group.flow === FLOW.clock || state.active, phase: state.phase, pieces });
+      fanOut(new Trace(pieces).via('v1', group.source.x, z, true), z, group.source.x, xs);
+    }
+    return nets;
+  }
+
+  /** Nets between row `row` and the row above it, in one block. */
+  function pairNets(row: number, block: number): LocalNet[] {
+    const lower = pins(row, block);
+    const upper = pins(row + 1, block);
+    if (lower.length === 0 || upper.length === 0) return [];
+    const groups = new Map<string, { source: PinAt; sinks: PinAt[] }>();
+    const add = (source: PinAt | null, sink: PinAt) => {
+      if (!source) return;
+      const key = `${source.row}:${source.k}`;
+      const group = groups.get(key) ?? { source, sinks: [] };
+      group.sinks.push(sink);
+      groups.set(key, group);
+    };
+    for (const pin of lower) if (pin.dir === 'in' && inputClass(pin, block) === 'above') add(nearestPin(upper, pin.x, (out) => out.dir === 'out'), pin);
+    for (const pin of upper) if (pin.dir === 'in' && inputClass(pin, block) === 'below') add(nearestPin(lower, pin.x, (out) => out.dir === 'out'), pin);
+    const cls = ((row % 2) + 2) % 2;
+    const lanes = { lower: [] as Array<[number, number]>, upper: [] as Array<[number, number]> };
+    const free = (lane: Array<[number, number]>, a: number, b: number) => lane.every(([c, d]) => b + LANE_GAP <= c || d + LANE_GAP <= a);
+    const used = new Set<number>();
+    const bx0 = block * BLOCK + CPP;
+    const bx1 = (block + 1) * BLOCK - CPP;
+    const nets: LocalNet[] = [];
+    for (const group of [...groups.values()].sort((a, b) => a.source.x - b.source.x || a.source.row - b.source.row)) {
+      const fromLower = group.source.row === row;
+      const xs = group.sinks.map((pin) => pin.x);
+      const lo = Math.max(bx0, Math.min(group.source.x, ...xs) - 2 * CPP);
+      const hi = Math.min(bx1, Math.max(group.source.x, ...xs) + 2 * CPP);
+      const candidates: number[] = [];
+      for (let x = m3From(cls, lo); x <= hi; x += 4 * CPP) candidates.push(x);
+      candidates.sort((a, b) => Math.abs(a - group.source.x) - Math.abs(b - group.source.x));
+      const sourceLane = fromLower ? lanes.lower : lanes.upper;
+      const sinkLane = fromLower ? lanes.upper : lanes.lower;
+      const zs = fromLower ? m2Z(row, 4) : m2Z(row + 1, 1);
+      const zk = fromLower ? m2Z(row + 1, 1) : m2Z(row, 4);
+      for (const xm of candidates) {
+        const key = Math.round(xm / CPP);
+        if (used.has(key)) continue;
+        const sa = Math.min(group.source.x, xm) - REACH;
+        const sb = Math.max(group.source.x, xm) + REACH;
+        const ka = Math.min(xm, ...xs) - REACH;
+        const kb = Math.max(xm, ...xs) + REACH;
+        if (!free(sourceLane, sa, sb) || !free(sinkLane, ka, kb)) continue;
+        sourceLane.push([sa, sb]);
+        sinkLane.push([ka, kb]);
+        used.add(key);
+        const state = netState(group.source.row * 4099 + group.source.k, 2);
+        const pieces: Piece[] = [];
+        nets.push({ flow: FLOW.data, active: state.active, phase: state.phase, pieces });
+        const trace = new Trace(pieces).via('v1', group.source.x, zs, true).m2(zs, group.source.x, xm).via('v2', xm, zs, true).m3(xm, zs, zk).via('v2', xm, zk, false);
+        fanOut(trace, zk, xm, xs);
+        break;
+      }
+    }
+    return nets;
+  }
+
+  return { pins, rowNets, pairNets };
+}
+
+function emitLocalNet(builder: ChunkBuilder, net: LocalNet) {
+  const clock = net.flow === FLOW.clock;
+  for (const piece of net.pieces) {
+    const emit: Emit = { glow: net.active ? (clock ? 0.8 : 1) : 0, phase: net.phase, flow: net.flow, arc: piece.arc, entry: piece.entry };
+    if (piece.kind === 'm2') builder.seg('copper', piece.x0, piece.x1, STACK.m2[0], STACK.m2[1], piece.z0, piece.z1, { ...emit, part: clock ? 'clock-net' : 'm2', axis: 'x' });
+    else if (piece.kind === 'm3') builder.seg('copper', piece.x0, piece.x1, STACK.m3[0], STACK.m3[1], piece.z0, piece.z1, { ...emit, part: clock ? 'clock-net' : 'm3', axis: 'z' });
+    else if (piece.kind === 'v1') builder.via('tungsten', (piece.x0 + piece.x1) / 2, (piece.z0 + piece.z1) / 2, V_HALF, V_HALF, STACK.v1[0], STACK.v1[1], { ...emit, part: 'v1' });
+    else if (piece.kind === 'v2') builder.via('tungsten', (piece.x0 + piece.x1) / 2, (piece.z0 + piece.z1) / 2, V_HALF, V_HALF, STACK.v2[0], STACK.v2[1], { ...emit, part: 'v2' });
+    // Pads stop just under the cells crater floor, where the V3 stack above lands.
+    else builder.seg('copper', piece.x0, piece.x1, STACK.m3[0], um(0.303), piece.z0, piece.z1, { ...emit, part: 'm3-pad', lift: false });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Level 3: local interconnect M0-M3 over standard cells and SRAM
 // ---------------------------------------------------------------------------
 
-const M0_TRACKS = [0.054, 0.09, 0.126, 0.162].map(um);
-
-const L3_M2: MazeLayer = { salt: 3201, horizontal: true, pitch: um(0.036), width: um(0.018), y: STACK.m2, cell: um(0.216), material: 'copper', occupancy: (leaf) => (leaf === 'sram' || leaf === 'tsv' || leaf === 'seal' || leaf === 'outside' || leaf === 'phy-bumps' ? 0 : leaf === 'decap' || leaf === 'channel' ? 0.14 : 0.3), glowChance: 0.03 };
-const L3_M3: MazeLayer = { salt: 3301, horizontal: false, pitch: um(0.054), width: um(0.026), y: STACK.m3, cell: um(0.432), material: 'copper', occupancy: (leaf) => (leaf === 'sram' || leaf === 'tsv' || leaf === 'seal' || leaf === 'outside' || leaf === 'phy-bumps' ? 0 : 0.26), glowChance: 0.04 };
-
 function level3(builder: ChunkBuilder) {
   const b = builder.bounds;
   const leaves = new LeafCache(um(0.108));
+  const router = localRouter();
 
-  visitRows(b, (row, blockIndex, leaf, cells) => {
+  visitRows(b, (row, blockIndex, _leaf, cells) => {
     const x0 = blockIndex * BLOCK;
     const railZ = rowZ(row);
     // Rails at every row boundary: VSS below even rows, VDD below odd rows.
-    builder.box('copper', x0, x0 + BLOCK, STACK.m0[0], STACK.m0[1], railZ - um(0.012), railZ + um(0.012), 0, 0, hash(3000, row));
+    builder.seg('copper', x0, x0 + BLOCK, STACK.m0[0], STACK.m0[1], railZ - um(0.012), railZ + um(0.012), { seed: hash(3000, row), part: 'm0-rail', flow: supplyFlow(row), glow: POWER_GLOW, phase: rand(3010, row, blockIndex) });
     for (const cell of cells) {
       const cx0 = cell.start * CPP;
       const cx1 = (cell.start + cell.width) * CPP;
-      if (cell.type === 'FILL' || cell.type === 'TAP') continue;
       if (cell.type === 'DECAP') {
-        builder.box('copper', cx0 + um(0.01), cx1 - um(0.01), STACK.m0[0], STACK.m0[1], rowOffset(row, um(0.07)) - um(0.03), rowOffset(row, um(0.07)) + um(0.03));
+        // Clear of the next cell's input wire, which starts a quarter pitch before that cell.
+        builder.seg('copper', cx0 + um(0.01), cx1 - CPP * 0.45, STACK.m0[0], STACK.m0[1], rowOffset(row, um(0.07)) - um(0.03), rowOffset(row, um(0.07)) + um(0.03), { part: 'decap-plate' });
         continue;
       }
-      const wires = 1 + (cell.width > 3 ? 1 : 0) + (cell.width > 8 ? 1 : 0);
-      for (let k = 0; k < wires; k += 1) {
-        const track = M0_TRACKS[hash(3001, row, cell.start, k) % M0_TRACKS.length];
-        const a = cell.start + Math.floor(rand(3002, row, cell.start, k) * (cell.width - 1));
-        const span = 1 + Math.floor(rand(3003, row, cell.start, k) * Math.max(1, cell.width - (a - cell.start) - 1));
-        const z = rowOffset(row, track);
-        builder.box('copper', (a + 0.35) * CPP, (a + span + 0.65) * CPP, STACK.m0[0], STACK.m0[1], z - um(0.009), z + um(0.009), rand(3004, row, cell.start, k) < 0.04 ? 1 : 0, rand(3005, row, cell.start));
+      const layout = cellLayout(cell.type);
+      if (!layout) continue;
+      const active = cellActive(row, cell);
+      const phase = rand(4004, row, cell.start);
+      for (const wire of layout.m0) {
+        const z = rowOffset(row, M0_TRACKS[wire.track]);
+        builder.seg('copper', (cell.start + wire.k0) * CPP, (cell.start + wire.k1) * CPP, STACK.m0[0], STACK.m0[1], z - um(0.009), z + um(0.009), { part: 'm0-wire', glow: active ? 0.7 : 0, phase });
       }
-      const pins = 1 + Math.floor(cell.width / 4);
-      for (let k = 0; k < pins; k += 1) {
-        const n = cell.start + 1 + Math.floor(rand(3006, row, cell.start, k) * Math.max(1, cell.width - 1));
-        const x = n * CPP;
-        const za = rowOffset(row, M0_TRACKS[0]);
-        const zb = rowOffset(row, M0_TRACKS[3]);
-        builder.box('copper', x - um(0.012), x + um(0.012), STACK.m1[0], STACK.m1[1], Math.min(za, zb) - um(0.012), Math.max(za, zb) + um(0.012));
-        const via = rowOffset(row, M0_TRACKS[hash(3007, row, n) % 4]);
-        builder.box('tungsten', x - um(0.01), x + um(0.01), STACK.v0[0], STACK.v0[1], via - um(0.01), via + um(0.01));
+      for (const via of layout.v0) {
+        const z = rowOffset(row, M0_TRACKS[via.track]);
+        builder.via('tungsten', (cell.start + via.k) * CPP, z, um(0.01), um(0.01), STACK.v0[0], STACK.v0[1], { part: 'v0', glow: active ? 0.7 : 0, phase, arc: 0, entry: via.track === 0 ? 'min' : 'max' });
+      }
+      const [za, zb] = zSpan(row, M0_TRACKS[0] - um(0.012), M0_TRACKS[3] + um(0.012));
+      for (const pin of layout.pins) {
+        const x = (cell.start + pin.k) * CPP;
+        builder.seg('copper', x - um(0.012), x + um(0.012), STACK.m1[0], STACK.m1[1], za, zb, { part: pin.dir === 'out' ? 'm1-out' : 'm1-pin', axis: 'z' });
       }
     }
   });
 
+  // Local nets: inside each row block, between neighbouring rows, and from the drops.
+  const rowFrom = Math.floor(b.z0 / ROW);
+  const rowTo = Math.floor(b.z1 / ROW);
+  for (let block = Math.floor(b.x0 / BLOCK); block <= Math.floor(b.x1 / BLOCK); block += 1) {
+    for (let row = rowFrom; row <= rowTo; row += 1) for (const net of router.rowNets(row, block)) emitLocalNet(builder, net);
+    for (let row = rowFrom - 1; row <= rowTo; row += 1) for (const net of router.pairNets(row, block)) emitLocalNet(builder, net);
+  }
+
+  // Power ladders reach the rails: pads on M3-M1 and vias down to the M0 rail.
+  for (const ladder of laddersIn({ x0: b.x0 - um(0.05), z0: b.z0 - um(0.05), x1: b.x1 + um(0.05), z1: b.z1 + um(0.05) })) {
+    const { x, z, flow } = ladder;
+    const down = flow === FLOW.vdd;
+    const emit: Emit = { flow, glow: POWER_GLOW, phase: rand(3501, Math.round(x * 1e6), ladder.row) };
+    const pad = (y: Band, top: number, hx: number, hz: number) => builder.seg('copper', x - hx, x + hx, y[0], top, z - hz, z + hz, { ...emit, part: 'ladder-pad', lift: false });
+    const via = (y: Band, arc: number) => builder.via('tungsten', x, z, um(0.01), um(0.01), y[0], y[1], { ...emit, part: 'power-ladder', entry: down ? 'max' : 'min', arc });
+    pad(STACK.m3, um(0.303), um(0.027), um(0.027));
+    via(STACK.v2, 0);
+    pad(STACK.m2, STACK.m2[1], um(0.016), um(0.015));
+    via(STACK.v1, viaSpan(STACK.v2));
+    pad(STACK.m1, STACK.m1[1], um(0.012), um(0.015));
+    via(STACK.v0, viaSpan(STACK.v2) + viaSpan(STACK.v1));
+  }
+
   // Deep-trench capacitor farms: M1 straps tie the trench tops together.
   emitStraps(builder, leaves, { horizontal: false, pitch: um(0.2), offset: um(0.1), width: um(0.05), y: STACK.m1, material: 'copper', sample: um(0.1), allowed: (leaf) => leaf === 'decap' });
-
-  const m2 = mazeRuns(L3_M2, b, leaves);
-  const m3 = mazeRuns(L3_M3, b, leaves);
-  emitRuns(builder, L3_M2, m2);
-  emitRuns(builder, L3_M3, m3);
-  emitVias(builder, { layer: L3_M2, runs: m2 }, { layer: L3_M3, runs: m3 }, STACK.v2, um(0.018), 0.1);
 
   // SRAM: bit-line pairs on M1, word lines on M2, cell contacts.
   const bitcell = { w: 2 * CPP, h: ROW };
@@ -1334,13 +2322,15 @@ function level4(builder: ChunkBuilder) {
     const x0 = blockIndex * BLOCK;
     const x1 = x0 + BLOCK;
     const railZ = rowZ(row);
+    const railFlow = supplyFlow(row);
     // Buried power rail under the boundary, nano-TSVs down to the backside
-    // power network, and the backside rail itself.
-    builder.box('copper', x0, x1, STACK.bpr[0], STACK.bpr[1], railZ - um(0.01), railZ + um(0.01), 0, 0, hash(4100, row));
-    builder.box('copper', x0, x1, STACK.backside[0], STACK.backside[1], railZ - um(0.016), railZ + um(0.016), 0, 0, hash(4101, row));
+    // power network, and the backside rail itself. Power arrives from the
+    // backside: VDD climbs the nano-TSVs into the buried rail, VSS returns down.
+    builder.seg('copper', x0, x1, STACK.bpr[0], STACK.bpr[1], railZ - um(0.01), railZ + um(0.01), { seed: hash(4100, row), part: 'bpr', flow: railFlow, glow: POWER_GLOW, phase: rand(4110, row) });
+    builder.seg('copper', x0, x1, STACK.backside[0], STACK.backside[1], railZ - um(0.016), railZ + um(0.016), { seed: hash(4101, row), part: 'backside-rail', flow: railFlow, glow: POWER_GLOW, phase: rand(4111, row) });
     for (let n = 3; n < BLOCK_CPP; n += 8) {
       const x = (blockIndex * BLOCK_CPP + n) * CPP;
-      builder.box('copper', x - um(0.007), x + um(0.007), STACK.nanoTsv[0], STACK.nanoTsv[1], railZ - um(0.007), railZ + um(0.007));
+      builder.via('copper', x, railZ, um(0.007), um(0.007), STACK.nanoTsv[0], STACK.nanoTsv[1], { part: 'nano-tsv', flow: railFlow, glow: POWER_GLOW, phase: rand(4112, row), entry: railFlow === FLOW.vdd ? 'min' : 'max', arc: 0 });
     }
 
     // Fins run through the block and break at diffusion breaks.
@@ -1373,32 +2363,54 @@ function level4(builder: ChunkBuilder) {
         builder.cyl('oxide', x, z, um(0.036), STACK.dtc[0], 0);
         builder.cyl('gate', x, z, um(0.029), STACK.dtc[0], STACK.dtc[1]);
       }
+      const layout = cellLayout(cell.type);
+      const active = layout !== null && cellActive(row, cell);
+      const phase = rand(4004, row, cell.start);
+      const contacted = new Map((layout?.gateContacts ?? []).map((contact) => [cell.start + contact.n, contact.track]));
+      const zLo = rowZ(row) + um(0.028);
+      const zHi = rowZ(row) + ROW - um(0.028);
+      const zMid = rowZ(row) + ROW / 2;
       for (let n = cell.start; n < cell.start + cell.width; n += 1) {
         const gx = (n + 0.5) * CPP;
-        const dummy = cell.type === 'FILL' || n === cell.start + cell.width - 1;
-        const cut = !dummy && rand(4002, row, n) < 0.3;
-        const active = !dummy && rand(4003, row, n) < 0.14;
-        const glow = active ? 0.45 : 0;
-        const phase = rand(4004, row, n);
-        const zLo = rowZ(row) + um(0.028);
-        const zHi = rowZ(row) + ROW - um(0.028);
-        const zMid = rowZ(row) + ROW / 2;
+        const dummy = cell.type === 'FILL' || cell.type === 'DECAP' || n === cell.start + cell.width - 1;
+        const track = contacted.get(n);
+        // Gates with a contact switch when their cell does; a few uncontacted
+        // gates are cut between the NMOS and PMOS devices.
+        const cut = !dummy && track === undefined && rand(4002, row, n) < 0.3;
+        const glow = active && track !== undefined ? 0.45 : 0;
         if (cut) {
-          builder.box('gate', gx - GATE_L / 2, gx + GATE_L / 2, STACK.gate[0], STACK.gate[1], zLo, zMid - um(0.009), glow, phase);
-          builder.box('gate', gx - GATE_L / 2, gx + GATE_L / 2, STACK.gate[0], STACK.gate[1], zMid + um(0.009), zHi, glow, phase);
+          builder.box('gate', gx - GATE_L / 2, gx + GATE_L / 2, STACK.gate[0], STACK.gate[1], zLo, zMid - um(0.009), 0, phase);
+          builder.box('gate', gx - GATE_L / 2, gx + GATE_L / 2, STACK.gate[0], STACK.gate[1], zMid + um(0.009), zHi, 0, phase);
         } else builder.box('gate', gx - GATE_L / 2, gx + GATE_L / 2, STACK.gate[0], STACK.gate[1], zLo, zHi, glow, phase);
-        if (!dummy && rand(4005, row, n) < 0.3) builder.box('tungsten', gx - um(0.007), gx + um(0.007), STACK.gate[1], STACK.contact[1], zMid - um(0.008), zMid + um(0.008));
-        if (dummy || cell.type === 'DECAP') continue;
-        // Raised source/drain epitaxy on both devices right of this gate.
-        const sx = (n + 1) * CPP;
-        if (n + 1 >= cell.start + cell.width) continue;
+        if (track !== undefined) {
+          const z = rowOffset(row, M0_TRACKS[track]);
+          builder.via('tungsten', gx, z, um(0.007), um(0.008), STACK.gate[1], STACK.contact[1], { part: 'contact-vg', glow, phase, entry: 'max', arc: 0 });
+        }
+      }
+      if (!layout) continue;
+      // Raised source/drain epitaxy on both devices at every diffusion position of the cell.
+      for (let k = cell.start; k < cell.start + cell.width; k += 1) {
+        const sx = k * CPP;
         for (const [fins, material] of [[FIN_N, 'epiN'], [FIN_P, 'epiP']] as const) {
-          const za = rowOffset(row, fins[0]);
-          const zb = rowOffset(row, fins[1]);
-          const lo = Math.min(za, zb) - um(0.011);
-          const hi = Math.max(za, zb) + um(0.011);
+          const [lo, hi] = zSpan(row, fins[0] - um(0.011), fins[1] + um(0.011));
           builder.box(material, sx - um(0.015), sx + um(0.015), STACK.epi[0], STACK.epi[1], lo, hi);
-          if (rand(4006, row, n, material === 'epiN' ? 1 : 2) < 0.62) builder.box('tungsten', sx - um(0.007), sx + um(0.007), STACK.contact[0], STACK.contact[1], lo + um(0.004), hi - um(0.004));
+        }
+      }
+      const md = (sx: number, span: [number, number], emit: Emit) => builder.seg('tungsten', sx - um(0.007), sx + um(0.007), STACK.contact[0], STACK.contact[1], span[0], span[1], { axis: 'z', ...emit });
+      for (const contact of layout.contacts) {
+        const sx = (cell.start + contact.k) * CPP;
+        if (contact.role === 'power') {
+          // NMOS source to the VSS rail, PMOS source to the VDD rail, each with
+          // a via down to the buried power rail under that edge.
+          md(sx, zSpan(row, 0, MD_N[1]), { part: 'contact-power', flow: FLOW.vss, glow: POWER_GLOW, phase });
+          md(sx, zSpan(row, MD_P[0], ROW), { part: 'contact-power', flow: FLOW.vdd, glow: POWER_GLOW, phase });
+          const [va, vb] = zSpan(row, 0, um(0.01));
+          builder.via('tungsten', sx, (va + vb) / 2, um(0.007), (vb - va) / 2, STACK.vbpr[0], STACK.vbpr[1], { part: 'vbpr', flow: FLOW.vss, glow: POWER_GLOW, phase, entry: 'max', arc: 0 });
+          const [wa, wb] = zSpan(row, ROW - um(0.01), ROW);
+          builder.via('tungsten', sx, (wa + wb) / 2, um(0.007), (wb - wa) / 2, STACK.vbpr[0], STACK.vbpr[1], { part: 'vbpr', flow: FLOW.vdd, glow: POWER_GLOW, phase, entry: 'min', arc: 0 });
+        } else {
+          // Drains of an output, or an internal node: one contact joining the NMOS and PMOS sides.
+          md(sx, zSpan(row, MD_N[0], MD_P[1]), { part: 'contact-md', glow: active ? 0.45 : 0, phase: phase + (contact.role === 'out' ? 0.12 : 0.06) });
         }
       }
     }
@@ -1462,9 +2474,54 @@ const GENERATORS: Array<((builder: ChunkBuilder) => void) | null> = [null, level
 export function generateChunk(levelId: number, ix: number, iz: number): ChunkData {
   const level = LEVELS[levelId];
   const bounds = chunkBounds(level, ix, iz);
-  const builder = new ChunkBuilder(bounds, [(bounds.x0 + bounds.x1) / 2, (bounds.z0 + bounds.z1) / 2]);
+  const builder = new ChunkBuilder(bounds, [(bounds.x0 + bounds.x1) / 2, (bounds.z0 + bounds.z1) / 2], levelId);
   if (rectsOverlap(bounds, DIE_RECT)) GENERATORS[levelId]?.(builder);
   return builder.finish(levelId, ix, iz);
+}
+
+// ---------------------------------------------------------------------------
+// Package: interposer wiring between the die and the memory stacks
+// ---------------------------------------------------------------------------
+
+/** Heights of the package layers under the die (mm; the die's silicon ends at -DIE.thickness). */
+export const PACKAGE_Y = {
+  interposerTop: -DIE.thickness - 0.02,
+  interposerBottom: -DIE.thickness - 0.12,
+  substrateTop: -DIE.thickness - 0.21,
+} as const;
+
+/**
+ * Redistribution-layer bundles on the interposer: every memory PHY reaches
+ * its HBM stack through short, dense wiring (drawn as sixteen bundles per
+ * stack, each standing for many traces). They run from under the PHY's bump
+ * field to under the stack's base die; pulses show reads and writes.
+ */
+export function generatePackageWiring(): ChunkData {
+  const hx = (PACKAGE_GEOMETRY.interposer.width * MM) / 2;
+  const hz = (PACKAGE_GEOMETRY.interposer.depth * MM) / 2;
+  const builder = new ChunkBuilder(rect(-hx, -hz, hx, hz), [0, 0], 0);
+  const y0 = PACKAGE_Y.interposerTop;
+  const y1 = y0 + 0.004;
+  const bundles = 16;
+  const width = 0.13;
+  for (const phy of PHYS) {
+    const placement = STACK_PLACEMENTS[phy.index];
+    const [bx, bz] = rectCenter(phy.bumps);
+    const sx = placement.x * MM;
+    const sz = placement.z * MM;
+    const alongX = phy.side === 'west' || phy.side === 'east';
+    for (let k = 0; k < bundles; k += 1) {
+      const emit: Emit = { part: 'rdl-trace', glow: k % 2 === 0 ? 1 : -1, phase: rand(701, phy.index, k) };
+      if (alongX) {
+        const z = phy.rect.z0 + ((k + 0.5) * (phy.rect.z1 - phy.rect.z0)) / bundles;
+        builder.seg('copper', Math.min(bx, sx), Math.max(bx, sx), y0, y1, z - width / 2, z + width / 2, emit);
+      } else {
+        const x = phy.rect.x0 + ((k + 0.5) * (phy.rect.x1 - phy.rect.x0)) / bundles;
+        builder.seg('copper', x - width / 2, x + width / 2, y0, y1, Math.min(bz, sz), Math.max(bz, sz), emit);
+      }
+    }
+  }
+  return builder.finish(0, 0, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1524,7 +2581,8 @@ export function sectionCaps(chunk: ChunkData, plane: SectionPlane, thickness: nu
         const distance = Math.abs(c - v);
         span = 2 * Math.sqrt(Math.max(0, half * half - distance * distance));
       }
-      const alongPlaneAxis = (d[p + 6] >= 2) === (plane.axis === 2);
+      const axis = pathAxis(d[p + 6]);
+      const alongPlaneAxis = (axis === 'x' && plane.axis === 0) || (axis === 'z' && plane.axis === 2);
       const start = alongPlaneAxis && d[p + 8] !== 0 ? d[p + 7] + (v - (c - half)) * 1000 : d[p + 7];
       // Cut faces of active wires glow at half strength: light inside the metal, not a lamp.
       const values = [0, d[p + 1], 0, 0, d[p + 4], 0, d[p + 6], start, d[p + 8] * 0.5, d[p + 9]];
@@ -1560,8 +2618,8 @@ export const FOCUS_STOPS: FocusStop[] = [
   { id: 'die', label: 'Die', layer: 'Global power mesh, seal ring, and I/O pads', below: 60, targetY: STACK_TOP, floor: null },
   { id: 'tile', label: 'Compute tile', layer: 'Semi-global metal and systolic buses', below: 6, targetY: STACK.noc[1], floor: null },
   { id: 'block', label: 'Tensor PE', layer: 'Intermediate routing maze', below: 0.45, targetY: STACK.mx4[1], floor: STACK.ubm[1] + um(0.01) },
-  { id: 'routing', label: 'Routing', layer: 'Intermediate routing, upper layers delayered', below: 0.04, targetY: STACK.mx4[1], floor: STACK.mx4[1] + um(0.05) },
-  { id: 'cells', label: 'Standard cells', layer: 'Local interconnect M0–M3 over the cell rows', below: 0.012, targetY: STACK.m3[1], floor: STACK.m3[1] + um(0.01) },
+  { id: 'routing', label: 'Routing', layer: 'Intermediate routing, upper layers delayered', below: 0.04, targetY: STACK.mx4[1], floor: STACK.mx4[1] + um(0.02) },
+  { id: 'cells', label: 'Standard cells', layer: 'Local interconnect M0–M3 over the cell rows', below: 0.012, targetY: STACK.m3[1], floor: STACK.m3[1] + um(0.004) },
   { id: 'devices', label: 'Transistors', layer: 'Fins, gates, epitaxy, and contacts (metal delayered)', below: 0.0032, targetY: um(0.055), floor: (STACK.contact[1] + STACK.m0[0]) / 2 },
 ];
 

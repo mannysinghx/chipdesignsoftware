@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { describeLocation, formatLength, type ChunkData, type FocusStop } from '@/lib/silicon-macro';
+import { DIE, describeLocation, formatLength, type ChunkData, type FocusStop } from '@/lib/silicon-macro';
 import {
-  LABEL_PLAN, PARTS, PART_IDS, STACK_RULER, describePrimitive, identifyChunk, identifyPrimitive, pickChunk, regionLabels,
-  type PartId, type PrimitiveRef, type RegionLabel,
+  LABEL_PLAN, PARTS, PART_IDS, STACK_RULER, describePrimitive, identifyChunk, identifyPrimitive, pickChunk, regionLabels, summarizeNet,
+  type NetSummary, type PartId, type PrimitiveRef, type RegionLabel,
 } from '@/lib/silicon-parts';
+import { CONDUCTORS, pieceBox, traceNet } from '@/lib/silicon-trace';
 import type { Anchor, Annotations, LabelBox, RulerMark } from './annotations';
 import type { SharedUniforms } from './materials';
 
@@ -15,13 +16,15 @@ import type { SharedUniforms } from './materials';
 export type InspectRecord = { id: string; level: number; data: ChunkData };
 
 export type Target =
-  | { kind: 'primitive'; key: string; part: PartId; ref: PrimitiveRef }
+  | { kind: 'primitive'; key: string; part: PartId; ref: PrimitiveRef; piece: { record: InspectRecord; batch: number; index: number } }
   | { kind: 'static'; key: string; part: PartId; box: THREE.Box3 }
   | { kind: 'region'; key: string; label: RegionLabel };
 
 export type SiliconSelection = {
   key: string;
   kind: Target['kind'];
+  /** Part or region id, for its explanation. */
+  id: string;
   title: string;
   role: string;
   material: string;
@@ -29,6 +32,8 @@ export type SiliconSelection = {
   size: string;
   location: string[];
   notes: string[];
+  /** The net the selected conductor belongs to, as traced through the drawn geometry. */
+  net: NetSummary | null;
 };
 
 /** A labellable point on a package part (die, stacks, interposer, ...). */
@@ -79,7 +84,7 @@ function refOf(record: InspectRecord, batchIndex: number, index: number): Primit
     level: record.level, material: batch.material, shape: batch.shape,
     x: d[o] + record.data.origin[0], z: d[o + 2] + record.data.origin[2],
     y0: d[o + 1] - d[o + 4] / 2, y1: d[o + 1] + d[o + 4] / 2,
-    sx: d[o + 3], sz: d[o + 5], glow: d[o + 8],
+    sx: d[o + 3], sz: d[o + 5], glow: d[o + 8], code: d[o + 9],
   };
 }
 
@@ -88,25 +93,27 @@ const size3 = (box: THREE.Box3) => {
   return `${formatLength(Math.max(s.x, s.z))} × ${formatLength(Math.min(s.x, s.z))} × ${formatLength(s.y)} thick`;
 };
 
-export function describeTarget(target: Target): SiliconSelection {
+export function describeTarget(target: Target, net: NetSummary | null = null): SiliconSelection {
   if (target.kind === 'primitive') {
     const d = describePrimitive(target.ref, target.part);
-    return { key: target.key, kind: target.kind, title: d.title, role: d.role, material: d.material, layer: d.layer, size: d.size, location: d.location, notes: d.notes };
+    return { key: target.key, kind: target.kind, id: target.part, title: d.title, role: d.role, material: d.material, layer: d.layer, size: d.size, location: d.location, notes: d.notes, net };
   }
   if (target.kind === 'static') {
     const part = PARTS[target.part];
     const center = target.box.getCenter(new THREE.Vector3());
     const onDie = target.part === 'die-surface' || target.part === 'die-top';
     const notes = target.part === 'bga' ? ['Balls shown at a sampled pitch, as in the 3D design twin'] : target.part === 'die-surface' ? ['Zoom in and the streamed metal, cells, and transistors replace the texture'] : [];
-    return { key: target.key, kind: target.kind, title: part.title, role: part.role, material: part.material, layer: part.layer, size: onDie ? 'Whole die' : size3(target.box), location: onDie ? describeLocation(center.x, center.z) : ['Package'], notes };
+    return { key: target.key, kind: target.kind, id: target.part, title: part.title, role: part.role, material: part.material, layer: part.layer, size: onDie ? 'Whole die' : size3(target.box), location: onDie ? describeLocation(center.x, center.z) : ['Package'], notes, net: null };
   }
   const { label } = target;
   const r = label.rect;
   return {
-    key: target.key, kind: target.kind, title: label.title, role: label.detail, material: '', layer: 'Floorplan region',
-    size: `${formatLength(r.x1 - r.x0)} × ${formatLength(r.z1 - r.z0)}`, location: describeLocation(label.x, label.z), notes: [],
+    key: target.key, kind: target.kind, id: label.id, title: label.title, role: label.detail, material: '', layer: 'Floorplan region',
+    size: `${formatLength(r.x1 - r.x0)} × ${formatLength(r.z1 - r.z0)}`, location: describeLocation(label.x, label.z), notes: [], net: null,
   };
 }
+
+const NET_COLORS: Record<NetSummary['flow'], string> = { data: '#7ef4ff', vdd: '#ffb066', vss: '#9dff80', clock: '#e79bff' };
 
 export function createInspector(source: InspectorSource, scene: THREE.Scene) {
   const { camera, shared, sectionPlane } = source;
@@ -187,7 +194,7 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
   function targetOf(hit: Hit, distance: number): Target {
     if (hit.kind === 'chunk') {
       const ref = refOf(hit.record, hit.batch, hit.index);
-      return { kind: 'primitive', key: `${hit.record.id}/${hit.batch}/${hit.index}`, part: identifyPrimitive(ref), ref };
+      return { kind: 'primitive', key: `${hit.record.id}/${hit.batch}/${hit.index}`, part: identifyPrimitive(ref), ref, piece: { record: hit.record, batch: hit.batch, index: hit.index } };
     }
     let part = hit.object.userData.part as PartId;
     // The die's top face: the floorplan texture from afar, bare silicon up close.
@@ -226,6 +233,54 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
   };
   const hoverLine = outline('#bfeaff', 0.5, 20);
   const selectLine = outline('#43d8ff', 1, 21);
+
+  // The traced net: every piece outlined, drawn through the geometry (x-ray)
+  // so a net reads end to end even where it passes under other layers.
+  const netMaterial = new THREE.LineBasicMaterial({ color: '#7ef4ff', transparent: true, opacity: 0.8, depthTest: false, depthWrite: false });
+  const netLine = new THREE.LineSegments(new THREE.BufferGeometry(), netMaterial);
+  netLine.renderOrder = 19;
+  netLine.frustumCulled = false;
+  netLine.visible = false;
+  scene.add(netLine);
+  let netShown = true;
+  let netPieces = 0;
+  // Box edges as pairs of corner indices (corner bits: x, y, z).
+  const EDGE_PAIRS = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 4, 6, 5, 7, 0, 4, 1, 5, 2, 6, 3, 7];
+  function showNet(boxes: Array<{ x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }>) {
+    const positions = new Float32Array(boxes.length * 24 * 3);
+    let o = 0;
+    for (const box of boxes) {
+      // A hair outside each piece, like the selection outline.
+      const px = (box.x1 - box.x0) * 0.002;
+      const py = (box.y1 - box.y0) * 0.002;
+      const pz = (box.z1 - box.z0) * 0.002;
+      for (const corner of EDGE_PAIRS) {
+        positions[o] = corner & 1 ? box.x1 + px : box.x0 - px;
+        positions[o + 1] = corner & 2 ? box.y1 + py : box.y0 - py;
+        positions[o + 2] = corner & 4 ? box.z1 + pz : box.z0 - pz;
+        o += 3;
+      }
+    }
+    netLine.geometry.dispose();
+    netLine.geometry = new THREE.BufferGeometry();
+    netLine.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    netPieces = boxes.length;
+    netLine.visible = netShown && boxes.length > 0;
+  }
+
+  /** Trace the net of a selected conductor, outline it, and describe it (null when it is not a conductor). */
+  function trace(target: Target | null): NetSummary | null {
+    if (!target || target.kind !== 'primitive' || !CONDUCTORS.has(target.ref.material)) {
+      showNet([]);
+      return null;
+    }
+    const result = traceNet(target.piece, source.records());
+    showNet(result.pieces.map((piece) => pieceBox(piece.record.data, piece.batch, piece.index)));
+    const summary = summarizeNet(result.pieces, result.truncated);
+    // The outline takes the colour of what the net carries, as its pulses do.
+    netMaterial.color.set(NET_COLORS[summary.flow]);
+    return summary;
+  }
 
   function place(line: THREE.LineSegments, target: Target | null) {
     if (!target) {
@@ -339,6 +394,11 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
             if (Math.abs(cx - tx) > reach + hx || Math.abs(cz - tz) > reach + hz) continue;
             // The point of the part nearest the target, a little inside its edges.
             point.set(THREE.MathUtils.clamp(tx, cx - hx * 0.7, cx + hx * 0.7), y1, THREE.MathUtils.clamp(tz, cz - hz * 0.7, cz + hz * 0.7));
+            // Interposer traces show only in the gap between the die and a stack.
+            if (PART_IDS[idsOfBatch[k]] === 'rdl-trace') {
+              if (hz > hx) point.z = Math.sign(cz) * (DIE.depth / 2 + 0.8);
+              else point.x = Math.sign(cx) * (DIE.width / 2 + 0.8);
+            }
             if (view.section.on) {
               // Cut parts are labelled on the cut face.
               const lo = view.section.axis === 0 ? cx - hx : cz - hz;
@@ -358,7 +418,7 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
             if (current && current.score <= score) continue;
             const ref = refOf(record, bi, k);
             const central = Math.hypot(screen[0] / view.width - 0.5, screen[1] / view.height - 0.5);
-            cells.set(cell, { score, point: point.clone(), target: { kind: 'primitive', key: `${record.id}/${bi}/${k}`, part: PART_IDS[idsOfBatch[k]], ref }, central });
+            cells.set(cell, { score, point: point.clone(), target: { kind: 'primitive', key: `${record.id}/${bi}/${k}`, part: PART_IDS[idsOfBatch[k]], ref, piece: { record, batch: bi, index: k } }, central });
           }
         });
         yield;
@@ -443,11 +503,17 @@ export function createInspector(source: InspectorSource, scene: THREE.Scene) {
     get selected() {
       return selected;
     },
+    trace,
+    setNetShown(on: boolean) {
+      netShown = on;
+      netLine.visible = on && netPieces > 0;
+    },
     dispose() {
-      for (const line of [hoverLine, selectLine]) {
+      for (const line of [hoverLine, selectLine, netLine]) {
         line.removeFromParent();
         (line.material as THREE.Material).dispose();
       }
+      netLine.geometry.dispose();
       boxEdges.dispose();
       cylinderEdges.dispose();
     },

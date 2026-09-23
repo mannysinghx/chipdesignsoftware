@@ -140,6 +140,6 @@ test('the legend covers every stop with swatches, and labelled parts are all in 
     const ids = legendFor(stop).map((item) => item.id);
     for (const part of LABEL_PLAN[stop]) assert.ok(ids.includes(part), `${stop} legend lacks ${part}`);
   }
-  assert.deepEqual(legendFor('package').map((item) => item.id), ['die', 'hbm', 'interposer', 'substrate', 'capacitor', 'bga']);
+  assert.deepEqual(legendFor('package').map((item) => item.id), ['die', 'hbm', 'interposer', 'rdl-trace', 'substrate', 'c4-bump', 'capacitor', 'bga']);
   assert.ok(legendFor('routing').some((item) => item.glow), 'animated nets are marked');
 });

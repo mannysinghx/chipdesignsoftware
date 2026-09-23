@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { DIE, PHYS, PRESETS, SILICON_EVIDENCE, TILES } from '@/lib/silicon-macro';
-import { legendFor } from '@/lib/silicon-parts';
+import { EXPLAIN, explainRegion, type Explanation } from '@/lib/silicon-explain';
+import { PARTS, legendFor, type PartId } from '@/lib/silicon-parts';
 import { getUiAudit } from '@/lib/ui-audit';
 import { useTrackedValue } from '@/lib/ui-audit-react';
-import type { DragMode, LabelMode, SiliconEngine, SiliconHud, SiliconSelection } from './silicon/engine';
+import type { DragMode, Flows, LabelMode, SiliconEngine, SiliconHud, SiliconSelection } from './silicon/engine';
 
 // Safari still ships only the prefixed Fullscreen API.
 type FullscreenElement = HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void };
@@ -24,6 +25,24 @@ const LABEL_MODES: Array<{ id: LabelMode; label: string; title: string }> = [
   { id: 'key', label: 'Key', title: 'Label only the main regions and parts' },
   { id: 'off', label: 'Off', title: 'Hide the labels (hover still names what is under the cursor)' },
 ];
+const FLOW_TOGGLES: Array<{ id: keyof Flows; label: string; title: string; swatch: string }> = [
+  { id: 'data', label: 'Data', title: 'Pulses carry data along each net: out of a cell, up through the vias, along the wires, and down into the cells it drives', swatch: '#38dbff' },
+  { id: 'power', label: 'Power', title: 'Show the supply flowing: VDD (amber) down from the bumps through the mesh, straps, and via ladders to the transistors; VSS (green) back', swatch: '#ff8a1c' },
+  { id: 'clock', label: 'Clock', title: 'Show the clock fanning out from each local clock buffer to the flip-flops it drives (zoom to Cells to see the clock nets)', swatch: '#db5cff' },
+];
+const FLOW_KEY: Array<{ id: string; label: string; swatch: string; detail: string }> = [
+  { id: 'data', label: 'Data', swatch: '#38dbff', detail: 'along each net, through its vias' },
+  { id: 'vdd', label: 'VDD', swatch: '#ff8a1c', detail: 'supply, down from the bumps' },
+  { id: 'vss', label: 'VSS', swatch: '#6cff4d', detail: 'ground return, back up' },
+  { id: 'clock', label: 'Clock', swatch: '#db5cff', detail: 'buffer to flip-flops' },
+];
+const FLOW_WORDS: Record<NonNullable<SiliconSelection['net']>['flow'], string> = { data: 'Signal net', vdd: 'VDD supply network', vss: 'VSS ground network', clock: 'Clock net' };
+
+function explanationFor(selection: SiliconSelection): Explanation | null {
+  if (selection.kind === 'region') return explainRegion(selection.id, selection.title);
+  return selection.id in PARTS ? EXPLAIN[selection.id as PartId] : null;
+}
+
 const VIEW_NOTE: Record<SiliconHud['view'], string | null> = {
   top: null,
   underside: 'Underside · BGA balls face the board',
@@ -37,7 +56,8 @@ export default function SiliconMacroView() {
   const [hud, setHud] = useState<SiliconHud | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [glow, setGlow] = useState(true);
+  const [flows, setFlows] = useState<Flows>({ data: true, power: false, clock: false });
+  const [netShown, setNetShown] = useState(true);
   const [bloom, setBloom] = useState(true);
   const [section, setSection] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
@@ -50,7 +70,8 @@ export default function SiliconMacroView() {
   const [legendOpen, setLegendOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches);
   const [selection, setSelection] = useState<SiliconSelection | null>(null);
 
-  useTrackedValue('ui.state', 'changed', 'silicon.glow', glow);
+  useTrackedValue('ui.state', 'changed', 'silicon.flows', Object.entries(flows).filter(([, on]) => on).map(([id]) => id).join(',') || 'none');
+  useTrackedValue('ui.state', 'changed', 'silicon.netShown', netShown);
   useTrackedValue('ui.state', 'changed', 'silicon.bloom', bloom);
   useTrackedValue('ui.state', 'changed', 'silicon.section', section);
   useTrackedValue('ui.state', 'changed', 'silicon.autoRotate', autoRotate);
@@ -100,7 +121,8 @@ export default function SiliconMacroView() {
     };
   }, []);
 
-  useEffect(() => { engineRef.current?.setGlow(glow); }, [glow, ready]);
+  useEffect(() => { engineRef.current?.setFlows(flows); }, [flows, ready]);
+  useEffect(() => { engineRef.current?.setNetShown(netShown); }, [netShown, ready]);
   useEffect(() => { engineRef.current?.setBloom(bloom); }, [bloom, ready]);
   useEffect(() => { engineRef.current?.setSection(section); }, [section, ready]);
   useEffect(() => { engineRef.current?.setAutoRotate(autoRotate); }, [autoRotate, ready]);
@@ -141,6 +163,7 @@ export default function SiliconMacroView() {
   const activeRung = hud ? ladderId(hud.stop.id) : 'die';
   const stopId = hud?.stop.id ?? 'die';
   const legend = legendFor(stopId);
+  const explanation = selection ? explanationFor(selection) : null;
   const viewNote = hud ? VIEW_NOTE[hud.view] : null;
 
   return (
@@ -157,7 +180,14 @@ export default function SiliconMacroView() {
       <div className="silicon-top">
         <div className="silicon-toolbar" role="toolbar" aria-label="Silicon macro view controls">
           <button onClick={() => fly('die')} title="Fly back to the whole die">Fit</button>
-          <button className={glow ? 'active' : ''} aria-pressed={glow} onClick={() => setGlow((value) => !value)} title="Animated data pulses on active wires">Glow</button>
+          <span className="silicon-segment silicon-flows" role="group" aria-label="Flows">
+            <em>Flow</em>
+            {FLOW_TOGGLES.map((flow) => (
+              <button key={flow.id} className={flows[flow.id] ? 'active' : ''} aria-pressed={flows[flow.id]} onClick={() => setFlows((current) => ({ ...current, [flow.id]: !current[flow.id] }))} title={flow.title}>
+                <i style={{ background: flow.swatch }} />{flow.label}
+              </button>
+            ))}
+          </span>
           <button className={bloom && !hud?.software ? 'active' : ''} aria-pressed={bloom && !hud?.software} disabled={hud?.software} onClick={() => setBloom((value) => !value)} title={hud?.software ? 'Bloom is off on software rendering (no GPU acceleration)' : 'Bloom on the glowing pathways'}>Bloom</button>
           <button className={section ? 'active' : ''} aria-pressed={section} onClick={() => setSection((value) => !value)} title="Cut a vertical section through the target to show the layer stack and deep trenches">Cross-section</button>
           <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)} title="Spin the chip slowly on its own; drag any time to take over">Spin</button>
@@ -194,7 +224,10 @@ export default function SiliconMacroView() {
               </li>
             ))}
           </ul>
-          <p>Hover anything to name it; click it for details.</p>
+          <div className="silicon-flow-key" aria-label="Pulse colours">
+            {FLOW_KEY.map((item) => <span key={item.id} title={item.detail}><i style={{ background: item.swatch }} />{item.label}</span>)}
+          </div>
+          <p>Hover anything to name it; click it to see what it does, how it is made, and its whole net.</p>
         </aside>
       )}
 
@@ -206,6 +239,37 @@ export default function SiliconMacroView() {
           </header>
           <strong>{selection.title}</strong>
           <p>{selection.role}</p>
+          {explanation && (
+            <section className="silicon-explain" aria-label="What it does">
+              <h4>What it does</h4>
+              <p>{explanation.does}</p>
+            </section>
+          )}
+          {(explanation || selection.net) && (
+            <section className="silicon-explain" aria-label="Connections">
+              <h4>Connections</h4>
+              {explanation && <p>{explanation.connects}</p>}
+              {selection.net && (
+                <div className="silicon-net">
+                  <div className="silicon-net-head">
+                    <b className={`flow-${selection.net.flow}`}>{FLOW_WORDS[selection.net.flow]}</b>
+                    <span>{selection.net.truncated ? `${selection.net.pieces.toLocaleString()}+ pieces in view` : `${selection.net.pieces.toLocaleString()} connected piece${selection.net.pieces === 1 ? '' : 's'}`}</span>
+                    <button className={netShown ? 'active' : ''} aria-pressed={netShown} onClick={() => setNetShown((value) => !value)} title="Outline every piece of this net, through the other layers">{netShown ? 'Hide net' : 'Show net'}</button>
+                  </div>
+                  {selection.net.pins.length > 0 && <p className="silicon-net-pins">{selection.net.pins.slice(0, 6).join(' → ')}{selection.net.pins.length > 6 ? ` +${selection.net.pins.length - 6} more` : ''}{selection.net.gates > 0 ? ` · switches ${selection.net.gates} gate${selection.net.gates === 1 ? '' : 's'}` : ''}</p>}
+                  <ol className="silicon-net-layers" aria-label="Layers the net passes through, top to bottom">
+                    {[...selection.net.layers].reverse().map((layer) => <li key={layer.layer}><span>{layer.layer}</span><em>{layer.parts.slice(0, 3).join(', ')}{layer.count > 1 ? ` ×${layer.count}` : ''}</em></li>)}
+                  </ol>
+                </div>
+              )}
+            </section>
+          )}
+          {explanation && (
+            <section className="silicon-explain" aria-label="How it is made">
+              <h4>How it is made</h4>
+              <ol>{explanation.made.map((step) => <li key={step}>{step}</li>)}</ol>
+            </section>
+          )}
           <dl>
             {selection.material && <><dt>Material</dt><dd>{selection.material}</dd></>}
             <dt>Size</dt><dd>{selection.size}</dd>
@@ -246,7 +310,7 @@ export default function SiliconMacroView() {
         </div>
       </div>
 
-      <div className="silicon-help">{dragMode === 'pan' ? 'Drag to move the view · right-drag to rotate 360°' : 'Drag to rotate 360°, over the top and underneath · right-drag or Shift-drag to move the view'} · scroll or pinch to zoom at the cursor · click any part to identify it · double-click to dive</div>
+      <div className="silicon-help">{dragMode === 'pan' ? 'Drag to move the view · right-drag to rotate 360°' : 'Drag to rotate 360°, over the top and underneath · right-drag or Shift-drag to move the view'} · scroll or pinch to zoom at the cursor · click any part to trace its net and see how it is made · double-click to dive</div>
 
       {!ready && !error && <div className="silicon-status">Growing the silicon…</div>}
       {error && <div className="silicon-status error" role="alert">{error}</div>}

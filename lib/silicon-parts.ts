@@ -8,9 +8,13 @@
 // metal in gold for contrast, the material says so.
 
 import {
-  CELL_WIDTH, CPP, EDGE_BLOCKS, PHYS, ROW, SRAM_STRIP, STACK, TILES, cellAt, describeLocation, formatLength, insideRect, leafAt, peRect, railSupply, tileAt,
+  CPP, EDGE_BLOCKS, FLOATS_PER_INSTANCE, PHYS, ROW, SRAM_STRIP, STACK, TILES, cellAt, cellLayout, describeLocation, formatLength, insideRect, leafAt, peRect, railSupply, tileAt,
   type CellType, type ChunkData, type FocusStop, type Leaf, type MaterialKey, type Rect, type ShapeKey,
 } from './silicon-macro.ts';
+import { netFlow, type TracePiece } from './silicon-trace.ts';
+import { PART_ORDER, flowOfPhase, partOfPhase, type PartId } from './silicon-part-ids.ts';
+
+export type { PartId } from './silicon-part-ids.ts';
 
 export type PartInfo = { title: string; role: string; material: string; layer: string };
 
@@ -32,9 +36,11 @@ export const PARTS = {
   'bitcell-gate': { title: 'Bitcell gate', role: 'Pass-gate, pull-down, or pull-up gate of a six-transistor SRAM bitcell', material: 'TiN / W over HfO₂', layer: FEOL },
   'epi-n': { title: 'NMOS source/drain', role: 'Raised phosphorus-doped silicon epitaxy grown on the NMOS fins', material: 'Si:P epitaxy', layer: FEOL },
   'epi-p': { title: 'PMOS source/drain', role: 'Raised boron-doped silicon-germanium epitaxy grown on the PMOS fins', material: 'SiGe:B epitaxy', layer: FEOL },
-  'contact-md': { title: 'Source/drain contact', role: 'Trench contact (MD) from the source/drain epitaxy up to M0', material: 'Tungsten', layer: MOL },
+  'contact-md': { title: 'Source/drain contact', role: 'Trench contact (MD) from a transistor drain up to M0: where a cell output leaves the transistors', material: 'Tungsten', layer: MOL },
+  'contact-power': { title: 'Power source contact', role: 'Trench contact that ties a transistor source to its supply rail (VDD for PMOS, VSS for NMOS)', material: 'Tungsten', layer: MOL },
   'contact-vg': { title: 'Gate contact', role: 'Contact (VG) that lands on a gate to wire its input', material: 'Tungsten', layer: MOL },
   'well-tap': { title: 'Well tap', role: 'Ties the n-well or p-substrate to its supply to prevent latch-up', material: 'Tungsten', layer: MOL },
+  vbpr: { title: 'Via to buried rail (VBPR)', role: 'Short via from a power source contact down to the buried power rail beneath the fins', material: 'Tungsten / ruthenium', layer: MOL },
   // Below the transistors
   bpr: { title: 'Buried power rail', role: 'VDD/VSS rail sunk below the fins, freeing M0 tracks for signals', material: 'Copper', layer: BACKSIDE },
   'nano-tsv': { title: 'Nano-TSV', role: 'Backside power delivery: feeds a buried rail from the wafer backside', material: 'Copper', layer: BACKSIDE },
@@ -50,13 +56,19 @@ export const PARTS = {
   'sram-supply': { title: 'Bitcell supply line', role: 'VDD/VSS line shared by a row of SRAM bitcells', material: 'Copper', layer: `${LOCAL} M0` },
   v0: { title: 'V0 via', role: 'Connects M0 up to M1', material: 'Tungsten', layer: `${LOCAL} V0` },
   'bitcell-via': { title: 'Bitcell via stack', role: 'Stacked vias from a bitcell up to its bit and word lines', material: 'Tungsten', layer: `${LOCAL} V0–V1` },
-  'm1-pin': { title: 'M1 pin', role: 'Standard-cell input/output pin where routing connects', material: 'Copper', layer: `${LOCAL} M1` },
+  'm1-pin': { title: 'M1 input pin', role: 'Standard-cell input pin: routing lands here through a V1 via and the signal drops through V0 and M0 to a gate contact', material: 'Copper', layer: `${LOCAL} M1` },
+  'm1-out': { title: 'M1 output pin', role: 'Standard-cell output pin joining the NMOS and PMOS drains; routing leaves from here through a V1 via', material: 'Copper', layer: `${LOCAL} M1` },
   'bit-line': { title: 'Bit line (BL/BLB)', role: 'Complementary SRAM column lines that read and write the bitcells', material: 'Copper', layer: `${LOCAL} M1` },
   'dtc-strap': { title: 'Trench-capacitor strap', role: 'M1 strap tying the tops of deep-trench capacitors to the supply', material: 'Copper', layer: `${LOCAL} M1` },
-  m2: { title: 'M2 route', role: 'Horizontal routing between neighbouring cells', material: 'Copper', layer: `${LOCAL} M2` },
+  v1: { title: 'V1 via', role: 'Connects an M1 pin up to an M2 route', material: 'Tungsten / cobalt', layer: `${LOCAL} V1` },
+  m2: { title: 'M2 route', role: 'Horizontal wire of a net between cell pins in a row', material: 'Copper', layer: `${LOCAL} M2` },
   'word-line': { title: 'Word line', role: 'SRAM row line that opens a row of bitcells for access', material: 'Copper', layer: `${LOCAL} M2` },
   v2: { title: 'V2 via', role: 'Connects M2 up to M3', material: 'Tungsten', layer: `${LOCAL} V2` },
-  m3: { title: 'M3 route', role: 'Vertical routing across a few cell rows', material: 'Copper', layer: `${LOCAL} M3` },
+  m3: { title: 'M3 route', role: 'Vertical wire of a net between cells in neighbouring rows', material: 'Copper', layer: `${LOCAL} M3` },
+  'm3-pad': { title: 'M3 landing pad', role: 'M3 pad where a via stack from the intermediate layers lands before the net drops to a cell pin', material: 'Copper', layer: `${LOCAL} M3` },
+  'ladder-pad': { title: 'Power ladder pad', role: 'Pad on a local layer where a power via ladder passes on its way down to an M0 rail', material: 'Copper', layer: LOCAL },
+  v3: { title: 'V3 via stack', role: 'Stacked vias through the thin upper local layers (M4–M7, not drawn) between M3 and Mx1', material: 'Copper / tungsten', layer: 'Local to intermediate' },
+  'clock-net': { title: 'Clock net', role: 'Local clock wire from a clock buffer to the clock pins of flip-flops', material: 'Copper', layer: LOCAL },
   'tsv-plug': { title: 'TSV plug', role: 'Copper column carrying the TSV up through the local layers', material: 'Copper', layer: LOCAL },
   'tsv-landing': { title: 'TSV landing pad', role: 'M3 pad where the TSV plug meets the metal stack', material: 'Copper', layer: `${LOCAL} M3` },
   // Intermediate metal
@@ -65,36 +77,57 @@ export const PARTS = {
   mx3: { title: 'Mx3 route', role: 'Wider block-level routing across the PE', material: 'Copper', layer: `${INTERMEDIATE} Mx3` },
   vx1: { title: 'Via (Vx1)', role: 'Connects Mx1 and Mx2 routes where they cross', material: 'Tungsten', layer: `${INTERMEDIATE} Vx1` },
   vx2: { title: 'Via (Vx2)', role: 'Connects Mx2 and Mx3 routes where they cross', material: 'Tungsten', layer: `${INTERMEDIATE} Vx2` },
+  vx3: { title: 'Via (Vx3)', role: 'Connects an Mx4 power strap down to the layers below', material: 'Tungsten', layer: `${INTERMEDIATE} Vx3` },
+  'mx-pad': { title: 'Via landing pad', role: 'Pad where a route ends and its via stack continues down toward the cells', material: 'Copper', layer: INTERMEDIATE },
+  'power-ladder': { title: 'Power via ladder', role: 'Stacked vias carrying VDD or VSS from an Mx4 strap down toward the M0 rails', material: 'Copper / tungsten', layer: INTERMEDIATE },
   'mx4-strap': { title: 'Mx4 power strap', role: 'Local power grid strap over the logic', material: 'Copper', layer: `${INTERMEDIATE} Mx4` },
   'bit-line-strap': { title: 'Bit-line strap', role: 'Strap that lowers the resistance of long SRAM lines', material: 'Copper', layer: `${INTERMEDIATE} Mx1` },
   'global-bit-line': { title: 'Global bit line', role: 'Carries data from SRAM sub-arrays to the sense amplifiers', material: 'Copper', layer: `${INTERMEDIATE} Mx2` },
   'word-line-strap': { title: 'Word-line strap', role: 'Strap that speeds up long SRAM word lines', material: 'Copper', layer: `${INTERMEDIATE} Mx3` },
   // Semi-global metal
   'tsv-via-stack': { title: 'TSV via stack', role: 'Vias stacked from the TSV landing pad up to the semi-global straps', material: 'Tungsten', layer: `${INTERMEDIATE}–${SEMI}` },
+  vx4: { title: 'Strap via stack', role: 'Via stack joining an Mx4 power strap to the semi-global straps above it', material: 'Tungsten', layer: `${INTERMEDIATE}–${SEMI}` },
   'systolic-bus': { title: 'Systolic data bus', role: 'Passes operands between neighbouring tensor PEs; pulses show data moving', material: 'Copper', layer: SEMI },
-  'pe-pins': { title: 'PE bus pins', role: 'Where a systolic bus fans into the PE datapath', material: 'Copper', layer: SEMI },
+  'pe-pins': { title: 'PE bus drop', role: 'Via stack where a bus line drops into (or rises from) the PE logic below', material: 'Tungsten', layer: `${SEMI}–${INTERMEDIATE}` },
+  'weight-bus': { title: 'Weight feed bus', role: 'Carries weights from a tile SRAM macro into the top of its PE columns', material: 'Copper', layer: SEMI },
+  'activation-bus': { title: 'Activation feed bus', role: 'Carries activations from the tile router into the left edge of each PE row', material: 'Copper', layer: SEMI },
+  'result-bus': { title: 'Result drain bus', role: 'Collects partial sums from the bottom of the PE array into the vector unit and back to the router', material: 'Copper', layer: SEMI },
   'semi-global-strap': { title: 'Semi-global power strap', role: 'Tile-level power grid between the top mesh and the local straps', material: 'Copper', layer: `${SEMI} My1/My2` },
-  'strap-via': { title: 'Strap via', role: 'Connects crossing semi-global straps (Vy1)', material: 'Tungsten', layer: `${SEMI} Vy1` },
+  'strap-via': { title: 'Strap via', role: 'Connects crossing semi-global straps of the same supply (Vy1)', material: 'Tungsten', layer: `${SEMI} Vy1` },
+  'strap-stack': { title: 'Ring via stack', role: 'Via stack joining a semi-global strap to the tile power ring above it', material: 'Tungsten', layer: SEMI },
   'router-xbar': { title: 'Router crossbar wire', role: 'Switch fabric inside the tile router; pulses show packets', material: 'Copper', layer: SEMI },
-  'phy-lane': { title: 'PHY lane', role: 'Memory interface lane from the drivers out to the microbumps', material: 'Copper', layer: SEMI },
+  'noc-drop': { title: 'NoC drop', role: 'Via stack joining a NoC lane to the tile router crossbar below it', material: 'Tungsten', layer: SEMI },
+  'phy-lane': { title: 'PHY lane', role: 'Memory interface lane in the PHY driver strip, between the NoC and the lane drivers', material: 'Copper', layer: SEMI },
+  'lane-drop': { title: 'Lane drop', role: 'Via stack joining a PHY NoC bundle line to its lane in the driver strip', material: 'Tungsten', layer: SEMI },
+  'bump-stack': { title: 'Bump via stack', role: 'Stacked vias from a microbump down to the transmitter/receiver directly beneath it', material: 'Copper / tungsten', layer: 'Top metal to semi-global' },
+  'io-pad': { title: 'I/O driver pad', role: 'Pad of the transmitter/receiver under a microbump, where the bump via stack lands', material: 'Copper', layer: SEMI },
   'io-guard': { title: 'I/O cell guard ring', role: 'Guard ring isolating an I/O cell', material: 'Copper', layer: SEMI },
   'esd-finger': { title: 'ESD protection finger', role: 'Finger of the diode that shunts electrostatic discharge at an I/O', material: 'Copper', layer: SEMI },
   'sram-ring': { title: 'SRAM power ring', role: 'Power ring around an SRAM macro', material: 'Copper', layer: SEMI },
   'sram-strap': { title: 'SRAM strap', role: 'Semi-global strap over an SRAM array', material: 'Copper', layer: SEMI },
-  'tsv-strap-pad': { title: 'TSV strap pad', role: 'Semi-global pad where a TSV via stack meets the power straps', material: 'Copper', layer: SEMI },
+  'tsv-strap-pad': { title: 'TSV strap pad', role: 'Semi-global pad where a TSV via stack meets the straps', material: 'Copper', layer: SEMI },
+  'tsv-riser': { title: 'TSV riser', role: 'Via stack from a TSV strap pad up to the SRAM spine, carrying stacked-die data into the L2 banks', material: 'Tungsten', layer: SEMI },
   'inductor-guard': { title: 'Inductor guard ring', role: 'Keeps substrate noise away from the PLL inductor', material: 'Copper', layer: SEMI },
   'inductor-underpass': { title: 'Inductor underpass', role: 'Brings the spiral inductor terminal out from its centre', material: 'Copper', layer: SEMI },
   'channel-bus': { title: 'Channel bus', role: 'Long parallel global wires in the channel between compute tiles', material: 'Copper', layer: SEMI },
+  'clock-spine': { title: 'Clock spine', role: 'Tile clock spine fed by the global clock tree, driving the local clock buffers', material: 'Copper', layer: SEMI },
   'noc-lane': { title: 'NoC lane', role: 'Network-on-chip link between tiles, SRAM, and PHYs; pulses are packets', material: 'Copper', layer: SEMI },
+  'noc-junction': { title: 'NoC junction', role: 'Vias joining horizontal and vertical NoC links where the network branches', material: 'Tungsten', layer: SEMI },
   // Top metal and bumps
   'tile-ring': { title: 'Tile power ring', role: 'Power ring around a compute tile', material: TOP_CU, layer: TOP },
+  'ring-stack': { title: 'Mesh-to-ring via stack', role: 'Via stack feeding a tile power ring from the global mesh above it', material: 'Tungsten', layer: TOP },
   'sram-spine': { title: 'SRAM strip spine', role: 'Data spine along the shared SRAM strip', material: 'Copper', layer: TOP },
+  'spine-drop': { title: 'Spine junction', role: 'Via joining the SRAM spine to a NoC lane that crosses the strip', material: 'Tungsten', layer: TOP },
   'global-strap': { title: 'Global power strap', role: 'Top-metal VDD/VSS mesh that feeds the whole die', material: TOP_CU, layer: TOP },
-  'top-via': { title: 'Top-metal via stack', role: 'Connects the crossing global power straps', material: 'Tungsten', layer: TOP },
+  'top-via': { title: 'Top-metal via stack', role: 'Connects crossing global straps of the same supply', material: 'Tungsten', layer: TOP },
+  'mesh-stack': { title: 'Mesh via stack', role: 'Via stack from the global mesh down to a tile power ring', material: 'Tungsten', layer: TOP },
   inductor: { title: 'PLL inductor', role: 'Spiral inductor of an LC-tank PLL oscillator (clock generation)', material: TOP_CU, layer: TOP },
   'pad-lead': { title: 'Pad lead', role: 'Connects an I/O pad into the I/O ring', material: 'Copper', layer: TOP },
   'pad-frame': { title: 'Pad frame', role: 'Metal frame under an I/O pad', material: 'Copper', layer: TOP },
   'bond-pad': { title: 'I/O pad', role: 'Pad for the die’s control and test I/O', material: 'Al/Cu pad (rendered gold)', layer: TOP },
+  'pad-stack': { title: 'I/O pad via stack', role: 'Vias joining an I/O pad to its lead, and the lead down to the ESD protection of its I/O cell', material: 'Tungsten', layer: TOP },
+  'power-bump': { title: 'Power bump', role: 'Bump that brings VDD or VSS from the package into the global power mesh', material: 'Cu pillar + SnAg cap', layer: 'Bump' },
+  'clock-trunk': { title: 'Clock trunk', role: 'Global clock H-tree from the PLLs to every compute tile', material: 'Copper', layer: TOP },
   ubm: { title: 'Under-bump metallization', role: 'Solderable pad the microbump pillar is built on', material: 'Ni / Au', layer: 'Bump' },
   pillar: { title: 'Cu pillar microbump', role: 'Copper pillar joining the die to the interposer (memory PHY signals)', material: 'Copper', layer: 'Bump' },
   'solder-cap': { title: 'Solder cap', role: 'Tin-silver cap that is reflowed to bond the pillar', material: 'SnAg solder', layer: 'Bump' },
@@ -105,15 +138,17 @@ export const PARTS = {
   die: { title: 'Accelerator die', role: 'The AI accelerator: 30 compute tiles, a shared SRAM strip, and 8 memory PHYs', material: 'Silicon', layer: 'Package' },
   'die-section': { title: 'Silicon substrate (cut)', role: 'Bulk silicon under the transistors, shown in cross-section', material: 'Silicon', layer: 'Substrate' },
   interposer: { title: 'Silicon interposer', role: 'Passive silicon that wires the die to the memory stacks', material: 'Silicon', layer: 'Package' },
+  'rdl-trace': { title: 'Interposer RDL trace', role: 'Fine copper wire on the interposer joining a die memory PHY to its HBM stack', material: 'Copper', layer: 'Interposer RDL' },
+  'interposer-tsv': { title: 'Interposer TSV', role: 'Copper via through the interposer silicon from its RDL down to a C4 bump', material: 'Copper', layer: 'Interposer' },
   hbm: { title: 'HBM memory stack', role: 'Stack of DRAM dies on a base die, beside the accelerator', material: 'Silicon / mold', layer: 'Package' },
   substrate: { title: 'Package substrate', role: 'Organic laminate that fans signals and power out to the board', material: 'Build-up laminate, solder mask', layer: 'Package' },
+  'c4-bump': { title: 'C4 bump', role: 'Solder bump joining the interposer to the package substrate', material: 'SnAg solder on Cu', layer: 'Interposer underside' },
   capacitor: { title: 'Decoupling capacitor', role: 'Ceramic capacitor that steadies the supply near the die', material: 'MLCC', layer: 'Package' },
   bga: { title: 'BGA solder ball', role: 'Solder ball joining the package to the circuit board (sampled pitch)', material: 'SAC solder', layer: 'Package underside' },
   metal: { title: 'Metal structure', role: 'Interconnect metal', material: 'Metal', layer: 'Metal stack' },
-} as const satisfies Record<string, PartInfo>;
+} as const satisfies Record<PartId, PartInfo>;
 
-export type PartId = keyof typeof PARTS;
-export const PART_IDS = Object.keys(PARTS) as PartId[];
+export const PART_IDS: PartId[] = [...PART_ORDER];
 const PART_INDEX = new Map(PART_IDS.map((id, index) => [id, index]));
 export const partIndex = (id: PartId) => PART_INDEX.get(id) ?? PART_INDEX.get('metal')!;
 
@@ -127,7 +162,8 @@ export const CELL_NAMES: Record<CellType, string> = {
 // Identification
 // ---------------------------------------------------------------------------
 
-export type PrimitiveRef = { level: number; material: MaterialKey; shape: ShapeKey; x: number; z: number; y0: number; y1: number; sx: number; sz: number; glow: number };
+/** A drawn primitive; `code` is its packed phase (part, flow, phase). */
+export type PrimitiveRef = { level: number; material: MaterialKey; shape: ShapeKey; x: number; z: number; y0: number; y1: number; sx: number; sz: number; glow: number; code?: number };
 
 const at = (y: number, value: number) => Math.abs(y - value) <= 2e-7;
 const INDUCTORS: Rect[] = EDGE_BLOCKS.flatMap((block) => block.inductors.map((i) => ({ x0: i.cx - i.size * 0.62, z0: i.cz - i.size * 0.62, x1: i.cx + i.size * 0.62, z1: i.cz + i.size * 0.62 })));
@@ -135,6 +171,9 @@ const onRowBoundary = (z: number) => Math.abs(z / ROW - Math.round(z / ROW)) < 0
 
 /** Which part a drawn primitive is. */
 export function identifyPrimitive(p: PrimitiveRef): PartId {
+  // Structures that record their own part (nets, via stacks, feeds) need no guessing.
+  const recorded = p.code === undefined ? null : partOfPhase(p.code);
+  if (recorded) return recorded;
   const { material: m, shape, y0 } = p;
   const narrow = Math.min(p.sx, p.sz);
   const leaf = (): Leaf => leafAt(p.x, p.z);
@@ -231,7 +270,7 @@ export function identifyChunk(chunk: ChunkData): Uint8Array[] {
       out[k] = partIndex(identifyPrimitive({
         level: chunk.level, material: batch.material, shape: batch.shape,
         x: d[o] + chunk.origin[0], z: d[o + 2] + chunk.origin[2], y0: d[o + 1] - d[o + 4] / 2, y1: d[o + 1] + d[o + 4] / 2,
-        sx: d[o + 3], sz: d[o + 5], glow: d[o + 8],
+        sx: d[o + 3], sz: d[o + 5], glow: d[o + 8], code: d[o + 9],
       }));
     }
     return out;
@@ -239,6 +278,74 @@ export function identifyChunk(chunk: ChunkData): Uint8Array[] {
 }
 
 export type PartDescription = PartInfo & { id: PartId; size: string; location: string[]; notes: string[] };
+
+/** The pin of a standard cell at a point (M1 pins sit at whole gate pitches), if any. */
+export function pinAt(x: number, z: number): { cell: CellType; pin: string; dir: 'in' | 'out' | 'clk'; row: number } | null {
+  const hit = cellAt(x, z);
+  if (!hit) return null;
+  const k = Math.round(x / CPP);
+  const pin = cellLayout(hit.cell.type)?.pins.find((item) => hit.cell.start + item.k === k);
+  return pin ? { cell: hit.cell.type, pin: pin.name, dir: pin.dir, row: hit.row } : null;
+}
+
+export type NetSummary = {
+  /** Distinct pieces (a wire split across two chunks counts once). */
+  pieces: number;
+  truncated: boolean;
+  flow: 'data' | 'vdd' | 'vss' | 'clock';
+  /** Layers the net passes through, bottom to top, with the parts on each. */
+  layers: Array<{ layer: string; parts: string[]; count: number }>;
+  /** Cell pins the net joins: its driver first, then what it drives. */
+  pins: string[];
+  /** Transistor gates the net switches. */
+  gates: number;
+};
+
+/** What a traced net is, from its pieces: the layers it climbs through and the pins it joins. */
+export function summarizeNet(pieces: TracePiece[], truncated: boolean): NetSummary {
+  const layers = new Map<string, { y: number; parts: Set<string>; count: number }>();
+  const pins = new Map<string, { text: string; out: boolean }>();
+  // Chunks clip wires at their edges; the halves share a part, a height, and
+  // the coordinate across the wire, so they count as one piece.
+  const logical = new Set<string>();
+  let gates = 0;
+  for (const piece of pieces) {
+    const batch = piece.record.data.batches[piece.batch];
+    const d = batch.data;
+    const o = piece.index * FLOATS_PER_INSTANCE;
+    const ref: PrimitiveRef = {
+      level: piece.record.level, material: batch.material, shape: batch.shape,
+      x: d[o] + piece.record.data.origin[0], z: d[o + 2] + piece.record.data.origin[2],
+      y0: d[o + 1] - d[o + 4] / 2, y1: d[o + 1] + d[o + 4] / 2, sx: d[o + 3], sz: d[o + 5], glow: d[o + 8], code: d[o + 9],
+    };
+    const id = identifyPrimitive(ref);
+    const along = Math.floor(d[o + 6] / 2);
+    const across = along === 0 ? `z${Math.round(ref.z * 1e7)}` : along === 1 ? `x${Math.round(ref.x * 1e7)}` : `${Math.round(ref.x * 1e7)}:${Math.round(ref.z * 1e7)}`;
+    const identity = `${id}|${Math.round(ref.y0 * 1e7)}|${across}`;
+    if (logical.has(identity)) continue;
+    logical.add(identity);
+    if (id === 'gate' || id === 'gate-switching') gates += 1;
+    const part = PARTS[id];
+    const entry = layers.get(part.layer) ?? { y: ref.y0, parts: new Set<string>(), count: 0 };
+    entry.y = Math.min(entry.y, ref.y0);
+    entry.parts.add(part.title);
+    entry.count += 1;
+    layers.set(part.layer, entry);
+    if (id === 'm1-pin' || id === 'm1-out') {
+      const found = pinAt(ref.x, ref.z);
+      if (found) pins.set(`${found.row}:${Math.round(ref.x / CPP)}`, { text: `${found.cell} ${found.dir === 'out' ? 'output' : found.dir === 'clk' ? 'clock input' : 'input'} ${found.pin}`, out: found.dir === 'out' });
+    }
+  }
+  const flow = (['data', 'vdd', 'vss', 'clock'] as const)[netFlow(pieces)];
+  return {
+    pieces: logical.size,
+    truncated,
+    flow,
+    layers: [...layers.entries()].sort((a, b) => a[1].y - b[1].y).map(([layer, entry]) => ({ layer, parts: [...entry.parts], count: entry.count })),
+    pins: [...pins.values()].sort((a, b) => Number(b.out) - Number(a.out)).map((item) => item.text),
+    gates,
+  };
+}
 
 /** Full read-out for the selection panel. */
 export function describePrimitive(p: PrimitiveRef, id: PartId = identifyPrimitive(p)): PartDescription {
@@ -248,11 +355,22 @@ export function describePrimitive(p: PrimitiveRef, id: PartId = identifyPrimitiv
     ? `Ø ${formatLength(p.sx)} × ${formatLength(height)}`
     : `${formatLength(Math.max(p.sx, p.sz))} × ${formatLength(Math.min(p.sx, p.sz))} × ${formatLength(height)} thick`;
   const notes: string[] = [];
-  const cell = p.y0 < STACK.mx1[0] && p.y0 > STACK.bpr[0] - 1e-9 ? cellAt(p.x, p.z) : null;
-  if (cell) notes.push(`In a ${cell.cell.type} cell (${CELL_NAMES[cell.cell.type]}), ${CELL_WIDTH[cell.cell.type]} gate pitches wide, row ${cell.row.toLocaleString()}`);
-  if (id === 'm0-rail' || id === 'bpr' || id === 'backside-rail' || id === 'nano-tsv') notes.push(`Carries ${railSupply(Math.round(p.z / ROW))}`);
-  if (p.glow !== 0 && id !== 'gate-switching') notes.push('Active net: the moving light shows data in flight');
-  return { id, ...part, size, location: describeLocation(p.x, p.z), notes };
+  // Float32 instance data puts a layer's base a hair off its band: compare with slack.
+  const cell = p.y0 < STACK.m3[1] + 1e-8 && p.y0 > STACK.bpr[0] - 1e-8 ? cellAt(p.x, p.z) : null;
+  if (cell) {
+    const width = cell.cell.width;
+    const pin = id === 'm1-pin' || id === 'm1-out' ? pinAt(p.x, p.z) : null;
+    notes.push(`${pin ? `Pin ${pin.pin} of a` : 'In a'} ${cell.cell.type} cell (${CELL_NAMES[cell.cell.type]}), ${width} gate pitch${width === 1 ? '' : 'es'} wide, row ${cell.row.toLocaleString()}`);
+  }
+  const flow = p.code === undefined ? 0 : flowOfPhase(p.code);
+  if (flow === 1 || flow === 2) notes.push(`Carries ${flow === 1 ? 'VDD (supply)' : 'VSS (ground return)'}`);
+  else if (id === 'm0-rail' || id === 'bpr' || id === 'backside-rail' || id === 'nano-tsv') notes.push(`Carries ${railSupply(Math.round(p.z / ROW))}`);
+  if (flow === 3) notes.push('Carries the clock');
+  if (p.glow !== 0 && id !== 'gate-switching') {
+    notes.push(flow === 1 || flow === 2 ? 'Turn on Power flow to see the supply moving through it' : flow === 3 ? 'Turn on Clock flow to see the clock edges travel' : 'Active net: the moving light shows data in flight');
+  }
+  const location = id === 'rdl-trace' ? ['Silicon interposer', 'Between a memory PHY and its HBM stack'] : describeLocation(p.x, p.z);
+  return { id, ...part, size, location, notes };
 }
 
 // ---------------------------------------------------------------------------
@@ -261,33 +379,40 @@ export function describePrimitive(p: PrimitiveRef, id: PartId = identifyPrimitiv
 
 /** Parts worth a floating label at each zoom stop (most useful first). */
 export const LABEL_PLAN: Record<FocusStop['id'], PartId[]> = {
-  package: [],
-  die: ['global-strap', 'noc-lane', 'bond-pad', 'seal-ring', 'inductor', 'tile-ring'],
-  tile: ['systolic-bus', 'semi-global-strap', 'tile-ring', 'channel-bus', 'noc-lane', 'global-strap', 'strap-via', 'router-xbar', 'sram-ring', 'tsv', 'pillar', 'phy-lane'],
-  block: ['mx1', 'mx2', 'mx3', 'vx1', 'mx4-strap', 'systolic-bus', 'pe-pins', 'semi-global-strap', 'global-strap', 'global-bit-line', 'word-line-strap', 'tsv-strap-pad', 'ubm'],
-  routing: ['mx1', 'mx2', 'mx3', 'vx1', 'vx2', 'mx4-strap', 'systolic-bus', 'semi-global-strap'],
-  cells: ['m0-rail', 'm0-wire', 'm1-pin', 'v0', 'm2', 'v2', 'm3', 'bit-line', 'word-line', 'bitcell-via', 'mx1', 'tsv-landing', 'dtc-strap'],
-  devices: ['fin', 'gate', 'gate-dummy', 'gate-switching', 'epi-n', 'epi-p', 'contact-md', 'contact-vg', 'well-tap', 'bitcell-gate', 'dtc', 'bpr', 'nano-tsv', 'backside-rail', 'm0-rail'],
+  package: ['rdl-trace'],
+  die: ['global-strap', 'noc-lane', 'noc-junction', 'power-bump', 'bond-pad', 'seal-ring', 'inductor', 'tile-ring', 'top-via'],
+  tile: ['systolic-bus', 'weight-bus', 'activation-bus', 'result-bus', 'semi-global-strap', 'tile-ring', 'channel-bus', 'noc-lane', 'noc-drop', 'global-strap', 'strap-via', 'router-xbar', 'sram-ring', 'tsv', 'pillar', 'bump-stack', 'phy-lane'],
+  block: ['mx1', 'mx2', 'mx3', 'vx1', 'v3', 'mx4-strap', 'vx4', 'systolic-bus', 'pe-pins', 'semi-global-strap', 'global-strap', 'global-bit-line', 'word-line-strap', 'tsv-strap-pad', 'ubm'],
+  routing: ['mx1', 'mx2', 'mx3', 'vx1', 'vx2', 'v3', 'power-ladder', 'mx4-strap', 'systolic-bus', 'semi-global-strap'],
+  cells: ['m0-rail', 'm0-wire', 'm1-pin', 'm1-out', 'v0', 'v1', 'm2', 'v2', 'm3', 'm3-pad', 'clock-net', 'bit-line', 'word-line', 'bitcell-via', 'mx1', 'tsv-landing', 'dtc-strap'],
+  devices: ['fin', 'gate', 'gate-dummy', 'gate-switching', 'epi-n', 'epi-p', 'contact-md', 'contact-power', 'contact-vg', 'vbpr', 'well-tap', 'bitcell-gate', 'dtc', 'bpr', 'nano-tsv', 'backside-rail', 'm0-rail'],
 };
 
 /** Rendered material of each labelled part, for legend swatches ('glow' marks animated nets). */
 const PART_LOOK: Partial<Record<PartId, { material: MaterialKey; glow?: boolean }>> = {
   fin: { material: 'silicon' }, gate: { material: 'gate' }, 'gate-dummy': { material: 'gate' }, 'gate-switching': { material: 'gate', glow: true },
-  'bitcell-gate': { material: 'gate' }, 'epi-n': { material: 'epiN' }, 'epi-p': { material: 'epiP' }, 'contact-md': { material: 'tungsten' },
-  'contact-vg': { material: 'tungsten' }, 'well-tap': { material: 'tungsten' }, bpr: { material: 'copper' }, 'nano-tsv': { material: 'copper' },
+  'bitcell-gate': { material: 'gate' }, 'epi-n': { material: 'epiN' }, 'epi-p': { material: 'epiP' }, 'contact-md': { material: 'tungsten', glow: true },
+  'contact-power': { material: 'tungsten' }, vbpr: { material: 'tungsten' },
+  'contact-vg': { material: 'tungsten', glow: true }, 'well-tap': { material: 'tungsten' }, bpr: { material: 'copper' }, 'nano-tsv': { material: 'copper' },
   'backside-rail': { material: 'copper' }, dtc: { material: 'gate' }, 'dtc-liner': { material: 'oxide' }, tsv: { material: 'copper' }, 'tsv-liner': { material: 'oxide' },
   'm0-rail': { material: 'copper' }, 'm0-wire': { material: 'copper', glow: true }, 'decap-plate': { material: 'copper' }, 'sram-supply': { material: 'copper' },
-  v0: { material: 'tungsten' }, 'bitcell-via': { material: 'tungsten' }, 'm1-pin': { material: 'copper' }, 'bit-line': { material: 'copper', glow: true },
-  'dtc-strap': { material: 'copper' }, m2: { material: 'copper', glow: true }, 'word-line': { material: 'copper', glow: true }, v2: { material: 'tungsten' },
-  m3: { material: 'copper', glow: true }, 'tsv-plug': { material: 'copper' }, 'tsv-landing': { material: 'copper' },
-  mx1: { material: 'copper', glow: true }, mx2: { material: 'copper', glow: true }, mx3: { material: 'copper', glow: true }, vx1: { material: 'tungsten' },
-  vx2: { material: 'tungsten' }, 'mx4-strap': { material: 'copper' }, 'global-bit-line': { material: 'copper', glow: true }, 'word-line-strap': { material: 'copper' },
-  'systolic-bus': { material: 'copper', glow: true }, 'pe-pins': { material: 'copper' }, 'semi-global-strap': { material: 'copper' }, 'strap-via': { material: 'tungsten' },
-  'router-xbar': { material: 'copper', glow: true }, 'phy-lane': { material: 'copper', glow: true }, 'sram-ring': { material: 'copper' }, 'tsv-strap-pad': { material: 'copper' },
-  'channel-bus': { material: 'copper', glow: true }, 'noc-lane': { material: 'copper', glow: true }, 'tile-ring': { material: 'gold' }, 'global-strap': { material: 'gold' },
+  v0: { material: 'tungsten', glow: true }, 'bitcell-via': { material: 'tungsten' }, 'm1-pin': { material: 'copper' }, 'm1-out': { material: 'copper' }, 'bit-line': { material: 'copper', glow: true },
+  'dtc-strap': { material: 'copper' }, v1: { material: 'tungsten', glow: true }, m2: { material: 'copper', glow: true }, 'word-line': { material: 'copper', glow: true }, v2: { material: 'tungsten', glow: true },
+  m3: { material: 'copper', glow: true }, 'm3-pad': { material: 'copper', glow: true }, 'clock-net': { material: 'copper', glow: true }, 'tsv-plug': { material: 'copper' }, 'tsv-landing': { material: 'copper' },
+  v3: { material: 'tungsten', glow: true }, 'power-ladder': { material: 'tungsten' }, 'ladder-pad': { material: 'copper' },
+  mx1: { material: 'copper', glow: true }, mx2: { material: 'copper', glow: true }, mx3: { material: 'copper', glow: true }, vx1: { material: 'tungsten', glow: true },
+  vx2: { material: 'tungsten', glow: true }, 'mx4-strap': { material: 'copper' }, 'global-bit-line': { material: 'copper', glow: true }, 'word-line-strap': { material: 'copper' },
+  vx4: { material: 'tungsten' }, 'systolic-bus': { material: 'copper', glow: true }, 'pe-pins': { material: 'tungsten', glow: true },
+  'weight-bus': { material: 'copper', glow: true }, 'activation-bus': { material: 'copper', glow: true }, 'result-bus': { material: 'copper', glow: true },
+  'semi-global-strap': { material: 'copper' }, 'strap-via': { material: 'tungsten' }, 'strap-stack': { material: 'tungsten' }, 'mesh-stack': { material: 'tungsten' },
+  'router-xbar': { material: 'copper', glow: true }, 'noc-drop': { material: 'tungsten', glow: true }, 'phy-lane': { material: 'copper', glow: true }, 'bump-stack': { material: 'copper' },
+  'sram-ring': { material: 'copper' }, 'tsv-strap-pad': { material: 'copper' },
+  'channel-bus': { material: 'copper', glow: true }, 'noc-lane': { material: 'copper', glow: true }, 'noc-junction': { material: 'tungsten' }, 'tile-ring': { material: 'gold' },
+  'global-strap': { material: 'gold' }, 'top-via': { material: 'tungsten' }, 'power-bump': { material: 'solder' },
   inductor: { material: 'gold' }, 'bond-pad': { material: 'gold' }, ubm: { material: 'gold' }, pillar: { material: 'copper' }, 'solder-cap': { material: 'solder' },
   'seal-ring': { material: 'copper' }, 'die-surface': { material: 'silicon' }, die: { material: 'silicon' }, hbm: { material: 'silicon' },
   interposer: { material: 'silicon' }, substrate: { material: 'silicon' }, capacitor: { material: 'solder' }, bga: { material: 'solder' },
+  'rdl-trace': { material: 'copper', glow: true }, 'c4-bump': { material: 'solder' },
 };
 
 /** Approximate on-screen colour of each material, for legend swatches. */
@@ -297,7 +422,7 @@ export const MATERIAL_SWATCH: Record<MaterialKey, string> = {
 
 export type LegendItem = { id: PartId; title: string; layer: string; role: string; swatch: string; glow: boolean };
 
-const PACKAGE_LEGEND: PartId[] = ['die', 'hbm', 'interposer', 'substrate', 'capacitor', 'bga'];
+const PACKAGE_LEGEND: PartId[] = ['die', 'hbm', 'interposer', 'rdl-trace', 'substrate', 'c4-bump', 'capacitor', 'bga'];
 
 /** What each zoom stop shows, for the on-screen legend. */
 export function legendFor(stop: FocusStop['id']): LegendItem[] {

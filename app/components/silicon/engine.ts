@@ -7,8 +7,8 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { CONNECTOR_SAMPLING, PACKAGE_GEOMETRY, SCENE_MM_PER_UNIT, STACK_PLACEMENTS } from '@/lib/package-connectors';
 import {
-  DIE, FLOATS_PER_INSTANCE, LEVELS, MATERIAL_KEYS, PRESETS, STACK_MAX,
-  chunkId, clipPlanesFor, craterFor, describeLocation, focusStopFor, generateChunk, generateGlobal, levelFade, scaleBar, sectionCaps, snapSection, windowChunks, zoomPanPath,
+  DIE, FLOATS_PER_INSTANCE, LEVELS, MATERIAL_KEYS, PACKAGE_Y, PRESETS, STACK_MAX,
+  chunkId, clipPlanesFor, craterFor, describeLocation, focusStopFor, generateChunk, generateGlobal, generatePackageWiring, levelFade, scaleBar, sectionCaps, snapSection, windowChunks, zoomPanPath,
   type Batch, type ChunkData, type ChunkKey, type FocusStop, type MaterialKey, type SectionPlane,
 } from '@/lib/silicon-macro';
 import { PARTS, type PartId } from '@/lib/silicon-parts';
@@ -50,9 +50,14 @@ export type SiliconEngineCallbacks = {
   onSelect: (selection: SiliconSelection | null) => void;
 };
 
+/** Which flows pulse: data on the signal nets, power (VDD down, VSS back) on the supply network, and the clock. */
+export type Flows = { data: boolean; power: boolean; clock: boolean };
+
 export type SiliconEngine = {
   flyTo: (presetId: string) => void;
-  setGlow: (on: boolean) => void;
+  setFlows: (flows: Flows) => void;
+  /** Outline the whole net of the selected conductor. */
+  setNetShown: (on: boolean) => void;
   setBloom: (on: boolean) => void;
   setSection: (on: boolean) => void;
   setAutoRotate: (on: boolean) => void;
@@ -158,7 +163,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   scene.add(headlight, headlight.target);
 
   const shared = createSharedUniforms();
-  const levelUniforms: LevelUniforms[] = LEVELS.map((level) => ({ uFade: { value: level.id === 0 ? 1 : 0 }, uPulsePeriod: { value: level.pulse.period }, uPulseRate: { value: level.pulse.speed / level.pulse.period } }));
+  const levelUniforms: LevelUniforms[] = LEVELS.map((level) => ({ uFade: { value: level.id === 0 ? 1 : 0 }, uPulsePeriod: { value: level.pulse.period }, uPulseRate: { value: level.pulse.speed / level.pulse.period }, uViaStretch: { value: level.viaStretch } }));
   const levelMaterials = LEVELS.map((level) => Object.fromEntries(MATERIAL_KEYS.map((key) => [key, createChipMaterial(key, shared, levelUniforms[level.id])])) as Record<MaterialKey, THREE.MeshStandardMaterial>);
   for (const set of levelMaterials) disposables.push(...Object.values(set));
 
@@ -173,6 +178,8 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const staticMeshes: THREE.Object3D[] = [];
   const packageAnchors: StaticAnchor[] = [];
   let bgaMesh: THREE.InstancedMesh | null = null;
+  // Interposer wiring, streamed like chip geometry but hidden with the package.
+  let packageWiring: THREE.Group | null = null;
   let substrateBottom = -Infinity;
   let dieUniforms: DieUniforms | null = null;
   function buildDieAndPackage() {
@@ -237,7 +244,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       return mesh;
     };
     staticBoxes.push({ rect: [-DIE.width / 2, -DIE.depth / 2, DIE.width / 2, DIE.depth / 2], y: [-DIE.thickness, 0], section: sectionSilicon, part: 'die-section' });
-    const interposerTop = -DIE.thickness - 0.02;
+    const interposerTop = PACKAGE_Y.interposerTop;
     const interposerWidth = PACKAGE_GEOMETRY.interposer.width * MM;
     const interposerDepth = PACKAGE_GEOMETRY.interposer.depth * MM;
     const interposer = addBox(interposerWidth, interposerDepth, interposerTop - 0.1, interposerTop, 0, 0, interposerMaterial, sectionSilicon, 'interposer');
@@ -287,6 +294,31 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
         const position = new THREE.Vector3().setFromMatrixPosition(bodies[index]);
         anchor('capacitor', bodyMesh, position.x, substrateTop + 0.5, position.z, new THREE.Box3().setFromCenterAndSize(position, new THREE.Vector3(1.1, 0.5, 1.1)));
       }
+    }
+    {
+      // C4 bumps join the interposer to the substrate, at a sampled pitch.
+      const pitch = 1.6;
+      const radius = 0.045;
+      const height = interposerTop - 0.1 - substrateTop;
+      const bumpGeometry = new THREE.CylinderGeometry(radius, radius * 1.1, height, 14);
+      const bumpMaterial = new THREE.MeshStandardMaterial({ color: '#c3c4c9', metalness: 1, roughness: 0.36 });
+      disposables.push(bumpGeometry, bumpMaterial);
+      const nx = Math.floor(interposerWidth / pitch);
+      const nz = Math.floor(interposerDepth / pitch);
+      const bumps = new THREE.InstancedMesh(bumpGeometry, bumpMaterial, nx * nz);
+      const matrix = new THREE.Matrix4();
+      let index = 0;
+      for (let i = 0; i < nx; i += 1) for (let j = 0; j < nz; j += 1) {
+        const x = (i - (nx - 1) / 2) * pitch;
+        const z = (j - (nz - 1) / 2) * pitch;
+        bumps.setMatrixAt(index, matrix.makeTranslation(x, substrateTop + height / 2, z));
+        index += 1;
+      }
+      bumps.userData.part = 'c4-bump';
+      scene.add(bumps);
+      staticMeshes.push(bumps);
+      const edge = new THREE.Vector3((nx - 1) / 2 * pitch, substrateTop + height / 2, 0);
+      anchor('c4-bump', bumps, edge.x, edge.y, edge.z, new THREE.Box3().setFromCenterAndSize(edge, new THREE.Vector3(radius * 2, height, radius * 2)));
     }
     {
       // BGA balls under the substrate, at the 3D twin's sampled pitch; drawn
@@ -719,7 +751,10 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const selectTarget = (target: Target | null) => {
     inspector.select(target);
     annotations.setSelected(target?.key ?? null);
-    callbacks.onSelect(target ? describeTarget(target) : null);
+    // A selected conductor brings its whole net with it: traced through the
+    // drawn geometry, outlined, and summarized for the panel.
+    const net = inspector.trace(target);
+    callbacks.onSelect(target ? describeTarget(target, net) : null);
   };
   // Package labels at the package stop; at the die stop the die itself needs none.
   const packageAnchorsFor = (id: FocusStop['id']) => (id === 'package' ? packageAnchors : id === 'die' ? packageAnchors.filter((item) => item.part !== 'die') : []);
@@ -1052,6 +1087,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     view = camera.position.y >= 0 ? 'top' : distance < BACKSIDE_WITHIN ? 'backside' : 'underside';
     const packageShown = view !== 'backside' || sectionOn;
     for (const object of staticMeshes) object.visible = packageShown && (object !== bgaMesh || camera.position.y < substrateBottom);
+    if (packageWiring) packageWiring.visible = packageShown;
 
     headlight.position.copy(camera.position);
     headlight.target.position.copy(orbit);
@@ -1180,6 +1216,8 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     await nextTask();
     if (disposed) return;
     addResident('global', 0, generateGlobal(), performance.now());
+    addResident('package-wiring', 0, generatePackageWiring(), performance.now());
+    packageWiring = resident.get('package-wiring')?.group ?? null;
     await nextTask();
     if (disposed) return;
     post = createPost();
@@ -1230,8 +1268,12 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       flyTo({ ...preset, polar: 1.36, azimuth: sectionAzimuth() });
       sectionFocusY = SECTION_FOCUS_Y[preset.id];
     },
-    setGlow(on) {
-      shared.uGlowGain.value = on ? 1 : 0;
+    setFlows(flows) {
+      shared.uGlowGain.value = flows.data ? 1 : 0;
+      shared.uFlowGain.value.set(flows.data ? 1 : 0, flows.power ? 1 : 0, flows.power ? 1 : 0, flows.clock ? 1 : 0);
+    },
+    setNetShown(on) {
+      inspector.setNetShown(on);
     },
     setBloom(on) {
       bloomEnabled = on;

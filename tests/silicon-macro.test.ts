@@ -4,7 +4,7 @@ import { ACCELERATOR_FLOORPLAN } from '../lib/reference-microchip.ts';
 import { PACKAGE_GEOMETRY, SCENE_MM_PER_UNIT, STACK_PLACEMENTS, acceleratorPhyAnchor } from '../lib/package-connectors.ts';
 import {
   CHANNEL_RECTS, DIE, DIE_RECT, EDGE_BLOCKS, FLOATS_PER_INSTANCE, FOCUS_STOPS, LEVELS, PHYS, PRESETS, SILICON_EVIDENCE, SRAM_STRIP, STACK, TILES,
-  CPP, ROW, chunkBounds, craterFor, describeLocation, focusStopFor, formatLength, generateChunk, generateGlobal, leafAt, rectsOverlap, scaleBar, sectionCaps, snapSection,
+  CPP, ROW, chunkBounds, craterFor, describeLocation, focusStopFor, formatLength, generateChunk, generateGlobal, generatePackageWiring, leafAt, rectsOverlap, scaleBar, sectionCaps, snapSection,
   um, windowChunks, zoomPanPath, type Batch, type ChunkData, type Rect,
 } from '../lib/silicon-macro.ts';
 
@@ -55,8 +55,12 @@ test('regions resolve to the expected functional leaf', () => {
 });
 
 test('the metal stack is ordered from the front end to the bumps', () => {
-  const order = ['fin', 'contact', 'm0', 'v0', 'm1', 'v1', 'm2', 'v2', 'm3', 'mx1', 'vx1', 'mx2', 'vx2', 'mx3', 'vx3', 'mx4', 'sysH', 'sysV', 'my1', 'vy1', 'my2', 'chanH', 'chanV', 'noc', 'ring', 'mz1', 'vz1', 'mz2', 'pad'] as const;
+  const order = ['fin', 'contact', 'm0', 'v0', 'm1', 'v1', 'm2', 'v2', 'm3', 'v3', 'mx1', 'vx1', 'mx2', 'vx2', 'mx3', 'vx3', 'mx4', 'vx4', 'sysH', 'vs', 'sysV', 'vy0', 'my1', 'vy1', 'my2', 'vc0', 'chanH', 'vc1', 'chanV', 'vn', 'nocH', 'vnj', 'nocV', 'vr', 'ring', 'vz0', 'mz1', 'vz1', 'mz2', 'pad'] as const;
   for (let k = 1; k < order.length; k += 1) assert.ok(STACK[order[k]][0] >= STACK[order[k - 1]][1] - 1e-12, `${order[k]} starts below ${order[k - 1]}`);
+  // Every metal layer meets the next through a via band with no gap between
+  // them, except where a crater floor needs a sliver of dielectric (M3/V3).
+  const joined = ['contact', 'm0', 'v0', 'm1', 'v1', 'm2', 'v2', 'm3', 'v3', 'mx1', 'vx1', 'mx2', 'vx2', 'mx3', 'vx3', 'mx4', 'vx4', 'sysH', 'vs', 'sysV', 'vy0', 'my1', 'vy1', 'my2', 'vc0', 'chanH', 'vc1', 'chanV', 'vn', 'nocH', 'vnj', 'nocV', 'vr', 'ring', 'vz0', 'mz1', 'vz1', 'mz2'] as const;
+  for (let k = 1; k < joined.length; k += 1) assert.ok(STACK[joined[k]][0] - STACK[joined[k - 1]][1] <= um(0.03) + 1e-12, `${joined[k - 1]} and ${joined[k]} leave a gap`);
   for (const deep of ['bpr', 'nanoTsv', 'backside', 'dtc', 'tsv'] as const) assert.ok(STACK[deep][0] < 0, `${deep} does not reach below the surface`);
 });
 
@@ -80,7 +84,10 @@ function assertChunkWellFormed(chunk: ChunkData) {
 
 test('chunks are deterministic, clipped to their bounds, and within budget', () => {
   const spots = [PRESETS[5], PRESETS[3], { x: 0, z: 1 }, { x: PHYS[0].rect.x0 + 3, z: PHYS[0].rect.z0 + 1 }, { x: 0.5, z: -DIE.depth / 2 + 0.3 }];
-  const budget = [0, 20000, 30000, 32000, 16000];
+  // Levels 2 and 3 draw every net whole since the interconnect rebuild: each
+  // route end has its via stack, and every cell its pins, contacts, and wires.
+  // The M4 Max still renders every rung at 400+ fps uncapped (README).
+  const budget = [0, 20000, 40000, 56000, 16000];
   for (const level of LEVELS.slice(1)) for (const spot of spots) {
     const keys = windowChunks(level, spot.x, spot.z, level.fullAt * 0.9);
     let total = 0;
@@ -96,6 +103,7 @@ test('chunks are deterministic, clipped to their bounds, and within budget', () 
   const global = generateGlobal();
   assertChunkWellFormed(global);
   assert.ok(global.instances > 1000 && global.instances < 8000);
+  assertChunkWellFormed(generatePackageWiring());
 });
 
 test('a wire split across two chunks keeps one tint and a continuous pulse path', () => {

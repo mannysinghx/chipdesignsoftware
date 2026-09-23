@@ -928,6 +928,11 @@ small { font-size: 10px !important; }
 .silicon-segment em { margin-right: 3px; color: #6f8aa5; font: 600 9px var(--font-geist-mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; }
 .silicon-toolbar .silicon-segment button { padding: 0 8px; }
 .silicon-toolbar .silicon-segment button.active { border-color: rgba(255,196,110,.42); background: rgba(255,190,90,.14); color: #fff2dc; }
+.silicon-toolbar .silicon-flows { margin-left: 0; padding-left: 0; border-left: 0; }
+.silicon-toolbar .silicon-flows button { display: inline-flex; align-items: center; gap: 5px; }
+.silicon-toolbar .silicon-flows button i { width: 7px; height: 7px; border-radius: 50%; opacity: .45; }
+.silicon-toolbar .silicon-flows button.active { border-color: rgba(90,220,255,.42); background: rgba(40,160,210,.18); color: #e2f7ff; }
+.silicon-toolbar .silicon-flows button.active i { opacity: 1; box-shadow: 0 0 6px currentColor; }
 .silicon-labels { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
 .silicon-label { position: absolute; top: 0; left: 0; border: 1px solid rgba(110,215,255,.42); border-radius: 6px; padding: 3px 8px; background: rgba(5,10,16,.82); color: #e4f5ff; font: 600 10.5px/1.35 var(--font-geist-sans), Arial, sans-serif; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); pointer-events: none; will-change: transform; }
 .silicon-label::before { position: absolute; top: 100%; left: 6px; width: 1px; height: 14px; background: rgba(110,215,255,.6); content: ''; }
@@ -963,7 +968,30 @@ small { font-size: 10px !important; }
 .silicon-legend b { display: block; color: #e6f1fb; font-size: 11px; font-weight: 620; }
 .silicon-legend small { display: block; margin-top: 1px; color: #7f95ab; font: 9.5px var(--font-geist-mono); }
 .silicon-legend p { margin: 10px 0 0; color: #7f95ab; font-size: 10px; }
-.silicon-selection { top: 86px; right: 16px; width: 300px; max-height: calc(100% - 210px); border-color: rgba(80,210,255,.32); padding: 12px 14px; background: rgba(6,10,16,.86); }
+.silicon-flow-key { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(160,190,220,.12); color: #a9bdd0; font: 600 9.5px var(--font-geist-mono); }
+.silicon-flow-key span { display: inline-flex; align-items: center; gap: 5px; }
+.silicon-flow-key i { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px rgba(255,255,255,.25); }
+.silicon-selection { top: 86px; right: 16px; width: 340px; max-height: calc(100% - 210px); border-color: rgba(80,210,255,.32); padding: 12px 14px; background: rgba(6,10,16,.88); }
+.silicon-explain { margin-top: 11px; padding-top: 9px; border-top: 1px solid rgba(160,190,220,.12); }
+.silicon-explain h4 { margin: 0 0 4px; color: #ffc978; font: 650 9px var(--font-geist-mono); letter-spacing: .12em; text-transform: uppercase; }
+.silicon-explain > p { margin: 0; color: #c3d3e2; font-size: 11.5px; line-height: 1.5; }
+.silicon-explain ol { margin: 4px 0 0; padding-left: 17px; color: #b3c5d6; font-size: 11px; line-height: 1.45; }
+.silicon-explain ol li + li { margin-top: 3px; }
+.silicon-net { margin-top: 8px; border: 1px solid rgba(126,244,255,.2); border-radius: 8px; padding: 8px 9px; background: rgba(20,60,80,.18); }
+.silicon-net-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.silicon-net-head b { font-size: 11px; font-weight: 650; }
+.silicon-net-head b.flow-data { color: #7ef4ff; }
+.silicon-net-head b.flow-vdd { color: #ffb066; }
+.silicon-net-head b.flow-vss { color: #9dff80; }
+.silicon-net-head b.flow-clock { color: #e79bff; }
+.silicon-net-head span { color: #8fa6bc; font: 10px var(--font-geist-mono); }
+.silicon-net-head button { height: 22px; margin-left: auto; border: 1px solid rgba(126,244,255,.3); border-radius: 6px; padding: 0 8px; background: transparent; color: #cfefff; font-size: 10px; font-weight: 650; cursor: pointer; }
+.silicon-net-head button.active { background: rgba(40,160,210,.22); }
+.silicon-net-pins { margin: 6px 0 0; color: #dbe8f4; font: 10.5px/1.45 var(--font-geist-mono); }
+.silicon-net-layers { margin: 7px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.silicon-net-layers li { display: grid; grid-template-columns: minmax(0, 46%) 1fr; gap: 6px; padding: 2px 0 2px 8px; border-left: 2px solid rgba(126,244,255,.45); font-size: 10.5px; }
+.silicon-net-layers span { overflow: hidden; color: #8fa6bc; font: 9.5px var(--font-geist-mono); text-overflow: ellipsis; white-space: nowrap; }
+.silicon-net-layers em { color: #dbe8f4; font-style: normal; }
 .silicon-selection strong { display: block; margin-top: 4px; color: #f2f9ff; font-size: 15px; font-weight: 650; }
 .silicon-selection > p { margin: 6px 0 0; color: #a9bdd0; font-size: 11.5px; line-height: 1.45; }
 .silicon-selection dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; margin: 10px 0 0; font-size: 11px; }

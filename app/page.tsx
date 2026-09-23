@@ -749,7 +749,7 @@ function GuideView({ level, setLevel, navigate }: {
   ];
   const workspaceCards: Array<{ view: View; title: string; purpose: string; firstQuestion: string }> = [
     { view: 'twin', title: '3D design twin', purpose: 'Movable full-system build visualization', firstQuestion: 'Where is every stack, die, build stage, and linked evidence value in the complete package?' },
-    { view: 'silicon', title: 'Silicon macro', purpose: 'Illustrative photoreal zoom from the package to single transistors', firstQuestion: 'What does a dense accelerator die look like at every scale, from the power mesh down to fins and gates?' },
+    { view: 'silicon', title: 'Silicon macro', purpose: 'Illustrative photoreal zoom from the package to single transistors, with every interconnect traced as a net and every part explained', firstQuestion: 'How do data, power, and the clock flow from the bumps down through each metal layer to the transistors, and how is each part made?' },
     { view: 'readiness', title: 'Readiness', purpose: 'Program-level evidence and blockers', firstQuestion: 'What is actually complete, and what still depends on external proof?' },
     { view: 'architecture', title: 'Architecture', purpose: 'T0 hierarchy and organization', firstQuestion: 'How do lanes, channels, banks, tiers, SRAM, and NoC regions connect?' },
     { view: 'workloads', title: 'Workloads', purpose: 'Deterministic traffic behavior', firstQuestion: 'Which access patterns benefit, stall, or create queue pressure?' },

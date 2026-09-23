@@ -5,8 +5,15 @@ import { DIE, type MaterialKey } from '@/lib/silicon-macro';
 // same objects, so one write per frame reaches all of them.
 export type SharedUniforms = {
   uTime: { value: number };
+  /** Data pulses on the far-view die texture (follows the Data flow toggle). */
   uGlowGain: { value: number };
+  /** Data pulse colour. */
   uGlowColor: { value: THREE.Color };
+  /** Pulse gain per flow: data, VDD, VSS, clock (0 hides that flow). */
+  uFlowGain: { value: THREE.Vector4 };
+  uVddColor: { value: THREE.Color };
+  uVssColor: { value: THREE.Color };
+  uClockColor: { value: THREE.Color };
   /** x, z: crater centre; z: floor height; w: radius (all mm). */
   uCrater: { value: THREE.Vector4 };
   uCraterSlope: { value: number };
@@ -20,6 +27,10 @@ export function createSharedUniforms(): SharedUniforms {
     uTime: { value: 0 },
     uGlowGain: { value: 1 },
     uGlowColor: { value: new THREE.Color().setRGB(0.22, 0.86, 1.0, THREE.LinearSRGBColorSpace) },
+    uFlowGain: { value: new THREE.Vector4(1, 0, 0, 0) },
+    uVddColor: { value: new THREE.Color().setRGB(...FLOW_COLORS.vdd, THREE.LinearSRGBColorSpace) },
+    uVssColor: { value: new THREE.Color().setRGB(...FLOW_COLORS.vss, THREE.LinearSRGBColorSpace) },
+    uClockColor: { value: new THREE.Color().setRGB(...FLOW_COLORS.clock, THREE.LinearSRGBColorSpace) },
     uCrater: { value: new THREE.Vector4(0, 0, 1, 0) },
     uCraterSlope: { value: 0.25 },
     uCraterOn: { value: 0 },
@@ -31,7 +42,17 @@ export type LevelUniforms = {
   uFade: { value: number };
   uPulsePeriod: { value: number };
   uPulseRate: { value: number };
+  /** Path length counted per µm of via height (see LevelSpec.viaStretch). */
+  uViaStretch: { value: number };
 };
+
+/** Pulse colours per flow (linear RGB); the legend shows the same hues. */
+export const FLOW_COLORS = {
+  data: [0.22, 0.86, 1.0],
+  vdd: [1.0, 0.52, 0.1],
+  vss: [0.42, 1.0, 0.3],
+  clock: [0.86, 0.36, 1.0],
+} as const satisfies Record<string, [number, number, number]>;
 
 // Physically based base colours (linear sRGB reflectance for the metals).
 type Surface = { color: [number, number, number]; metalness: number; roughness: number; tint: number };
@@ -51,6 +72,7 @@ const CHIP_VERTEX_HEAD = /* glsl */ `
 attribute vec3 iOffset;
 attribute vec3 iScale;
 attribute vec4 iData;
+uniform float uViaStretch;
 varying vec4 vChip;
 varying vec3 vChipWorld;
 varying float vChipHeight;
@@ -58,18 +80,22 @@ varying float vChipHeight;
 
 const CHIP_BEGIN_VERTEX = /* glsl */ `
 vec3 transformed = position * iScale + iOffset;
-// Glow path: iData.x carries the tint plus 2 when the wire runs along z.
-float chipAxisZ = step(1.5, iData.x);
-float chipAlong = mix(position.x, position.z, chipAxisZ) + 0.5;
-float chipLength = mix(iScale.x, iScale.z, chipAxisZ) * 1000.0;
+// Glow path: iData.x carries the tint plus 2 when the path runs along z and
+// 4 when it runs up a via (y), whose height counts uViaStretch times.
+float chipAxis = floor(iData.x * 0.5);
+float chipAlong = (chipAxis < 0.5 ? position.x : (chipAxis < 1.5 ? position.z : position.y)) + 0.5;
+float chipLength = (chipAxis < 0.5 ? iScale.x : (chipAxis < 1.5 ? iScale.z : iScale.y * uViaStretch)) * 1000.0;
 vChip = vec4(fract(iData.x), iData.y + chipAlong * chipLength, iData.z, iData.w);
 vChipHeight = position.y + 0.5;
 `;
 
 const CHIP_FRAGMENT_HEAD = /* glsl */ `
 uniform float uTime;
-uniform float uGlowGain;
 uniform vec3 uGlowColor;
+uniform vec4 uFlowGain;
+uniform vec3 uVddColor;
+uniform vec3 uVssColor;
+uniform vec3 uClockColor;
 uniform vec4 uCrater;
 uniform float uCraterSlope;
 uniform float uCraterOn;
@@ -106,8 +132,12 @@ if (vChip.z != 0.0) {
   float chipS = vChip.y * sign(vChip.z);
   float chipCycle = fract(uTime * uPulseRate - chipS / uPulsePeriod + vChip.w);
   float chipHead = smoothstep(0.0, 0.03, chipCycle) * (1.0 - smoothstep(0.03, 0.4, chipCycle));
+  // What the conductor carries rides in the integer part of the phase.
+  float chipFlow = mod(floor(vChip.w), 4.0);
+  vec3 chipColor = chipFlow < 0.5 ? uGlowColor : (chipFlow < 1.5 ? uVddColor : (chipFlow < 2.5 ? uVssColor : uClockColor));
+  float chipGain = chipFlow < 0.5 ? uFlowGain.x : (chipFlow < 1.5 ? uFlowGain.y : (chipFlow < 2.5 ? uFlowGain.z : uFlowGain.w));
   // Peak just over the bloom threshold: pulses glow softly without flaring white.
-  totalEmissiveRadiance += uGlowColor * uGlowGain * abs(vChip.z) * (0.05 + 2.1 * chipHead * chipHead);
+  totalEmissiveRadiance += chipColor * chipGain * abs(vChip.z) * (0.05 + 2.1 * chipHead * chipHead);
 }
 `;
 
@@ -138,7 +168,7 @@ export function createChipMaterial(key: MaterialKey, shared: SharedUniforms, lev
       .replace('#include <aomap_fragment>', '#include <aomap_fragment>\nfloat chipAo = mix(0.42, 1.0, smoothstep(0.0, 0.95, vChipHeight));\nreflectedLight.indirectDiffuse *= chipAo;\nreflectedLight.indirectSpecular *= mix(0.55, 1.0, chipAo);')
       .replace('#include <emissivemap_fragment>', CHIP_GLOW);
   };
-  material.customProgramCacheKey = () => 'silicon-chip-v1';
+  material.customProgramCacheKey = () => 'silicon-chip-v2';
   return material;
 }
 
