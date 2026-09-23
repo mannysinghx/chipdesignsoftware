@@ -159,6 +159,61 @@ features:
     title: Latest executed evidence per adapter, with reproduction status
     events: [http_request]
 
+  # ---- api: agents (Phase 2) -------------------------------------------------
+  - id: mission.submit
+    kind: api
+    phase: 2
+    owner: platform
+    title: Create an agent mission (it waits for a person to launch it)
+    events: [http_request]
+  - id: mission.query
+    kind: api
+    phase: 2
+    owner: platform
+    title: List missions and read a mission with its tasks
+    events: [http_request]
+  - id: approval.inbox
+    kind: api
+    phase: 2
+    owner: platform
+    title: Pending human approvals (mission launches, plans, and reviews)
+    events: [http_request]
+  - id: approval.decide
+    kind: api
+    phase: 2
+    owner: platform
+    title: A person approves, rejects, or sends back a mission launch, plan, or review (with the reason)
+    events: [http_request, approved, rejected]
+    may_emit: [needs_work]
+
+  # ---- worker: agents (Phase 2) ---------------------------------------------
+  - id: agent.mission
+    kind: worker
+    phase: 2
+    owner: platform
+    title: Mission lifecycle over the open-node DAG
+    events: [created, launched, completed]
+    may_emit: [rejected, halted]
+  - id: agent.task
+    kind: worker
+    phase: 2
+    owner: platform
+    title: Every task state-machine transition, model call, tool call, and policy decision
+    events: [created, context_validated, plan_proposed, approved_if_required, running_tools, evidence_collected, self_checked, review_required, accepted, llm_call, tool_call, policy_decision]
+    may_emit: [rejected, needs_work]
+  - id: budget.limit
+    kind: worker
+    phase: 2
+    owner: platform
+    title: Hard token and spend ceilings for agent model calls
+    events: [limit_hit, run_halted]
+  - id: evidence.bundle
+    kind: worker
+    phase: 2
+    owner: platform
+    title: Evidence bundle assembly from a mission's accepted tasks
+    events: [gate_evaluated, artifact_written]
+
   # ---- worker (Phase 1) ----------------------------------------------------
   - id: run.lifecycle
     kind: worker

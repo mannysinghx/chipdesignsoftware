@@ -22,7 +22,9 @@ PACKAGE = PLATFORM_DIR / "aimem_platform"
 #   runs/toolchains.py  hash-verified bundle downloads inside the audited toolchain.provision step
 #   runs/drivers/*      execute inside the sandbox and write only to the run's /work/out, which is
 #                       recorded file-by-file in the run's outputs_recorded event
-FILE_WRITERS = {"artifacts.py", "audit/writer.py", "audit/verifier.py", "runs/service.py", "runs/toolchains.py"}
+#   agents/worktree.py  agent task worktrees: every path passes the write-scope policy, and the file
+#                       appears only after its agent.task tool_call event commits
+FILE_WRITERS = {"artifacts.py", "audit/writer.py", "audit/verifier.py", "runs/service.py", "runs/toolchains.py", "agents/worktree.py"}
 SANDBOX_DRIVERS = "runs/drivers/"
 DML = re.compile(r"\b(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE|GRANT|REVOKE)\b", re.IGNORECASE)
 WRITE_MODES = re.compile(r"[wax+]")

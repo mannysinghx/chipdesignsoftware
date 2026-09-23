@@ -191,6 +191,105 @@ def cmd_compare_manifests(args: argparse.Namespace, services: Services, step: St
     return 0 if result["identical"] and result["spec_hash_equal"] else 4
 
 
+def _mission_line(view: dict) -> str:
+    usage = view["usage"]
+    return f"{view['mission_id']}  {view['kind']}  {view['status']}  route={view['model_route']} ({view['model']})  tokens={usage['tokens']} calls={usage['calls']}"
+
+
+def cmd_mission(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    import time
+    import uuid as uuid_module
+
+    from sqlalchemy import select as select_rows
+
+    from .agents.mission import advance, create_mission, mission_view
+    from .models import Mission
+
+    if args.action == "start":
+        try:
+            mission = create_mission(services, args.kind, actor=cli_actor(), route=args.route)
+        except (PermissionError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        step.target = ("mission", str(mission.mission_id))
+        print(_mission_line(mission_view(services, mission.mission_id)))
+        print(f"It waits for a person to launch it: aimem-platform approve mission {mission.mission_id} approved --reason '...'", file=sys.stderr)
+        return 0
+    if args.action == "worker":
+        runner = _runner(args, services)
+        worker_id = f"agents:{getpass.getuser()}"
+        services.writer.commit_event(services.db, feature="worker.lifecycle", action="started", source="worker", target=("worker", worker_id), details={"kind": "agent", "runner": runner.name})
+        advanced = 0
+        try:
+            while True:
+                with services.db.read() as session:
+                    running = session.scalars(select_rows(Mission.mission_id).where(Mission.status == "running").order_by(Mission.created_at)).all()
+                for mission_id in running:
+                    print(_mission_line(mission_view(services, advance(services, mission_id, runner=runner).mission_id)))
+                    advanced += 1
+                if args.once:
+                    break
+                time.sleep(args.poll)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            services.writer.commit_event(services.db, feature="worker.lifecycle", action="stopped", source="worker", target=("worker", worker_id), details={"kind": "agent", "advanced": advanced})
+        step.details["advanced"] = advanced
+        return 0
+    try:
+        mission_id = uuid_module.UUID(args.mission_id)
+        step.target = ("mission", str(mission_id))
+        if args.action == "advance":
+            advance(services, mission_id, runner=_runner(args, services))
+        view = mission_view(services, mission_id)
+    except (LookupError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if getattr(args, "json", False):
+        print(json.dumps(view, indent=2, sort_keys=True))
+        return 0
+    print(_mission_line(view))
+    for task in view["tasks"]:
+        waiting = f"  WAITING FOR {task['approval']['kind'].upper()} APPROVAL ({task['approval']['rule']})" if task["approval"] and "decided" not in task["approval"] else ""
+        halted = f"  {task['halt_reason']}" if task["halt_reason"] else ""
+        print(f"  {task['node']:<13} {task['state']:<21} {task['task_id']}  tokens={task['usage']['tokens']}{waiting}{halted}")
+    if view["bundle_sha256"]:
+        print(f"  evidence bundle: {view['bundle_sha256']}")
+    return 0
+
+
+def cmd_approvals(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    from .agents.mission import pending_approvals
+
+    items = pending_approvals(services)
+    step.details["pending"] = len(items)
+    for item in items:
+        where = item.get("node") or item.get("mission_kind")
+        print(f"{item['target']:<8} {item['id']}  {item['subject']:<7} {where:<13} {item['rule']}: {item['policy_reason']}")
+    if not items:
+        print("Nothing is waiting for a decision.")
+    return 0
+
+
+def cmd_approve(args: argparse.Namespace, services: Services, step: StepHandle) -> int:
+    import uuid as uuid_module
+
+    from .agents.mission import MissionConflict, decide
+    from .audit.context import ActorRef
+
+    # The person at this terminal decides; the event records them as a human, not as the CLI.
+    person = ActorRef("human", f"os:{getpass.getuser()}", None, authenticated=True)
+    try:
+        result = decide(services, target=args.target, target_id=uuid_module.UUID(args.id), decision=args.decision, reason=args.reason, actor=person)
+    except (LookupError, MissionConflict, ValueError, PermissionError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    step.target = (args.target, args.id)
+    step.details.update({"decision": args.decision, "result": result})
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 COMMANDS = {
     "create-user": cmd_create_user,
     "verify-chain": cmd_verify_chain,
@@ -203,6 +302,9 @@ COMMANDS = {
     "reconstruct": cmd_reconstruct,
     "manifest": cmd_manifest,
     "compare-manifests": cmd_compare_manifests,
+    "mission": cmd_mission,
+    "approvals": cmd_approvals,
+    "approve": cmd_approve,
 }
 
 
@@ -247,6 +349,29 @@ def build_parser() -> argparse.ArgumentParser:
     compare = commands.add_parser("compare-manifests", help="Compare two manifest files, e.g. from two machines")
     compare.add_argument("first")
     compare.add_argument("second")
+
+    mission = commands.add_parser("mission", help="Agent missions: start, show, advance, or run the mission worker")
+    mission_actions = mission.add_subparsers(dest="action", required=True)
+    start = mission_actions.add_parser("start", help="Create a mission; a person must launch it before anything runs")
+    start.add_argument("kind", choices=["t0-closure"])
+    start.add_argument("--route", choices=["local", "hosted"], help="Model route (default: AIMEM_AGENT_ROUTE, normally local)")
+    show = mission_actions.add_parser("show", help="Print a mission and its tasks")
+    show.add_argument("mission_id")
+    show.add_argument("--json", action="store_true")
+    step_forward = mission_actions.add_parser("advance", help="Advance a launched mission until it completes, halts, or waits for a person")
+    step_forward.add_argument("mission_id")
+    step_forward.add_argument("--runner", choices=["docker", "local"])
+    mission_worker = mission_actions.add_parser("worker", help="Advance every running mission, repeatedly")
+    mission_worker.add_argument("--once", action="store_true")
+    mission_worker.add_argument("--poll", type=float, default=5.0)
+    mission_worker.add_argument("--runner", choices=["docker", "local"])
+
+    commands.add_parser("approvals", help="List what is waiting for a person's decision")
+    approve = commands.add_parser("approve", help="Decide a mission launch, a plan, or a review, as the person at this terminal")
+    approve.add_argument("target", choices=["mission", "task"])
+    approve.add_argument("id")
+    approve.add_argument("decision", choices=["approved", "rejected", "needs_work"])
+    approve.add_argument("--reason", help="Required to reject or send back")
     return parser
 
 

@@ -186,3 +186,79 @@ class Artifact(Base):
     provenance_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+MISSION_STATUSES = ("pending_launch", "running", "awaiting_approval", "completed", "rejected", "halted")
+MODEL_ROUTES = ("local", "hosted", "scripted")
+TASK_STATES = (
+    "CREATED", "CONTEXT_VALIDATED", "PLAN_PROPOSED", "APPROVED_IF_REQUIRED", "RUNNING_TOOLS",
+    "EVIDENCE_COLLECTED", "SELF_CHECKED", "REVIEW_REQUIRED", "ACCEPTED", "REJECTED", "NEEDS_WORK",
+)
+
+
+class Mission(Base):
+    """One agent mission over the open-node DAG. Its history is its agent.mission, agent.task,
+    and approval.decide audit events, all in the mission's trace; this row is the current state."""
+
+    __tablename__ = "missions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending_launch','running','awaiting_approval','completed','rejected','halted')", name="status"
+        ),
+        CheckConstraint("model_route IN ('local','hosted','scripted')", name="model_route"),
+        CheckConstraint("trace_id ~ '^[0-9a-f]{32}$'", name="trace_id_format"),
+        Index("ix_missions_status_created_at", "status", "created_at"),
+    )
+
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by: Mapped[str] = mapped_column(Text, nullable=False)
+    trace_id: Mapped[str] = mapped_column(Text, nullable=False)
+    root_event_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    model_route: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    budget_json: Mapped[str] = mapped_column(Text, nullable=False)
+    usage_json: Mapped[str] = mapped_column(Text, nullable=False)
+    approval_json: Mapped[str | None] = mapped_column(Text)
+    bundle_sha256: Mapped[str | None] = mapped_column(Text)
+    summary_json: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    launched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentTask(Base):
+    """One node of a mission, driven through the task state machine (agents/fsm.py)."""
+
+    __tablename__ = "agent_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('CREATED','CONTEXT_VALIDATED','PLAN_PROPOSED','APPROVED_IF_REQUIRED','RUNNING_TOOLS',"
+            "'EVIDENCE_COLLECTED','SELF_CHECKED','REVIEW_REQUIRED','ACCEPTED','REJECTED','NEEDS_WORK')",
+            name="state",
+        ),
+        Index("ix_agent_tasks_mission_id_node", "mission_id", "node", unique=True),
+    )
+
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    mission_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("missions.mission_id"), nullable=False)
+    node: Mapped[str] = mapped_column(Text, nullable=False)
+    agent: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_version: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    root_event_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    depends_on_json: Mapped[str] = mapped_column(Text, nullable=False)
+    tools_json: Mapped[str] = mapped_column(Text, nullable=False)
+    worktree: Mapped[str] = mapped_column(Text, nullable=False)
+    context_json: Mapped[str | None] = mapped_column(Text)
+    plan_json: Mapped[str | None] = mapped_column(Text)
+    evidence_json: Mapped[str | None] = mapped_column(Text)
+    check_json: Mapped[str | None] = mapped_column(Text)
+    approval_json: Mapped[str | None] = mapped_column(Text)
+    usage_json: Mapped[str] = mapped_column(Text, nullable=False)
+    halt_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -16,13 +16,14 @@ import io
 import json
 import secrets
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import pytest
 from fastapi.testclient import TestClient
 
 from aimem_platform import cli
+from aimem_platform.agents import mission as missions
 from aimem_platform.app import create_app
 from aimem_platform.audit.context import ActorRef
 from aimem_platform.operations import coverage_report
@@ -31,6 +32,7 @@ from aimem_platform.runs.runners import LocalRunner
 from aimem_platform.runs.service import run_worker, toolchains_for
 from aimem_platform.services import Services, build_services
 
+from agents_support import APPROVER, evidence_task, launched_mission, scripted_gateway, selftest_roles
 from conftest import PlatformEnv, events_since, head_seq, upgrade
 
 
@@ -41,6 +43,7 @@ class Ctx:
     services: Services
     env: PlatformEnv
     monkeypatch: pytest.MonkeyPatch
+    cache: dict = field(default_factory=dict)
 
 
 def ui(ctx: Ctx, feature_id: str) -> None:
@@ -200,6 +203,49 @@ def run_reproduce(ctx: Ctx) -> None:
     assert reproduce_run(ctx.services, LocalRunner(), run_id, actor=actor)["identical"] is True
 
 
+def mission_submit(ctx: Ctx) -> None:
+    assert ctx.client.post("/api/missions", headers=ctx.login("engineer"), json={"kind": "t0-closure"}).status_code == 201
+
+
+def mission_query(ctx: Ctx) -> None:
+    viewer = ctx.login("viewer")
+    listed = ctx.client.get("/api/missions", headers=viewer).json()["missions"]
+    assert ctx.client.get(f"/api/missions/{listed[0]['mission_id']}", headers=viewer).status_code == 200
+
+
+def approval_inbox(ctx: Ctx) -> None:
+    assert ctx.client.get("/api/approvals", headers=ctx.login("viewer")).status_code == 200
+
+
+def approval_decide(ctx: Ctx) -> None:
+    engineer, approver = ctx.login("engineer"), ctx.login("approver")
+    for decision in ("approved", "rejected"):
+        mission_id = ctx.client.post("/api/missions", headers=engineer, json={"kind": "t0-closure"}).json()["mission"]["mission_id"]
+        body = {"target": "mission", "id": mission_id, "decision": decision, "reason": "coverage scenario"}
+        assert ctx.client.post("/api/approvals", headers=approver, json=body).status_code == 200
+
+
+def completed_mission(ctx: Ctx) -> None:
+    """One scripted mission, launched and accepted by people, covers agent.mission, agent.task, and evidence.bundle."""
+    if "mission" in ctx.cache:
+        return
+    selftest_roles(ctx.monkeypatch)
+    mission = launched_mission(ctx.services)
+    missions.advance(ctx.services, mission.mission_id, runner=LocalRunner(), gateway=scripted_gateway(ctx.services))
+    missions.decide(ctx.services, target="task", target_id=evidence_task(ctx.services, mission.mission_id).task_id, decision="approved", reason="coverage", actor=APPROVER)
+    ctx.cache["mission"] = missions.mission_view(ctx.services, mission.mission_id)
+    assert ctx.cache["mission"]["status"] == "completed"
+
+
+def budget_limit(ctx: Ctx) -> None:
+    tight = build_services(ctx.env.settings.model_copy(update={"task_max_tokens": 50}))
+    try:
+        mission = launched_mission(tight)
+        assert missions.advance(tight, mission.mission_id, runner=LocalRunner(), gateway=scripted_gateway(tight)).status == "halted"
+    finally:
+        tight.close()
+
+
 class _PresentDocker:
     """Docker stand-in where every pinned toolchain is already installed."""
 
@@ -248,6 +294,14 @@ SCENARIOS: dict[str, Callable[[Ctx], None]] = {
     "worker.lifecycle": worker_lifecycle,
     "run.reproduce": run_reproduce,
     "toolchain.provision": toolchain_provision,
+    "mission.submit": mission_submit,
+    "mission.query": mission_query,
+    "approval.inbox": approval_inbox,
+    "approval.decide": approval_decide,
+    "agent.mission": completed_mission,
+    "agent.task": completed_mission,
+    "evidence.bundle": completed_mission,
+    "budget.limit": budget_limit,
     **{feature_id: (lambda ctx, feature_id=feature_id: ui(ctx, feature_id)) for feature_id in (
         "ui.session", "ui.interaction", "ui.view", "ui.state", "ui.param",
         "ui.export", "ui.sweep", "ui.agent_replay", "ui.twin", "ui.error",

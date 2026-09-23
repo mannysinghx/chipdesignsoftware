@@ -1,7 +1,7 @@
 # AIMEM Design Studio: Self-Improving AI Chip Design Platform
 
 **Plan date:** 22 September 2026
-**Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phase 1 built and executed the same day, with all three exit criteria met (see [Phase 1 status](#phase-1-status-2026-09-22)). Phases 2 to 6 are proposed.
+**Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phase 1 built and executed the same day, with all three exit criteria met (see [Phase 1 status](#phase-1-status-2026-09-22)). Phase 2 increment 1 (agent runtime, model gateway, approvals) built the same day (see [Phase 2 status](#phase-2-status-2026-09-22-increment-1)). Phases 3 to 6 are proposed.
 **Extends:** `../AIMEM_X1_AI_DESIGN_PLATFORM_DEVELOPMENT_PLAN.md` (31 Aug 2026). That plan defines the product, evidence classes, and agent authority boundaries. This plan adds three things: a working backend and real agents, **recursive self-improvement (RSI)**, and **mandatory logging of every action and feature**.
 
 ---
@@ -219,6 +219,40 @@ Every phase has testable exit criteria. Durations assume 2–3 engineers plus ag
 - `aimem_t0_channel` reaches a DRC/LVS-clean sky130 GDS, with timing reported by OpenSTA. The evidence class is `executed (public PDK)` and is never labeled signoff.
 - The same inputs reproduce the same output hashes on two machines.
 - Every run is fully reconstructable from `audit_events` alone.
+
+### Phase 2 status (2026-09-22, increment 1)
+
+**Decision recorded (section 7, item 1):** local model by default, hosted optional. Agents use a local model through Ollama (`qwen3.6:35b`). The Claude route switches on only when the owner configures a key and a mission opts in with `--route hosted`.
+
+**Built:** `platform/aimem_platform/agents/`:
+- the task state machine, with every transition audited;
+- a policy module whose every decision carries a named rule;
+- a model gateway with hard token and spend ceilings, prompts and responses stored by hash, and JSON-schema output on both routes;
+- per-task worktrees as the only write path;
+- the eight open-node roles, with versioned prompts;
+- missions, approvals, and the evidence bundle.
+
+Also migration `0003_agents`, eight registered features with coverage scenarios, `POST/GET /api/missions`, `GET/POST /api/approvals`, and the `mission`/`approvals`/`approve` CLI commands.
+
+| Exit criterion | Status |
+| --- | --- |
+| A T0 mission runs end to end on real tools, produces an evidence bundle, and a person approves at the defined points | **Mechanics proven; owner run pending.** Dry run on the disposable test database: all 8 nodes, the local model, and the Docker-sandboxed lint, sim, formal, and physical adapters. It took 961 s: 16 model calls, 36,946 tokens, $0. The bundle's decision is `hold` and its class `planned`. The tools reproduced the known results: sim 20/21, formal 4/5, and the physical flow DRC 0 / LVS match / WNS −4.65 ns. On the dev database, the mission waits for its owner at each approval point: the launch, nodes whose tools found defects, and the bundle. Approvals there are the owner's; none are made for them |
+| Agents cannot write outside their worktree, proved by denial tests, with the denials logged | **Met.** `test_writes_outside_the_task_worktree_are_refused_and_logged` makes nine escape attempts (`..`, absolute, symlink, NUL, backslash, empty, `.`) and `test_a_planned_write_outside_the_worktree_is_refused_before_any_file_changes` tries a planned write to `rtl/`. Each is refused before the disk is touched and logged as a denied `policy_decision` (`worktree.write_scope`). |
+| Every model call and tool call in the mission is visible in the Activity trace tree | **Met.** Every mission event is in the mission's trace, and tool runs are filed under the agent's tool call. `test_a_t0_mission_runs_end_to_end_with_people_approving` checks all 16 `llm_call` events, the tool calls, and each run's lifecycle events in `/api/audit/traces/{trace}`, which the Activity view renders. |
+
+**What the dry runs taught, now fixed:**
+- The self-check could not see the notes it was checking; it now does (template `self_check/2`).
+- One shared parameter object let the model hand `rtl.lint` a path; each plan step is now pinned to its tool's own schema.
+- A found defect now always goes to a person (`review.tool_failures`), rather than depending on the model's reading.
+- A repeated identical tool step reuses the first run instead of executing twice.
+
+**Deviations and gaps:**
+- The gateway is a small internal module rather than LiteLLM. It needs no new dependency, and the audit and budget logic stays in one place.
+- Ollama serves the local model instead of vLLM, which has no Apple Silicon build.
+- Tasks run one at a time in DAG order; a per-mission advisory lock keeps it to one worker.
+- NEEDS_WORK ends a mission; there is no retry-from-node command yet.
+- Agent findings can be wrong. One dry run flagged 1,024 lanes × 8 Gb/s against the 1.024 TB/s spec, which is the same figure in bits versus bytes. They are recorded as the agent's advisory claims (`agent_findings`, class `planned`), never as evidence.
+- Not built yet (next increments): the validation-first RTL loop with patch worktrees, and the live Agent operations view with an approvals inbox. The replay remains, labeled as replay.
 
 ### Phase 2: Real agents on the existing 8-node DAG (≈4–6 weeks)
 

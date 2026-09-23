@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PLATFORM_ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +53,23 @@ class Settings(BaseSettings):
     docker_bin: str = "docker"
     keep_run_workspaces: bool = False
     run_log_chunk_bytes: int = 262_144
+
+    # Phase 2 agents. The local route (Ollama) is the default. The hosted route (Claude)
+    # is available only when a key is configured here and a mission opts in.
+    agent_route: str = "local"
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen3.6:35b"
+    ollama_context_tokens: int = 32_768
+    ollama_think: bool | None = False  # None omits the flag for models without a thinking mode
+    anthropic_api_key: SecretStr | None = None  # AIMEM_ANTHROPIC_API_KEY in platform/.env
+    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_model: str = "claude-opus-5"
+    anthropic_usd_per_mtok: tuple[float, float] = (5.0, 25.0)  # input, output
+    llm_timeout_s: float = 900.0
+    llm_max_output_tokens: int = 4_096
+    task_max_tokens: int = 60_000
+    mission_max_tokens: int = 400_000
+    mission_max_usd: float = 5.0
 
     @property
     def artifact_root(self) -> Path:

@@ -1,4 +1,4 @@
-# AIMEM platform: audit backbone (Phase 0)
+# AIMEM platform: audit backbone, tool runs, and agent missions
 
 The control plane behind AIMEM Design Studio. Phase 0 delivers the part every
 later phase depends on: **every action is logged, and the log cannot be quietly
@@ -93,6 +93,39 @@ platform/.venv/bin/aimem-platform run rtl.sim             # or submit from the R
 platform/.venv/bin/aimem-platform reproduce <run-id>
 ```
 
+## Agent missions (Phase 2)
+
+`aimem_platform/agents/` drives the eight open nodes of the orchestration DAG (contract, architecture, performance, RTL, formal, physical, multiphysics, evidence) as agent tasks. Agents plan, call typed tools, and check their evidence. The tools produce the evidence, and people approve at fixed points.
+
+**State machine** (`fsm.py`): `CREATED → CONTEXT_VALIDATED → PLAN_PROPOSED → APPROVED_IF_REQUIRED → RUNNING_TOOLS → EVIDENCE_COLLECTED → SELF_CHECKED → REVIEW_REQUIRED → ACCEPTED / REJECTED / NEEDS_WORK`. Every move is an `agent.task` event in the same transaction as the row change, and every event is in the mission's trace.
+
+**Human approval points** (`policy.py`):
+- a person launches every mission (model route and budget);
+- a person accepts the evidence bundle;
+- a person reviews any node whose tools report a fail or error verdict (a found defect), and any node whose agent reports its evidence incomplete;
+- any plan that would change design files needs approval (no Phase 2 tool does this yet).
+
+Every other gate is a logged policy decision with its rule. Boundary nodes (measured silicon, foundry execution, fabrication release) get no task, only a `boundary.hard_stop` decision. Agents cannot approve anything: `decide()` accepts human actors only.
+
+**Model gateway** (`gateway.py`): the default route is local, through Ollama (`qwen3.6:35b`). The hosted route (Claude through the Anthropic SDK) exists only when `AIMEM_ANTHROPIC_API_KEY` is set and a mission opts in with `--route hosted`. It needs `pip install -e 'platform[hosted]'`.
+
+Every call is checked against hard token ceilings per task and per mission, plus a spend ceiling for the hosted route. A call that could cross one is never made: it is logged as `budget.limit` `limit_hit` + `run_halted`. The exact prompt and response go to the artifact store, and the call is one `agent.task` `llm_call` event with its model, template version, tokens, cost estimate, and hashes. Output is constrained to a JSON schema on both routes.
+
+**Write scope** (`worktree.py`): an agent writes only through `worktree.write`, inside `var/worktrees/<mission>/<node>`. Absolute paths, `..`, symlinks, NUL bytes, and backslashes are refused before anything touches the disk, and each refusal is logged as a denied `policy_decision`. Tool runs read committed repository inputs through the Phase 1 adapters and are filed under the agent's tool call in the mission trace.
+
+**Evidence bundle** (`evidence.bundle`): each gate with its runs by hash, the failing verdicts, the hard stops, and a `hold` decision. Its evidence class is the weakest of its gates, because classes never upgrade.
+
+```bash
+platform/.venv/bin/aimem-platform mission start t0-closure            # waits for a person to launch it
+platform/.venv/bin/aimem-platform approvals                           # what is waiting for a decision
+platform/.venv/bin/aimem-platform approve mission <id> approved --reason "..."
+platform/.venv/bin/aimem-platform mission advance <id>                # or: mission worker
+platform/.venv/bin/aimem-platform mission show <id>
+platform/.venv/bin/aimem-platform approve task <task-id> approved --reason "..."   # plan or review
+```
+
+API: `POST /api/missions` (engineer), `GET /api/missions[/{id}]`, `GET /api/approvals`, and `POST /api/approvals` (approver; a reason is required to reject or send back).
+
 ## Adding a feature
 
 1. Register it in `features.yaml` with the actions it must emit (`events`) and may emit (`may_emit`).
@@ -115,6 +148,10 @@ Environment variables (or `platform/.env`) with the `AIMEM_` prefix:
 | `SESSION_TTL_HOURS` | `12` | |
 | `VAR_DIR` | `platform/var` | Artifacts, anchors, fallback log |
 | `OTEL_CONSOLE` | `false` | Print spans; a collector exporter is Phase 5 |
+| `AGENT_ROUTE` | `local` | Default model route for new missions (`local` or `hosted`) |
+| `OLLAMA_URL` / `OLLAMA_MODEL` | `http://127.0.0.1:11434` / `qwen3.6:35b` | Local route |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | none / `claude-opus-5` | Hosted route; enables it only for missions that opt in |
+| `TASK_MAX_TOKENS` / `MISSION_MAX_TOKENS` / `MISSION_MAX_USD` | `60000` / `400000` / `5.0` | Hard ceilings, checked before every model call |
 
 ## Known limits (tracked for later phases)
 
@@ -122,3 +159,4 @@ Environment variables (or `platform/.env`) with the `AIMEM_` prefix:
 - Rate limits are in-process; Phase 5 moves them to a shared store.
 - Appends are serialized by one advisory lock, which is ample for Phase 0 volumes. Batching and partitioning come with Phase 1 tool runs.
 - The UI buffer keeps the latest 1,000 events per page and 5,000 queued; if the API is unreachable longer than that, drops are counted and shown, not silent.
+- Agent tasks run one at a time in DAG order, and NEEDS_WORK ends a mission; a retry-from-this-node command, the validation-first RTL patch loop, and the live Agent operations view are the next Phase 2 increments.

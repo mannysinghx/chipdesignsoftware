@@ -124,7 +124,12 @@ def _media_type(path: str) -> str:
 # ---------------------------------------------------------------------------
 # submit
 # ---------------------------------------------------------------------------
-def submit_run(services: Services, adapter_id: str, params: dict | None, *, actor: ActorRef, reproduction_of: uuid.UUID | None = None) -> Run:
+def submit_run(
+    services: Services, adapter_id: str, params: dict | None, *, actor: ActorRef, reproduction_of: uuid.UUID | None = None,
+    trace: tuple[str, uuid.UUID] | None = None,
+) -> Run:
+    """Snapshot the adapter's inputs and queue a run. `trace` (trace id, parent event id) files the
+    run under a caller's trace, such as the agent tool call that asked for it."""
     adapter = get_adapter(adapter_id)
     typed = adapter.params_model(**(params or {}))
     repo = services.settings.repo_root
@@ -136,7 +141,7 @@ def submit_run(services: Services, adapter_id: str, params: dict | None, *, acto
         hashes[sandbox_path] = blob.sha256
         blobs[sandbox_path] = blob
     spec = adapter.build_spec(typed, hashes, toolchains_for(services))
-    return _enqueue(services, adapter, spec, blobs, actor=actor, git=git_state(repo, list(sources.values())), reproduction_of=reproduction_of)
+    return _enqueue(services, adapter, spec, blobs, actor=actor, git=git_state(repo, list(sources.values())), reproduction_of=reproduction_of, trace=trace)
 
 
 def submit_spec(services: Services, spec: RunSpec, *, actor: ActorRef, reproduction_of: uuid.UUID) -> Run:
@@ -150,9 +155,9 @@ def submit_spec(services: Services, spec: RunSpec, *, actor: ActorRef, reproduct
     return _enqueue(services, adapter, spec, blobs, actor=actor, git=None, reproduction_of=reproduction_of)
 
 
-def _enqueue(services, adapter: Adapter, spec: RunSpec, blobs: dict, *, actor: ActorRef, git: dict | None, reproduction_of) -> Run:
+def _enqueue(services, adapter: Adapter, spec: RunSpec, blobs: dict, *, actor: ActorRef, git: dict | None, reproduction_of, trace=None) -> Run:
     run_id = uuid.uuid4()
-    trace_id = new_trace_id()
+    trace_id, parent_event_id = trace if trace is not None else (new_trace_id(), None)
     now = utcnow()
     spec_document = spec.to_dict()
     run = Run(
@@ -188,6 +193,7 @@ def _enqueue(services, adapter: Adapter, spec: RunSpec, blobs: dict, *, actor: A
             actor=actor,
             target=("run", str(run_id)),
             trace_id=trace_id,
+            parent_event_id=parent_event_id,
             input_hash=f"sha256:{spec.spec_hash()}",
             details={
                 "adapter": adapter.id,
