@@ -17,6 +17,7 @@ from sqlalchemy import select
 from ..audit.canonical import dumps_canonical, sanitize
 from ..models import AuditEvent, Run, RunFile
 from ..services import Services
+from .normalize import scheme_of
 from .spec import RunSpec
 
 FINAL_ACTIONS = ("finished", "errored", "timed_out", "cancelled", "abandoned")
@@ -115,11 +116,36 @@ def compare_with_record(services: Services, run_id: uuid.UUID | str) -> dict:
 
 
 def compare_manifests(first: dict, second: dict) -> dict:
-    """Compare two reproducible-output maps (path -> {"sha256", "normalization"})."""
+    """Compare two reproducible-output maps (path -> {"sha256", "scheme", "normalization", ...}).
+
+    Hashes are compared only when both sides were normalized by the same scheme. A
+    path hashed under two different schemes is reported as incomparable, never as a
+    match, and `normalization` says what each side ignored.
+    """
     paths = sorted(set(first) | set(second))
-    mismatches = [
-        {"path": path, "first": first.get(path, {}).get("sha256"), "second": second.get(path, {}).get("sha256")}
-        for path in paths
-        if first.get(path, {}).get("sha256") != second.get(path, {}).get("sha256")
-    ]
-    return {"compared": len(paths), "matched": len(paths) - len(mismatches), "mismatches": mismatches, "identical": not mismatches}
+    mismatches, incomparable = [], []
+    for path in paths:
+        a, b = first.get(path), second.get(path)
+        if a is not None and b is not None and (scheme_of(a) is None or scheme_of(a) != scheme_of(b)):
+            incomparable.append({"path": path, "first": _scheme_label(a), "second": _scheme_label(b)})
+        elif (a or {}).get("sha256") != (b or {}).get("sha256"):
+            mismatches.append({"path": path, "first": (a or {}).get("sha256"), "second": (b or {}).get("sha256")})
+    return {
+        "compared": len(paths),
+        "matched": len(paths) - len(mismatches) - len(incomparable),
+        "mismatches": mismatches,
+        "incomparable": incomparable,
+        "normalization": {
+            path: sorted({entry["normalization"] for entry in (first.get(path), second.get(path)) if entry and "normalization" in entry})
+            for path in paths
+        },
+        "identical": not mismatches and not incomparable,
+    }
+
+
+def _scheme_label(entry: dict) -> str:
+    scheme = scheme_of(entry)
+    if scheme is None:
+        return f"unknown ({entry.get('normalization')!r})"
+    name, declared = scheme
+    return f"{name} declared {', '.join(declared)}" if declared else name

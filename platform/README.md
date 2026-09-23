@@ -79,7 +79,12 @@ A **run** executes one adapter's pinned tools in a sandbox and records everythin
 
 **Audit**: `run.lifecycle` records `queued` (with the complete spec), `claimed`, `started` (committed before the sandbox launches), `outputs_recorded` (every kept output by hash, plus normalized hashes for comparison), and `finished` / `errored` / `timed_out` / `cancelled`, all in one trace. `aimem-platform reconstruct <run>` and the Runs workspace rebuild a run from those events alone and compare them with the `runs` table.
 
-**Reproducibility**: `aimem-platform reproduce <run>` re-executes the spec recovered from the audit log and compares normalized outputs (GDSII dates zeroed; timing and memory keys removed from JSON). `manifest` and `compare-manifests` compare runs across machines; CI's `eda-runs` job is the second machine.
+**Reproducibility**: `aimem-platform reproduce <run>` re-executes the spec recovered from the audit log and compares normalized outputs. `manifest` and `compare-manifests` compare runs across machines; CI's `eda-runs` job is the second machine. Every normalized hash names its scheme (`runs/normalize.py`):
+
+- `gds-v1` zeroes the GDSII BGNLIB/BGNSTR date payloads, and `raw-v1` hashes the bytes as written.
+- `json-v2` hashes canonical JSON without two kinds of key. It drops keys whose trailing tokens are an ORFS METRICS2.1 runtime, CPU or peak-memory reading (`*__runtime__total`, `*__cpu__total`, `*__mem__peak`), a `timestamp`, a `date` or a `hostname`. It also drops the exact keys the adapter declares for that file (`/checks/uid` in `selftest.json`). Each entry lists the keys it dropped.
+
+Hashes are compared only when their schemes match. Any other file is reported as `incomparable`, never as identical. When a run was recorded under an older scheme, `reproduce` re-hashes its stored outputs under the current scheme before comparing, and says so. json-v1 matched substrings, so it could drop design keys such as `candidates` or `aimem_bank`. It dropped none from any output recorded so far, and those outputs hash identically under json-v2 (`docs/OPS_LOG.md`, 2026-09-22).
 
 ```bash
 platform/.venv/bin/aimem-platform toolchain install      # pinned image + hash-verified bundle

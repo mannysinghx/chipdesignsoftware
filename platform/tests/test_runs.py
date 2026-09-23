@@ -103,6 +103,22 @@ def test_reproduction_from_the_audit_log_gives_identical_outputs(local_services)
     with local_services.db.read() as session:
         twin = session.get(Run, uuid.UUID(result["reproduction_run"]))
     assert twin.reproduction_of == run.run_id and twin.spec_hash == run.spec_hash
+    assert result["renormalized"] == [] and result["normalization"]["selftest.json"] == ["json-v2: canonical JSON without /checks/uid"]
+
+
+def test_a_run_recorded_under_an_older_scheme_is_rehashed_not_compared_across_schemes(local_services, monkeypatch):
+    # Record the original the way runs were recorded before schemes were named. Its hash is
+    # zeros: it must never be compared with a json-v2 hash, so its value cannot matter.
+    monkeypatch.setattr(SelfTestAdapter, "normalized", lambda self, relative, data: {"sha256": "0" * 64, "normalization": "uid removed"})
+    run = run_selftest(local_services)
+    monkeypatch.undo()
+    before = head_seq(local_services)
+    result = reproduce_run(local_services, LocalRunner(), run.run_id, actor=ENGINEER)
+    assert result["identical"] and result["matched"] == 1 and result["incomparable"] == []
+    [note] = result["renormalized"]
+    assert note["path"] == "selftest.json" and note["recorded"] == "uid removed" and note["rehashed"] == "json-v2: canonical JSON without /checks/uid"
+    compared = find(events_since(local_services, before), feature="run.reproduce", action="compared")
+    assert compared[0]["result"] == "ok" and compared[0]["details"]["renormalized"] == result["renormalized"]
 
 
 class SleepAdapter(Adapter):
@@ -243,6 +259,8 @@ def test_gds_normalization_ignores_dates_but_not_geometry(tmp_path):
     assert first.read_bytes() != redated.read_bytes()
     assert gds_normalized_sha256(first) == gds_normalized_sha256(redated)
     assert gds_normalized_sha256(first) != gds_normalized_sha256(changed)
+    # gds-v1 is unchanged: pinned from the implementation that hashed every recorded GDS (commit 4ccff97).
+    assert gds_normalized_sha256(first) == "8649c86a656873b07bc96d9684b40d14f6026758966396dd999572ac2f8a8837"
 
 
 def test_physical_summary_parses_metrics_drc_and_lvs(tmp_path):

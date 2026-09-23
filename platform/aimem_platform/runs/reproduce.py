@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 from sqlalchemy import select
@@ -10,6 +11,8 @@ from ..audit.context import ActorRef
 from ..audit.writer import utcnow
 from ..models import Run
 from ..services import Services
+from .adapters import Adapter, get_adapter
+from .normalize import scheme_of
 from .reconstruct import compare_manifests, reconstruct_run
 from .service import execute_run, submit_spec, worker_identity
 from .spec import RunSpec
@@ -37,6 +40,36 @@ def run_inline(services: Services, runner, run: Run) -> Run:
     return execute_run(services, runner, claim_specific(services, run.run_id, runner_name=runner.name), keep_workspace=services.settings.keep_run_workspaces)
 
 
+def renormalize_recorded(services: Services, adapter: Adapter, outputs: dict, current: dict) -> tuple[dict, list[dict]]:
+    """A recorded run's reproducible outputs, re-hashed where `current` uses another scheme.
+
+    Hashes from two schemes are never compared. Every output a run kept is still in
+    the content-addressed store under the raw hash its outputs_recorded event lists,
+    so a file recorded under an older scheme is re-hashed from those bytes under the
+    current one. Each such file is listed with what happened; one whose bytes are gone
+    keeps its recorded entry and compares as incomparable.
+    """
+    raw = {item["path"]: item["sha256"] for item in outputs["outputs"]}
+    recorded = dict(outputs["reproducible"])
+    notes = []
+    for path, entry in outputs["reproducible"].items():
+        if path not in current or scheme_of(entry) == scheme_of(current[path]):
+            continue
+        digest = raw.get(path)
+        note = {"path": path, "recorded": entry.get("normalization"), "raw_sha256": digest}
+        if digest is None or not services.artifacts.exists(digest):
+            note["error"] = "the raw output is not in the artifact store"
+        else:
+            data = services.artifacts.path_for(digest).read_bytes()
+            if hashlib.sha256(data).hexdigest() != digest:
+                note["error"] = "the stored bytes do not match their hash"
+            else:
+                recorded[path] = adapter.normalized(path, data)
+                note["rehashed"] = recorded[path]["normalization"]
+        notes.append(note)
+    return recorded, notes
+
+
 def reproduce_run(services: Services, runner, run_id: uuid.UUID | str, *, actor: ActorRef) -> dict:
     original = reconstruct_run(services, run_id)  # audit log only
     if original["problems"]:
@@ -47,7 +80,9 @@ def reproduce_run(services: Services, runner, run_id: uuid.UUID | str, *, actor:
     reproduction = submit_spec(services, spec, actor=actor, reproduction_of=uuid.UUID(str(run_id)))
     finished = run_inline(services, runner, reproduction)
     repeated = reconstruct_run(services, reproduction.run_id)
-    comparison = compare_manifests(original["outputs"]["reproducible"], (repeated["outputs"] or {}).get("reproducible", {}))
+    current = (repeated["outputs"] or {}).get("reproducible", {})
+    recorded, renormalized = renormalize_recorded(services, get_adapter(spec.adapter), original["outputs"], current)
+    comparison = {**compare_manifests(recorded, current), "renormalized": renormalized}
     services.writer.commit_event(
         services.db,
         feature="run.reproduce",

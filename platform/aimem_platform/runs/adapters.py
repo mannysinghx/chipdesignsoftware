@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .normalize import file_sha256, gds_normalized_sha256, json_normalized_sha256
+from .normalize import normalize
 from .runners import Execution
 from .spec import Limits, RunSpec
 from .toolchains import Toolchains
@@ -55,6 +55,7 @@ class Adapter:
     limits: Limits = Limits()
     keep: tuple[str, ...] = ()  # output globs stored as artifacts
     reproducible_paths: tuple[str, ...] = ()  # output globs compared across runs
+    json_drops: dict[str, tuple[str, ...]] = {}  # reproducible JSON path -> exact keys (JSON pointers) it also ignores
 
     # -- inputs ---------------------------------------------------------------
     def inputs(self, params: BaseModel, repo: Path) -> dict[str, Path]:
@@ -102,20 +103,17 @@ class Adapter:
         return list(seen)
 
     def reproducible(self, out: Path) -> dict[str, dict]:
-        """path -> {"sha256": normalized hash, "normalization": what was ignored}"""
+        """path -> {"sha256": normalized hash, "scheme", "normalization": what was ignored, ...} (see normalize.py)"""
         result = {}
         for pattern in self.reproducible_paths:
             for path in sorted(out.glob(pattern)):
                 if path.is_file():
-                    result[str(path.relative_to(out))] = self.normalized(path)
+                    relative = str(path.relative_to(out))
+                    result[relative] = self.normalized(relative, path.read_bytes())
         return result
 
-    def normalized(self, path: Path) -> dict:
-        if path.suffix == ".gds":
-            return {"sha256": gds_normalized_sha256(path), "normalization": "GDSII BGNLIB/BGNSTR dates zeroed"}
-        if path.suffix == ".json":
-            return {"sha256": json_normalized_sha256(path), "normalization": "canonical JSON without timing, memory, host, or date keys"}
-        return {"sha256": file_sha256(path), "normalization": "none"}
+    def normalized(self, relative: str, data: bytes) -> dict:
+        return normalize(relative, data, self.json_drops.get(relative, ()))
 
     def summarize(self, out: Path, execution: Execution) -> Outcome:
         raise NotImplementedError
@@ -150,16 +148,13 @@ class SelfTestAdapter(Adapter):
     limits = Limits(cpus=1.0, memory_mb=512, pids=128, timeout_s=120)
     keep = ("selftest.json",)
     reproducible_paths = ("selftest.json",)
+    json_drops = {"selftest.json": ("/checks/uid",)}  # uid depends on the machine; everything else must match
 
     def inputs(self, params, repo):
         return {"driver/selftest.py": DRIVERS / "selftest.py"}
 
     def command(self, params):
         return ["python3", "/work/in/driver/selftest.py", "/work/out", "/work/in"]
-
-    def normalized(self, path: Path) -> dict:
-        # uid depends on the machine; everything else must match.
-        return {"sha256": json_normalized_sha256(path, frozenset({"uid"})), "normalization": "uid removed"}
 
     def summarize(self, out, execution):
         report = _read_json(out / "selftest.json")
@@ -304,11 +299,6 @@ class PhysicalAdapter(Adapter):
 
     def env(self, params, toolchains):
         return {**super().env(params, toolchains), "NUM_CORES": "4"}
-
-    def normalized(self, path: Path) -> dict:
-        if path.name == "physical.json":
-            return {"sha256": json_normalized_sha256(path), "normalization": "canonical JSON without timing, memory, host, or date keys"}
-        return super().normalized(path)
 
     def summarize(self, out, execution):
         report = _read_json(out / "physical.json")

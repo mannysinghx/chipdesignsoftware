@@ -180,8 +180,14 @@ def cmd_compare_manifests(args: argparse.Namespace, services: Services, step: St
     second = json.loads(Path(args.second).read_text())
     result = compare_manifests(first.get("reproducible", first), second.get("reproducible", second))
     result["spec_hash_equal"] = first.get("spec_hash") == second.get("spec_hash")
-    step.details.update({"identical": result["identical"], "spec_hash_equal": result["spec_hash_equal"]})
+    step.details.update({"identical": result["identical"], "spec_hash_equal": result["spec_hash_equal"], "incomparable": len(result["incomparable"])})
     print(json.dumps(result, indent=2))
+    if result["incomparable"]:
+        print(
+            f"{len(result['incomparable'])} file(s) were normalized under different schemes, so their hashes were not compared; "
+            "reproduce the older run to get a manifest under the current schemes.",
+            file=sys.stderr,
+        )
     return 0 if result["identical"] and result["spec_hash_equal"] else 4
 
 
