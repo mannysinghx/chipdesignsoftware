@@ -128,9 +128,17 @@ class LocalRunner:
     def isolation(self, spec: RunSpec) -> dict:
         return {"kind": "none", "note": "host process; for tests and machines without Docker"}
 
+    @staticmethod
+    def map_path(value: str, workdir: Path) -> str:
+        """Map a sandbox path (/work or /work/...) to the run directory. Only a leading /work
+        is mapped: host paths like /home/runner/work/... (GitHub Actions) must stay intact."""
+        if value == WORK or value.startswith(WORK + "/"):
+            return str(workdir) + value[len(WORK):]
+        return value
+
     def execute(self, spec: RunSpec, workdir: Path, log_path: Path, *, run_id: str, cancel_requested: Callable[[], bool]) -> Execution:
         def local(value: str) -> str:
-            return value.replace(WORK, str(workdir))
+            return self.map_path(value, workdir)
 
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
         env.update({key: local(value) for key, value in spec.env})

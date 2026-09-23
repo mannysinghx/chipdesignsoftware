@@ -341,3 +341,13 @@ def test_a_finalization_failure_ends_the_run_as_errored_not_stuck(local_services
     assert current.status == "errored" and "finalization failed" in current.error and "signoff" in current.error
     errored = find(events_since(local_services, before), feature="run.lifecycle", action="errored")
     assert errored and "Traceback" in errored[0]["error"]
+
+
+def test_local_runner_maps_only_a_leading_sandbox_path(tmp_path):
+    # Regression: GitHub Actions checks out under /home/runner/work/..., which a substring
+    # replace of "/work" mangled, so the interpreter path broke and runs errored.
+    assert LocalRunner.map_path("/work/out", tmp_path) == f"{tmp_path}/out"
+    assert LocalRunner.map_path("/work", tmp_path) == str(tmp_path)
+    host = "/home/runner/work/repo/platform/.venv/bin/python"
+    assert LocalRunner.map_path(host, tmp_path) == host
+    assert LocalRunner.map_path("/workspace/file", tmp_path) == "/workspace/file"
