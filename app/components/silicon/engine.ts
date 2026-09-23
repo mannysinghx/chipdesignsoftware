@@ -12,7 +12,7 @@ import {
   type Batch, type ChunkData, type ChunkKey, type FocusStop, type MaterialKey, type SectionPlane,
 } from '@/lib/silicon-macro';
 import { createDieTextures, createStackSideTexture } from './die-texture';
-import { FinishShader, createBackdrop, createChipMaterial, createDieSurfaceMaterial, createDieUniforms, createSharedUniforms, createStudioEnvironment, type LevelUniforms } from './materials';
+import { FinishShader, createBackdrop, createChipMaterial, createDieSurfaceMaterial, createDieUniforms, createSharedUniforms, createStudioEnvironment, type DieUniforms, type LevelUniforms } from './materials';
 
 export type SiliconHud = {
   stop: FocusStop;
@@ -115,9 +115,6 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const backdrop = createBackdrop();
   disposables.push(backdrop);
   scene.background = backdrop;
-  const environment = createStudioEnvironment(renderer);
-  disposables.push(environment);
-  scene.environment = environment.texture;
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 1000);
   const key = new THREE.DirectionalLight('#fff3e4', 1.25);
@@ -138,87 +135,100 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   disposables.push(unitBox, unitCylinder);
 
   // ------------------------------------------------------ die and package
-  const maxTexture = Math.min(renderer.capabilities.maxTextureSize, gpu.software ? 2048 : 4096);
-  const textures = createDieTextures(maxTexture, Math.min(8, renderer.capabilities.getMaxAnisotropy()));
-  disposables.push(textures.albedo, textures.roughnessMetal, textures.activity);
-  const dieUniforms = createDieUniforms(textures.activity);
-  const dieTop = createDieSurfaceMaterial(textures.albedo, textures.roughnessMetal, shared, dieUniforms);
-  const siliconSide = new THREE.MeshStandardMaterial({ color: '#16181d', metalness: 0.35, roughness: 0.38 });
-  const sectionSilicon = new THREE.MeshStandardMaterial({ color: '#5d636d', metalness: 0.3, roughness: 0.46 });
-  const interposerMaterial = new THREE.MeshPhysicalMaterial({ color: '#1a1d23', metalness: 0.45, roughness: 0.3, clearcoat: 0.45, clearcoatRoughness: 0.2, iridescence: 0.25, iridescenceThicknessRange: [300, 600] });
-  const stackSide = createStackSideTexture();
-  disposables.push(stackSide);
-  const stackSideMaterial = new THREE.MeshStandardMaterial({ map: stackSide, metalness: 0.2, roughness: 0.55 });
-  // Thinned-silicon backside on the stacks: near-black and glossy.
-  const stackTopMaterial = new THREE.MeshPhysicalMaterial({ color: '#0b0c0f', metalness: 0.35, roughness: 0.32, clearcoat: 0.4, clearcoatRoughness: 0.25 });
-  const substrateMaterial = new THREE.MeshPhysicalMaterial({ color: '#08110c', metalness: 0.05, roughness: 0.42, clearcoat: 0.75, clearcoatRoughness: 0.2 });
-  const capBodyMaterial = new THREE.MeshStandardMaterial({ color: '#3a3027', metalness: 0.05, roughness: 0.5 });
-  const capEndMaterial = new THREE.MeshStandardMaterial({ color: '#c8c8cc', metalness: 1, roughness: 0.32 });
-  disposables.push(dieTop, siliconSide, sectionSilicon, interposerMaterial, stackSideMaterial, stackTopMaterial, substrateMaterial, capBodyMaterial, capEndMaterial);
-
-  const dieGeometry = new THREE.BoxGeometry(DIE.width, DIE.thickness, DIE.depth);
-  // World-space UVs on the top face (group 2 = +y) so the textures register to die millimetres.
-  {
-    const position = dieGeometry.getAttribute('position');
-    const uv = dieGeometry.getAttribute('uv');
-    const group = dieGeometry.groups[2];
-    for (let k = group.start; k < group.start + group.count; k += 1) {
-      const vertex = dieGeometry.index ? dieGeometry.index.getX(k) : k;
-      uv.setXY(vertex, (position.getX(vertex) + DIE.width / 2) / DIE.width, (position.getZ(vertex) + DIE.depth / 2) / DIE.depth);
-    }
-    uv.needsUpdate = true;
-  }
-  disposables.push(dieGeometry);
-  const dieMesh = new THREE.Mesh(dieGeometry, [siliconSide, siliconSide, dieTop, siliconSide, siliconSide, siliconSide]);
-  dieMesh.position.y = -DIE.thickness / 2;
-  scene.add(dieMesh);
-
+  // Built in its own task by build(); section caps read staticBoxes.
   const staticBoxes: Array<{ rect: [number, number, number, number]; y: [number, number]; section: THREE.Material }> = [];
-  const addBox = (width: number, depth: number, y0: number, y1: number, x: number, z: number, material: THREE.Material | THREE.Material[], section: THREE.Material) => {
-    const geometry = new THREE.BoxGeometry(width, y1 - y0, depth);
-    disposables.push(geometry);
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(x, (y0 + y1) / 2, z);
-    scene.add(mesh);
-    staticBoxes.push({ rect: [x - width / 2, z - depth / 2, x + width / 2, z + depth / 2], y: [y0, y1], section });
-    return mesh;
-  };
-  staticBoxes.push({ rect: [-DIE.width / 2, -DIE.depth / 2, DIE.width / 2, DIE.depth / 2], y: [-DIE.thickness, 0], section: sectionSilicon });
-  const interposerTop = -DIE.thickness - 0.02;
-  addBox(PACKAGE_GEOMETRY.interposer.width * MM, PACKAGE_GEOMETRY.interposer.depth * MM, interposerTop - 0.1, interposerTop, 0, 0, interposerMaterial, sectionSilicon);
-  const stackSize = PACKAGE_GEOMETRY.dramTier.size * MM;
-  for (const placement of STACK_PLACEMENTS) {
-    addBox(stackSize, stackSize, interposerTop, 0.02, placement.x * MM, placement.z * MM, [stackSideMaterial, stackSideMaterial, stackTopMaterial, stackSideMaterial, stackSideMaterial, stackSideMaterial], stackSideMaterial);
-  }
-  const substrateTop = interposerTop - 0.1 - 0.09;
-  addBox(PACKAGE_GEOMETRY.substrate.width * MM, PACKAGE_GEOMETRY.substrate.depth * MM, substrateTop - 1.1, substrateTop, 0, 0, substrateMaterial, substrateMaterial);
-  {
-    // Die-side decoupling capacitors (0402) around the interposer.
-    const bodies: THREE.Matrix4[] = [];
-    const ends: THREE.Matrix4[] = [];
-    const halfW = (PACKAGE_GEOMETRY.interposer.width * MM) / 2 + 3.2;
-    const halfD = (PACKAGE_GEOMETRY.interposer.depth * MM) / 2 + 3.2;
-    const place = (x: number, z: number, rotate: boolean) => {
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotate ? Math.PI / 2 : 0);
-      bodies.push(new THREE.Matrix4().compose(new THREE.Vector3(x, substrateTop + 0.25, z), q, new THREE.Vector3(0.62, 0.5, 0.5)));
-      for (const side of [-1, 1]) {
-        const offset = new THREE.Vector3(side * 0.4, 0, 0).applyQuaternion(q);
-        ends.push(new THREE.Matrix4().compose(new THREE.Vector3(x + offset.x, substrateTop + 0.25, z + offset.z), q, new THREE.Vector3(0.2, 0.52, 0.52)));
-      }
+  let dieUniforms: DieUniforms | null = null;
+  function buildDieAndPackage() {
+    const maxTexture = Math.min(renderer.capabilities.maxTextureSize, gpu.software ? 2048 : 4096);
+    const textures = createDieTextures(maxTexture, Math.min(8, renderer.capabilities.getMaxAnisotropy()));
+    disposables.push(textures.albedo, textures.roughnessMetal, textures.activity);
+    const surfaceUniforms = createDieUniforms(textures.activity);
+    dieUniforms = surfaceUniforms;
+    const dieTop = createDieSurfaceMaterial(textures.albedo, textures.roughnessMetal, shared, surfaceUniforms, gpu.software);
+    // Software GL links every program on the main thread: package parts use
+    // the standard shader there instead of clearcoat and iridescence.
+    const packageMaterial = (options: THREE.MeshPhysicalMaterialParameters) => {
+      if (!gpu.software) return new THREE.MeshPhysicalMaterial(options);
+      const { color, metalness, roughness } = options;
+      return new THREE.MeshStandardMaterial({ color, metalness, roughness });
     };
-    for (let k = -8; k <= 8; k += 1) {
-      place(k * 3.6, -halfD, false);
-      place(k * 3.6, halfD, false);
+    const siliconSide = new THREE.MeshStandardMaterial({ color: '#16181d', metalness: 0.35, roughness: 0.38 });
+    const sectionSilicon = new THREE.MeshStandardMaterial({ color: '#5d636d', metalness: 0.3, roughness: 0.46 });
+    const interposerMaterial = packageMaterial({ color: '#1a1d23', metalness: 0.45, roughness: 0.3, clearcoat: 0.45, clearcoatRoughness: 0.2, iridescence: 0.25, iridescenceThicknessRange: [300, 600] });
+    const stackSide = createStackSideTexture();
+    disposables.push(stackSide);
+    const stackSideMaterial = new THREE.MeshStandardMaterial({ map: stackSide, metalness: 0.2, roughness: 0.55 });
+    // Thinned-silicon backside on the stacks: near-black and glossy.
+    const stackTopMaterial = packageMaterial({ color: '#0b0c0f', metalness: 0.35, roughness: 0.32, clearcoat: 0.4, clearcoatRoughness: 0.25 });
+    const substrateMaterial = packageMaterial({ color: '#08110c', metalness: 0.05, roughness: 0.42, clearcoat: 0.75, clearcoatRoughness: 0.2 });
+    const capBodyMaterial = new THREE.MeshStandardMaterial({ color: '#3a3027', metalness: 0.05, roughness: 0.5 });
+    const capEndMaterial = new THREE.MeshStandardMaterial({ color: '#c8c8cc', metalness: 1, roughness: 0.32 });
+    disposables.push(dieTop, siliconSide, sectionSilicon, interposerMaterial, stackSideMaterial, stackTopMaterial, substrateMaterial, capBodyMaterial, capEndMaterial);
+
+    const dieGeometry = new THREE.BoxGeometry(DIE.width, DIE.thickness, DIE.depth);
+    // World-space UVs on the top face (group 2 = +y) so the textures register to die millimetres.
+    {
+      const position = dieGeometry.getAttribute('position');
+      const uv = dieGeometry.getAttribute('uv');
+      const group = dieGeometry.groups[2];
+      for (let k = group.start; k < group.start + group.count; k += 1) {
+        const vertex = dieGeometry.index ? dieGeometry.index.getX(k) : k;
+        uv.setXY(vertex, (position.getX(vertex) + DIE.width / 2) / DIE.width, (position.getZ(vertex) + DIE.depth / 2) / DIE.depth);
+      }
+      uv.needsUpdate = true;
     }
-    for (let k = -7; k <= 7; k += 1) {
-      place(-halfW, k * 3.8, true);
-      place(halfW, k * 3.8, true);
+    disposables.push(dieGeometry);
+    const dieMesh = new THREE.Mesh(dieGeometry, [siliconSide, siliconSide, dieTop, siliconSide, siliconSide, siliconSide]);
+    dieMesh.position.y = -DIE.thickness / 2;
+    scene.add(dieMesh);
+
+    const addBox = (width: number, depth: number, y0: number, y1: number, x: number, z: number, material: THREE.Material | THREE.Material[], section: THREE.Material) => {
+      const geometry = new THREE.BoxGeometry(width, y1 - y0, depth);
+      disposables.push(geometry);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, (y0 + y1) / 2, z);
+      scene.add(mesh);
+      staticBoxes.push({ rect: [x - width / 2, z - depth / 2, x + width / 2, z + depth / 2], y: [y0, y1], section });
+      return mesh;
+    };
+    staticBoxes.push({ rect: [-DIE.width / 2, -DIE.depth / 2, DIE.width / 2, DIE.depth / 2], y: [-DIE.thickness, 0], section: sectionSilicon });
+    const interposerTop = -DIE.thickness - 0.02;
+    addBox(PACKAGE_GEOMETRY.interposer.width * MM, PACKAGE_GEOMETRY.interposer.depth * MM, interposerTop - 0.1, interposerTop, 0, 0, interposerMaterial, sectionSilicon);
+    const stackSize = PACKAGE_GEOMETRY.dramTier.size * MM;
+    for (const placement of STACK_PLACEMENTS) {
+      addBox(stackSize, stackSize, interposerTop, 0.02, placement.x * MM, placement.z * MM, [stackSideMaterial, stackSideMaterial, stackTopMaterial, stackSideMaterial, stackSideMaterial, stackSideMaterial], stackSideMaterial);
     }
-    const bodyMesh = new THREE.InstancedMesh(unitBox, capBodyMaterial, bodies.length);
-    bodies.forEach((matrix, index) => bodyMesh.setMatrixAt(index, matrix));
-    const endMesh = new THREE.InstancedMesh(unitBox, capEndMaterial, ends.length);
-    ends.forEach((matrix, index) => endMesh.setMatrixAt(index, matrix));
-    scene.add(bodyMesh, endMesh);
+    const substrateTop = interposerTop - 0.1 - 0.09;
+    addBox(PACKAGE_GEOMETRY.substrate.width * MM, PACKAGE_GEOMETRY.substrate.depth * MM, substrateTop - 1.1, substrateTop, 0, 0, substrateMaterial, substrateMaterial);
+    {
+      // Die-side decoupling capacitors (0402) around the interposer.
+      const bodies: THREE.Matrix4[] = [];
+      const ends: THREE.Matrix4[] = [];
+      const halfW = (PACKAGE_GEOMETRY.interposer.width * MM) / 2 + 3.2;
+      const halfD = (PACKAGE_GEOMETRY.interposer.depth * MM) / 2 + 3.2;
+      const place = (x: number, z: number, rotate: boolean) => {
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotate ? Math.PI / 2 : 0);
+        bodies.push(new THREE.Matrix4().compose(new THREE.Vector3(x, substrateTop + 0.25, z), q, new THREE.Vector3(0.62, 0.5, 0.5)));
+        for (const side of [-1, 1]) {
+          const offset = new THREE.Vector3(side * 0.4, 0, 0).applyQuaternion(q);
+          ends.push(new THREE.Matrix4().compose(new THREE.Vector3(x + offset.x, substrateTop + 0.25, z + offset.z), q, new THREE.Vector3(0.2, 0.52, 0.52)));
+        }
+      };
+      for (let k = -8; k <= 8; k += 1) {
+        place(k * 3.6, -halfD, false);
+        place(k * 3.6, halfD, false);
+      }
+      for (let k = -7; k <= 7; k += 1) {
+        place(-halfW, k * 3.8, true);
+        place(halfW, k * 3.8, true);
+      }
+      const bodyMesh = new THREE.InstancedMesh(unitBox, capBodyMaterial, bodies.length);
+      bodies.forEach((matrix, index) => bodyMesh.setMatrixAt(index, matrix));
+      const endMesh = new THREE.InstancedMesh(unitBox, capEndMaterial, ends.length);
+      ends.forEach((matrix, index) => endMesh.setMatrixAt(index, matrix));
+      scene.add(bodyMesh, endMesh);
+    }
+    return textures;
   }
 
   // --------------------------------------------------------- chunk meshes
@@ -285,18 +295,25 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     resident.set(id, { id, level, data, group, capGroup: null, capStamp: '', lastWanted: now, instances: data.instances });
   }
 
-  addResident('global', 0, generateGlobal(), performance.now());
-
   // ------------------------------------------------------------ post stack
-  const target = new THREE.WebGLRenderTarget(1, 1, { type: hdrTargets ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: gpu.software ? 0 : 4 });
-  const composer = new EffectComposer(renderer, target);
-  composer.addPass(new RenderPass(scene, camera));
   const bloomStrength = gpu.software ? 0.32 : 0.42;
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), bloomStrength, 0.5, hdrTargets ? 1.0 : 0.82);
-  composer.addPass(bloom);
-  composer.addPass(new OutputPass());
-  const finish = new ShaderPass(FinishShader);
-  composer.addPass(finish);
+  let bloomEnabled = true;
+  let post: { composer: EffectComposer; bloom: UnrealBloomPass | null; finish: ShaderPass; target: THREE.WebGLRenderTarget } | null = null;
+  function createPost() {
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: hdrTargets ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: gpu.software ? 0 : 4 });
+    const composer = new EffectComposer(renderer, target);
+    composer.addPass(new RenderPass(scene, camera));
+    // Bloom's blur chain is seven programs; software GL goes without it.
+    const bloom = gpu.software ? null : new UnrealBloomPass(new THREE.Vector2(1, 1), bloomStrength, 0.5, hdrTargets ? 1.0 : 0.82);
+    if (bloom) {
+      bloom.enabled = bloomEnabled;
+      composer.addPass(bloom);
+    }
+    composer.addPass(new OutputPass());
+    const finish = new ShaderPass(FinishShader);
+    composer.addPass(finish);
+    return { composer, bloom, finish, target };
+  }
 
   // -------------------------------------------------------------- controls
   const controls = new OrbitControls(camera, canvas);
@@ -447,9 +464,11 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const applySize = () => {
     renderer.setPixelRatio(dpr);
     renderer.setSize(cssWidth, cssHeight, false);
-    composer.setPixelRatio(dpr);
-    composer.setSize(cssWidth, cssHeight);
-    finish.uniforms.uResolution.value.set(cssWidth * dpr, cssHeight * dpr);
+    if (post) {
+      post.composer.setPixelRatio(dpr);
+      post.composer.setSize(cssWidth, cssHeight);
+      post.finish.uniforms.uResolution.value.set(cssWidth * dpr, cssHeight * dpr);
+    }
     camera.aspect = cssWidth / cssHeight;
     camera.updateProjectionMatrix();
   };
@@ -625,9 +644,11 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     headlight.target.position.copy(orbit);
     headlight.intensity += ((sectionOn ? 1.3 : 0.3) - headlight.intensity) * (1 - Math.exp(-dt * 4));
     // Head-on faces in a section converge at the vanishing point; less bloom there.
-    bloom.strength += ((sectionOn ? bloomStrength * 0.55 : bloomStrength) - bloom.strength) * (1 - Math.exp(-dt * 4));
-    dieUniforms.uMacroMix.value = THREE.MathUtils.smoothstep(distance, 0.02, 0.5);
-    dieUniforms.uBaseGlow.value = 1 - levelFade(LEVELS[1], distance);
+    if (post?.bloom) post.bloom.strength += ((sectionOn ? bloomStrength * 0.55 : bloomStrength) - post.bloom.strength) * (1 - Math.exp(-dt * 4));
+    if (dieUniforms) {
+      dieUniforms.uMacroMix.value = THREE.MathUtils.smoothstep(distance, 0.02, 0.5);
+      dieUniforms.uBaseGlow.value = 1 - levelFade(LEVELS[1], distance);
+    }
     return distance;
   }
 
@@ -644,13 +665,13 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
 
   const frame = (now: number) => {
     raf = window.requestAnimationFrame(frame);
-    if (contextLost) return;
+    if (contextLost || !post) return;
     const dt = Math.min(0.1, (now - last) / 1000);
     frameEma += ((now - last) - frameEma) * 0.08;
     frameWindow.push(now - last);
     last = now;
     shared.uTime.value = (now - startTime) / 1000;
-    finish.uniforms.uTime.value = shared.uTime.value;
+    post.finish.uniforms.uTime.value = shared.uTime.value;
 
     if (flight) stepFlight(now);
     else {
@@ -666,7 +687,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     stream(now, distance);
 
     renderer.info.reset();
-    composer.render(dt);
+    post.composer.render(dt);
 
     if (!readySent) {
       readySent = true;
@@ -715,7 +736,68 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       });
     }
   };
-  raf = window.requestAnimationFrame(frame);
+
+  // ------------------------------------------------------------ staged build
+  // Setup is long (HDR environment, die textures, global metal, shader
+  // compilation), so each step runs in a task of its own: the click or tab
+  // switch that opened the view completes at once, and leaving mid-build
+  // just stops at the next step.
+  let disposed = false;
+  const nextTask = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  async function build() {
+    await nextTask();
+    if (disposed) return;
+    const environment = createStudioEnvironment(renderer);
+    disposables.push(environment);
+    scene.environment = environment.texture;
+    await nextTask();
+    if (disposed) return;
+    const textures = buildDieAndPackage();
+    // Upload the die textures now, one per task, rather than in the first frame.
+    for (const texture of [textures.albedo, textures.roughnessMetal, textures.activity]) {
+      await nextTask();
+      if (disposed) return;
+      renderer.initTexture(texture);
+    }
+    await nextTask();
+    if (disposed) return;
+    addResident('global', 0, generateGlobal(), performance.now());
+    await nextTask();
+    if (disposed) return;
+    post = createPost();
+    applySize();
+    // Queue every program now. Where the driver compiles in parallel, wait
+    // for them without blocking; elsewhere they link on the first frame.
+    // (compileAsync would keep polling after a dispose.)
+    const programs = renderer.compile(scene, camera);
+    await nextTask();
+    if (disposed) return;
+    const programOf = (material: THREE.Material) => (renderer.properties.get(material) as { currentProgram?: { isReady: () => boolean; getUniforms: () => unknown } }).currentProgram;
+    if (renderer.extensions.has('KHR_parallel_shader_compile')) {
+      for (let tries = 0; tries < 300; tries += 1) {
+        let compiling = 0;
+        for (const material of programs) if (programOf(material)?.isReady() === false) compiling += 1;
+        if (compiling === 0) break;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 16));
+        if (disposed) return;
+      }
+    } else {
+      // No parallel compile: finish linking one program per task, so no single
+      // task waits on the whole set (the GPU process keeps compiling between).
+      for (const material of programs) {
+        programOf(material)?.getUniforms();
+        await nextTask();
+        if (disposed) return;
+      }
+    }
+    last = performance.now();
+    // Judge resolution only once frames are steady, not on the compile frames.
+    adaptAt = last + 2500;
+    raf = window.requestAnimationFrame(frame);
+  }
+  build().catch((reason: unknown) => {
+    if (!disposed) callbacks.onError(`The silicon scene failed to build: ${reason instanceof Error ? reason.message : String(reason)}`);
+  });
 
   // ------------------------------------------------------------- API
   return {
@@ -734,7 +816,8 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       shared.uGlowGain.value = on ? 1 : 0;
     },
     setBloom(on) {
-      bloom.enabled = on;
+      bloomEnabled = on;
+      if (post?.bloom) post.bloom.enabled = on;
     },
     setSection(on) {
       if (sectionOn === on) return;
@@ -760,6 +843,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       controls.autoRotate = on;
     },
     dispose() {
+      disposed = true;
       window.cancelAnimationFrame(raf);
       window.clearTimeout(gestureTimer);
       observer.disconnect();
@@ -780,9 +864,11 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
         if (object instanceof THREE.Mesh && object.geometry !== unitBox && object.geometry !== unitCylinder) object.geometry.dispose();
       });
       for (const item of disposables) item.dispose();
-      for (const pass of composer.passes) pass.dispose();
-      composer.dispose();
-      target.dispose();
+      if (post) {
+        for (const pass of post.composer.passes) pass.dispose();
+        post.composer.dispose();
+        post.target.dispose();
+      }
       renderer.dispose();
       renderer.forceContextLoss();
       canvas.remove();

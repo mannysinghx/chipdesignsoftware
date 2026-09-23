@@ -46,23 +46,34 @@ export default function SiliconMacroView() {
     if (!host) return;
     let engine: SiliconEngine | null = null;
     let cancelled = false;
+    let frame = 0;
+    let timer = 0;
     // three.js and the generators load with the view, not with the Studio.
+    // The engine starts after the loading state has painted, in a task of its
+    // own: a click that opens this view must finish before any GPU setup runs.
     import('./silicon/engine').then(({ createSiliconEngine }) => {
       if (cancelled) return;
-      try {
-        engine = createSiliconEngine(host, {
-          onHud: setHud,
-          onReady: () => setReady(true),
-          onError: setError,
-          onCameraGesture: (details) => getUiAudit()?.interaction('camera', details, { type: 'control', id: 'Silicon macro camera' }),
-        });
-        engineRef.current = engine;
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : String(reason));
-      }
+      frame = window.requestAnimationFrame(() => {
+        timer = window.setTimeout(() => {
+          if (cancelled) return;
+          try {
+            engine = createSiliconEngine(host, {
+              onHud: setHud,
+              onReady: () => setReady(true),
+              onError: setError,
+              onCameraGesture: (details) => getUiAudit()?.interaction('camera', details, { type: 'control', id: 'Silicon macro camera' }),
+            });
+            engineRef.current = engine;
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : String(reason));
+          }
+        }, 0);
+      });
     }, (reason: unknown) => setError(`The 3D engine failed to load: ${reason instanceof Error ? reason.message : String(reason)}`));
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
       engine?.dispose();
       engineRef.current = null;
     };
@@ -119,7 +130,7 @@ export default function SiliconMacroView() {
         <div className="silicon-toolbar" role="toolbar" aria-label="Silicon macro view controls">
           <button onClick={() => fly('die')} title="Fly back to the whole die">Fit</button>
           <button className={glow ? 'active' : ''} aria-pressed={glow} onClick={() => setGlow((value) => !value)} title="Animated data pulses on active wires">Glow</button>
-          <button className={bloom ? 'active' : ''} aria-pressed={bloom} onClick={() => setBloom((value) => !value)} title="Bloom on the glowing pathways">Bloom</button>
+          <button className={bloom && !hud?.software ? 'active' : ''} aria-pressed={bloom && !hud?.software} disabled={hud?.software} onClick={() => setBloom((value) => !value)} title={hud?.software ? 'Bloom is off on software rendering (no GPU acceleration)' : 'Bloom on the glowing pathways'}>Bloom</button>
           <button className={section ? 'active' : ''} aria-pressed={section} onClick={() => setSection((value) => !value)} title="Cut a vertical section through the target to show the layer stack and deep trenches">Cross-section</button>
           <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)}>Orbit</button>
           {fullscreenSupported && <button className={fullscreen ? 'active' : ''} aria-pressed={fullscreen} onClick={toggleFullscreen} title={fullscreen ? 'Exit full screen (Esc)' : 'Open the view full screen'}>{fullscreen ? '⤡ Exit' : '⤢ Full screen'}</button>}

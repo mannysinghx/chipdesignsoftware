@@ -157,19 +157,15 @@ export function createDieUniforms(activity: THREE.Texture): DieUniforms {
   };
 }
 
-export function createDieSurfaceMaterial(map: THREE.Texture, roughnessMetal: THREE.Texture, shared: SharedUniforms, die: DieUniforms) {
-  const material = new THREE.MeshPhysicalMaterial({
-    map,
-    roughnessMap: roughnessMetal,
-    metalnessMap: roughnessMetal,
-    roughness: 1,
-    metalness: 1,
-    clearcoat: 0.55,
-    clearcoatRoughness: 0.14,
-    iridescence: 0.42,
-    iridescenceIOR: 1.46,
-    iridescenceThicknessRange: [240, 720],
-  });
+/**
+ * `lite` drops clearcoat and thin-film iridescence (a much smaller shader)
+ * for software rendering, where every program links on the main thread.
+ */
+export function createDieSurfaceMaterial(map: THREE.Texture, roughnessMetal: THREE.Texture, shared: SharedUniforms, die: DieUniforms, lite = false) {
+  const surface = { map, roughnessMap: roughnessMetal, metalnessMap: roughnessMetal, roughness: 1, metalness: 1 };
+  const material = lite
+    ? new THREE.MeshStandardMaterial(surface)
+    : new THREE.MeshPhysicalMaterial({ ...surface, clearcoat: 0.55, clearcoatRoughness: 0.14, iridescence: 0.42, iridescenceIOR: 1.46, iridescenceThicknessRange: [240, 720] });
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shared, die);
     shader.fragmentShader = /* glsl */ `
