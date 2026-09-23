@@ -1,7 +1,7 @@
 # AIMEM Design Studio: Self-Improving AI Chip Design Platform
 
 **Plan date:** 22 September 2026
-**Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phases 1 to 6 are proposed.
+**Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phase 1 built and executed the same day (see [Phase 1 status](#phase-1-status-2026-09-22)). Phases 2 to 6 are proposed.
 **Extends:** `../AIMEM_X1_AI_DESIGN_PLATFORM_DEVELOPMENT_PLAN.md` (31 Aug 2026). That plan defines the product, evidence classes, and agent authority boundaries. This plan adds three things: a working backend and real agents, **recursive self-improvement (RSI)**, and **mandatory logging of every action and feature**.
 
 ---
@@ -183,6 +183,29 @@ Every phase has testable exit criteria. Durations assume 2–3 engineers plus ag
 - Tamper test: editing any audit row is detected by the verifier.
 - Every existing UI action in `page.tsx` emits an event (checked by a Playwright smoke test).
 - Existing `npm test`, lint, and build are unchanged and green.
+
+### Phase 1 status (2026-09-22)
+
+**Built:** the run system in `platform/aimem_platform/runs/` (pinned toolchains, Docker sandbox, five adapters, audited lifecycle, reconstruction, reproduction), new testbenches in `verification/cocotb/`, SymbiYosys jobs in `formal/`, the sky130hd flow config in `design/physical/orfs/`, the Runs workspace, live evidence in the Digital and Physical views, and a CI job that executes every adapter on a second machine.
+
+| Exit criterion | Evidence |
+| --- | --- |
+| `aimem_t0_channel` reaches a DRC/LVS-clean sky130 GDS with OpenSTA timing, labeled `executed (public PDK)` | Run `6f3d41e1` (physical.orfs, sandboxed, 6.4 min): **DRC 0 violations, LVS match**, GDS written; OpenSTA: fmax **169.5 MHz**, setup WNS −4.65 ns / TNS −630 ns at the 1.25 ns (800 MHz) contract clock, hold met; 4,883 cells, 95,861 µm² die. Evidence class `executed`, limitation "public PDK (sky130hd) proxy; not signoff and not the production node" |
+| Same inputs reproduce the same output hashes on two machines | Same machine: selftest, lint, and sim re-executed from their audit records with **identical** normalized outputs (formal and physical reproductions pending at the time of writing). Second machine: CI job `eda-runs` executes the same specs on native x86; comparison recorded in the ops log |
+| Every run is fully reconstructable from `audit_events` alone | `aimem-platform reconstruct` / the Runs workspace rebuild each run from its `run.lifecycle` events: all 7 checks (spec, spec hash, inputs, input availability, status, outputs, output manifest hash) consistent for every executed run; a test edits a `runs` row directly and the rebuild reports the disagreement |
+
+**What the tools found (executed evidence, not models):**
+- `aimem_t0_channel` reports `ecc_corrected` / `ecc_uncorrectable` in the cycle *before* `rsp_valid` and clears them when `rsp_valid` rises, so a consumer sampling response fields never sees ECC status. Found by simulation (`ecc_status_is_valid_with_the_response`, 20/21 tests pass) and independently by formal (`channel_protocol.sby` FAIL with a counterexample). Not fixed: RTL changes need the owner's approval.
+- SECDED is proven for **any** 64-bit word: every single-bit fault corrected, every double-bit fault detected (SymbiYosys prove + cover). The channel's liveness, refresh priority, and response scoreboard are proven unbounded (k-induction).
+- Verilator lint: 0 errors, 11 warnings (width truncations in lane repair, `active_write` unused because the channel has no storage yet).
+- Sky130 reaches 169.5 MHz; the 800 MHz contract belongs to the advanced node.
+
+**Deviations and gaps:**
+- cocotb runs on Icarus 14 instead of Verilator (no C++ build under x86 emulation); Verilator is used for lint.
+- ORFS's `kepler-formal` equivalence check crashes under Rosetta (SIGILL), so `LEC_CHECK=0` on every machine; netlist equivalence checking is open.
+- Icarus 14-devel with cocotb 2.1-dev segfaults at shutdown if a test ends with a pending write; testbenches settle one step after each test (`verification/cocotb/tb.py`).
+- Ramulator2 adapter deferred: the existing build is macOS-only and a Linux build fetches dependencies at configure time, which sandboxed runs cannot do.
+- A real defect was caught in production use: the physical adapter first reported evidence class `executed (public PDK)`, which the artifacts table rejects, leaving run `9c4d67e8` stuck in `running`. Fixed (qualifiers moved to provenance `limitations`; any finalize failure now ends a run as `errored`), regression-tested, and the stuck run recorded as `errored` through the audited path.
 
 ### Phase 1: Real tool execution (≈4–6 weeks)
 

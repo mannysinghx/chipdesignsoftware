@@ -18,6 +18,7 @@ Every number in the app carries an evidence class: **executed** (reproduced loca
 | Production X1 | Eight-stack, 16-high, 8,192-lane production target with performance states and routing pressure. |
 | Agent operations | Deterministic replay of the AI agent mission control plane. |
 | User guide | Role-aware end-to-end guide embedded in the app. |
+| Runs | Real tool execution (Phase 1): pinned, sandboxed runs of Verilator lint, cocotb simulation, SymbiYosys formal, and the OpenROAD sky130 flow through DRC/LVS, with live logs, content-addressed outputs, layout images, and a one-click rebuild of any run from the audit log. |
 | Activity | The audit log: every click, edit, sign-in, API request, CLI command, and migration, with trace trees, chain verification, and live feature coverage. |
 
 ## 3D design twin
@@ -72,6 +73,15 @@ npm run platform:dev    # API on :8100; open the Activity tab in the Studio
 ```
 
 Deployed without an API, the Studio keeps events in the page and labels them local-only.
+
+## Real tool execution (Phase 1)
+
+The platform runs the EDA tools itself, in a sandbox, from pinned toolchains (`openroad/orfs` by digest and the YosysHQ OSS CAD Suite by SHA-256). Each run's spec hash covers the image, toolchains, command, environment, and every input's content hash; its outputs are stored by hash; and it can be rebuilt from the audit log alone and re-executed to compare outputs. See [platform/README.md](platform/README.md#tool-runs-phase-1).
+
+```bash
+platform/.venv/bin/aimem-platform toolchain install   # requires Docker
+npm run platform:worker                                # executes runs queued from the Runs tab
+```
 
 ## Deployment
 
