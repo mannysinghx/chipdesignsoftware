@@ -266,7 +266,8 @@ try {
           action = 'type + blur';
           await element.first().fill('smoke');
           await element.first().evaluate((node) => node.blur());
-        } else if (info.audit === 'twin-label') {
+        } else if (info.audit === 'twin-label' || info.audit === 'silicon-label') {
+          // 3D labels track the camera, so they are never "stable" for a pointer click.
           action = 'dispatch click';
           await element.first().dispatchEvent('click');
         } else {

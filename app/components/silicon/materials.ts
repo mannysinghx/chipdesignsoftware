@@ -11,6 +11,8 @@ export type SharedUniforms = {
   uCrater: { value: THREE.Vector4 };
   uCraterSlope: { value: number };
   uCraterOn: { value: number };
+  /** Camera position and a radius around it that is never drawn (no near-plane slicing). */
+  uCull: { value: THREE.Vector4 };
 };
 
 export function createSharedUniforms(): SharedUniforms {
@@ -21,6 +23,7 @@ export function createSharedUniforms(): SharedUniforms {
     uCrater: { value: new THREE.Vector4(0, 0, 1, 0) },
     uCraterSlope: { value: 0.25 },
     uCraterOn: { value: 0 },
+    uCull: { value: new THREE.Vector4(0, 1e9, 0, 0) },
   };
 }
 
@@ -33,15 +36,15 @@ export type LevelUniforms = {
 // Physically based base colours (linear sRGB reflectance for the metals).
 type Surface = { color: [number, number, number]; metalness: number; roughness: number; tint: number };
 const SURFACES: Record<MaterialKey, Surface> = {
-  copper: { color: [0.955, 0.638, 0.538], metalness: 1, roughness: 0.2, tint: 0.16 },
-  gold: { color: [1.0, 0.766, 0.336], metalness: 1, roughness: 0.16, tint: 0.1 },
-  tungsten: { color: [0.52, 0.51, 0.53], metalness: 1, roughness: 0.34, tint: 0.12 },
-  gate: { color: [0.63, 0.56, 0.46], metalness: 0.95, roughness: 0.26, tint: 0.12 },
-  silicon: { color: [0.3, 0.32, 0.37], metalness: 0.45, roughness: 0.24, tint: 0.1 },
-  epiN: { color: [0.36, 0.43, 0.56], metalness: 0.3, roughness: 0.34, tint: 0.1 },
-  epiP: { color: [0.5, 0.42, 0.34], metalness: 0.3, roughness: 0.34, tint: 0.1 },
-  oxide: { color: [0.5, 0.58, 0.68], metalness: 0, roughness: 0.1, tint: 0.06 },
-  solder: { color: [0.78, 0.78, 0.8], metalness: 1, roughness: 0.3, tint: 0.08 },
+  copper: { color: [0.955, 0.638, 0.538], metalness: 1, roughness: 0.32, tint: 0.16 },
+  gold: { color: [1.0, 0.766, 0.336], metalness: 1, roughness: 0.28, tint: 0.1 },
+  tungsten: { color: [0.52, 0.51, 0.53], metalness: 1, roughness: 0.42, tint: 0.12 },
+  gate: { color: [0.63, 0.56, 0.46], metalness: 0.95, roughness: 0.34, tint: 0.12 },
+  silicon: { color: [0.3, 0.32, 0.37], metalness: 0.45, roughness: 0.34, tint: 0.1 },
+  epiN: { color: [0.36, 0.43, 0.56], metalness: 0.3, roughness: 0.4, tint: 0.1 },
+  epiP: { color: [0.5, 0.42, 0.34], metalness: 0.3, roughness: 0.4, tint: 0.1 },
+  oxide: { color: [0.5, 0.58, 0.68], metalness: 0, roughness: 0.18, tint: 0.06 },
+  solder: { color: [0.78, 0.78, 0.8], metalness: 1, roughness: 0.38, tint: 0.08 },
 };
 
 const CHIP_VERTEX_HEAD = /* glsl */ `
@@ -70,6 +73,7 @@ uniform vec3 uGlowColor;
 uniform vec4 uCrater;
 uniform float uCraterSlope;
 uniform float uCraterOn;
+uniform vec4 uCull;
 uniform float uFade;
 uniform float uPulsePeriod;
 uniform float uPulseRate;
@@ -92,6 +96,7 @@ if (uCraterOn > 0.5) {
   if (vChipWorld.y > uCrater.z + max(0.0, chipRho - uCrater.w) * uCraterSlope) discard;
 }
 if (uFade < 0.999 && chipBayer(gl_FragCoord.xy) > uFade) discard;
+if (distance(vChipWorld, uCull.xyz) < uCull.w) discard;
 `;
 
 const CHIP_GLOW = /* glsl */ `
@@ -101,7 +106,8 @@ if (vChip.z != 0.0) {
   float chipS = vChip.y * sign(vChip.z);
   float chipCycle = fract(uTime * uPulseRate - chipS / uPulsePeriod + vChip.w);
   float chipHead = smoothstep(0.0, 0.03, chipCycle) * (1.0 - smoothstep(0.03, 0.4, chipCycle));
-  totalEmissiveRadiance += uGlowColor * uGlowGain * abs(vChip.z) * (0.05 + 1.6 * chipHead * chipHead);
+  // Peak just over the bloom threshold: pulses glow softly without flaring white.
+  totalEmissiveRadiance += uGlowColor * uGlowGain * abs(vChip.z) * (0.05 + 2.1 * chipHead * chipHead);
 }
 `;
 
@@ -117,7 +123,7 @@ export function createChipMaterial(key: MaterialKey, shared: SharedUniforms, lev
     metalness: surface.metalness,
     roughness: surface.roughness,
     side: THREE.DoubleSide,
-    envMapIntensity: 1.05,
+    envMapIntensity: 1.0,
   });
   const uTintAmount = { value: surface.tint };
   material.onBeforeCompile = (shader) => {
@@ -165,7 +171,7 @@ export function createDieSurfaceMaterial(map: THREE.Texture, roughnessMetal: THR
   const surface = { map, roughnessMap: roughnessMetal, metalnessMap: roughnessMetal, roughness: 1, metalness: 1 };
   const material = lite
     ? new THREE.MeshStandardMaterial(surface)
-    : new THREE.MeshPhysicalMaterial({ ...surface, clearcoat: 0.55, clearcoatRoughness: 0.14, iridescence: 0.42, iridescenceIOR: 1.46, iridescenceThicknessRange: [240, 720] });
+    : new THREE.MeshPhysicalMaterial({ ...surface, clearcoat: 0.3, clearcoatRoughness: 0.3, iridescence: 0.35, iridescenceIOR: 1.46, iridescenceThicknessRange: [240, 720] });
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shared, die);
     shader.fragmentShader = /* glsl */ `
@@ -211,9 +217,20 @@ export function createStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.We
   };
   const hdr = (hex: string, intensity: number) => new THREE.Color(hex).multiplyScalar(intensity);
 
-  // Room: near-black walls and a faint warm floor bounce.
+  // Room: near-black walls, a soft floor bounce that undersides mirror when
+  // the chip is turned over, and a dim horizon band that vertical faces (cut
+  // faces in a cross-section) mirror, so both read as metal without a flash
+  // light at the camera (a coaxial light puts a hot spot mid-frame).
   add(new THREE.SphereGeometry(30, 48, 24), hdr('#0b0d12', 1), [0, 0, 0]);
-  add(new THREE.CircleGeometry(24, 48), hdr('#3a2e22', 0.7), [0, -12, 0], [0, 0, 0]);
+  add(new THREE.CircleGeometry(24, 48), hdr('#a8968a', 0.55), [0, -12, 0], [0, 0, 0]);
+  {
+    const geometry = new THREE.CylinderGeometry(25, 25, 8, 64, 1, true);
+    const material = new THREE.MeshBasicMaterial({ color: hdr('#9fb0c4', 0.3), side: THREE.DoubleSide });
+    const band = new THREE.Mesh(geometry, material);
+    band.position.y = 1;
+    scene.add(band);
+    disposables.push(geometry, material);
+  }
   // Light tent: a diffuse band well above the horizon all around,
   // modulated so the reflections keep some structure as the camera orbits.
   {
@@ -231,7 +248,7 @@ export function createStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.We
     }
     const map = new THREE.CanvasTexture(tent);
     map.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map, color: new THREE.Color(1.55, 1.5, 1.45), side: THREE.DoubleSide });
+    const material = new THREE.MeshBasicMaterial({ map, color: new THREE.Color(0.85, 0.82, 0.8), side: THREE.DoubleSide });
     // 27-62 degrees of elevation: grazing reflections see the dark room, not the tent.
     const geometry = new THREE.CylinderGeometry(10, 18, 10, 64, 1, true);
     const band = new THREE.Mesh(geometry, material);
@@ -239,14 +256,40 @@ export function createStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.We
     scene.add(band);
     disposables.push(map, material, geometry);
   }
-  // Overhead softbox and a coaxial ring light, like a macro rig.
-  add(new THREE.PlaneGeometry(14, 14), hdr('#fff7ee', 2.6), [0, 18, 2]);
-  add(new THREE.TorusGeometry(4.2, 0.7, 16, 64), hdr('#ffffff', 5.5), [0, 14, 7]);
+  // Overhead softbox and a coaxial ring light, like a macro rig. Flat metal
+  // seen from above mirrors this whole region, so a uniform hot panel washes
+  // the die out to white: the softbox is dim and falls off from its centre,
+  // which leaves overhead views a soft sheen with structure across it.
+  {
+    const size = 128;
+    const falloff = document.createElement('canvas');
+    falloff.width = size;
+    falloff.height = size;
+    const context = falloff.getContext('2d');
+    if (context) {
+      const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      gradient.addColorStop(0, '#ffffff');
+      gradient.addColorStop(0.55, '#8a8a8a');
+      gradient.addColorStop(1, '#262626');
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, size, size);
+    }
+    const map = new THREE.CanvasTexture(falloff);
+    map.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map, color: hdr('#fff7ee', 0.85), side: THREE.DoubleSide });
+    const geometry = new THREE.PlaneGeometry(18, 18);
+    const softbox = new THREE.Mesh(geometry, material);
+    softbox.position.set(0, 18, 2);
+    softbox.lookAt(0, 0, 0);
+    scene.add(softbox);
+    disposables.push(map, material, geometry);
+  }
+  add(new THREE.TorusGeometry(4.2, 0.7, 16, 64), hdr('#ffffff', 1.0), [0, 14, 7]);
   // Strip boxes and a rim, all 30+ degrees up: long highlights along the
   // wires without flaring the grazing reflections of wide metal.
-  add(new THREE.PlaneGeometry(3.2, 12), hdr('#ffe9d2', 6.5), [-14, 12, 4]);
-  add(new THREE.PlaneGeometry(3.2, 12), hdr('#e3efff', 4.6), [13, 11, -5]);
-  add(new THREE.PlaneGeometry(20, 2.4), hdr('#ffffff', 2.6), [0, 10, -16]);
+  add(new THREE.PlaneGeometry(3.2, 12), hdr('#ffe9d2', 2.8), [-14, 12, 4]);
+  add(new THREE.PlaneGeometry(3.2, 12), hdr('#e3efff', 2.0), [13, 11, -5]);
+  add(new THREE.PlaneGeometry(20, 2.4), hdr('#ffffff', 1.3), [0, 10, -16]);
   // Faint coloured accents low down: a hint of tint in edge reflections.
   add(new THREE.PlaneGeometry(6, 3), hdr('#39d6ff', 1.1), [-12, 3.5, -12]);
   add(new THREE.PlaneGeometry(6, 3), hdr('#ffae4a', 0.8), [13, 3.2, 11]);

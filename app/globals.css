@@ -923,6 +923,52 @@ small { font-size: 10px !important; }
 .silicon-evidence i { width: 7px; height: 7px; border-radius: 50%; background: #7189a6; }
 .silicon-status { position: absolute; z-index: 4; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 1px solid rgba(160,190,220,.18); border-radius: 10px; padding: 12px 16px; background: rgba(6,9,14,.8); color: #cfe0f0; font: 12px var(--font-geist-mono); text-align: center; }
 .silicon-status.error { max-width: min(480px, calc(100% - 32px)); border-color: rgba(255,150,110,.4); color: #ffd2c2; }
+/* Silicon macro: labels, hover read-out, cross-section ruler, legend, and selection. */
+.silicon-segment { display: inline-flex; align-items: center; gap: 2px; margin-left: 3px; padding-left: 7px; border-left: 1px solid rgba(160,190,220,.16); }
+.silicon-segment em { margin-right: 3px; color: #6f8aa5; font: 600 9px var(--font-geist-mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; }
+.silicon-toolbar .silicon-segment button { padding: 0 8px; }
+.silicon-toolbar .silicon-segment button.active { border-color: rgba(255,196,110,.42); background: rgba(255,190,90,.14); color: #fff2dc; }
+.silicon-labels { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.silicon-label { position: absolute; top: 0; left: 0; border: 1px solid rgba(110,215,255,.42); border-radius: 6px; padding: 3px 8px; background: rgba(5,10,16,.82); color: #e4f5ff; font: 600 10.5px/1.35 var(--font-geist-sans), Arial, sans-serif; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer; pointer-events: auto; will-change: transform; }
+.silicon-label::before { position: absolute; top: 100%; left: 6px; width: 1px; height: 14px; background: rgba(110,215,255,.6); content: ''; }
+.silicon-label::after { position: absolute; top: calc(100% + 11px); left: 4px; width: 5px; height: 5px; border-radius: 50%; background: #7fe3ff; box-shadow: 0 0 0 2px rgba(5,10,16,.75); content: ''; }
+.silicon-label[data-tone="region"] { border-color: rgba(255,200,120,.45); color: #fff0da; }
+.silicon-label[data-tone="region"]::before { background: rgba(255,200,120,.6); }
+.silicon-label[data-tone="region"]::after { background: #ffc978; }
+.silicon-label[data-tone="package"] { border-color: rgba(200,210,225,.45); color: #eef2f7; }
+.silicon-label[data-tone="package"]::before { background: rgba(200,210,225,.6); }
+.silicon-label[data-tone="package"]::after { background: #dfe6ee; }
+.silicon-label:hover, .silicon-label:focus-visible { border-color: #7fe3ff; background: rgba(12,34,48,.94); outline: none; }
+.silicon-label.selected { border-color: #43d8ff; background: rgba(18,70,96,.94); color: #fff; }
+.silicon-tooltip { position: absolute; top: 0; left: 0; z-index: 4; max-width: 300px; border: 1px solid rgba(160,200,230,.28); border-radius: 7px; padding: 6px 9px; background: rgba(5,9,14,.92); color: #eaf5ff; box-shadow: 0 8px 24px rgba(0,0,0,.4); pointer-events: none; }
+.silicon-tooltip b { display: block; font-size: 11.5px; font-weight: 650; }
+.silicon-tooltip span { display: block; margin-top: 2px; color: #8fa6bc; font: 10px var(--font-geist-mono); }
+.silicon-ruler { position: absolute; top: 0; right: 14px; z-index: 2; pointer-events: none; }
+.silicon-ruler-mark { position: absolute; top: 0; right: 0; }
+.silicon-ruler-mark i { display: block; width: 6px; border: 1px solid rgba(255,201,120,.72); border-left: 0; }
+.silicon-ruler-mark span { position: absolute; right: 12px; transform: translateY(-50%); border-radius: 4px; padding: 1px 6px; background: rgba(5,9,14,.74); color: #ffe3b8; font: 600 10px var(--font-geist-mono); white-space: nowrap; }
+.silicon-legend, .silicon-selection { position: absolute; z-index: 3; overflow: auto; border: 1px solid rgba(160,190,220,.14); border-radius: 12px; background: rgba(6,9,14,.76); box-shadow: 0 12px 34px rgba(0,0,0,.35); backdrop-filter: blur(10px); }
+.silicon-legend { top: 86px; left: 16px; width: 250px; max-height: calc(100% - 270px); padding: 10px 12px; }
+.silicon-legend header, .silicon-selection header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.silicon-legend header button, .silicon-selection header button { width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: #8fa6bc; font-size: 15px; line-height: 1; cursor: pointer; }
+.silicon-legend header button:hover, .silicon-selection header button:hover { background: rgba(120,170,220,.14); color: #eef5fb; }
+.silicon-legend ul { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none; }
+.silicon-legend li { display: grid; grid-template-columns: 12px 1fr; gap: 9px; align-items: start; }
+.silicon-legend li i { width: 12px; height: 12px; margin-top: 2px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
+.silicon-legend li i.glow { box-shadow: 0 0 0 2px rgba(56,219,255,.55), 0 0 9px rgba(56,219,255,.65); }
+.silicon-legend b { display: block; color: #e6f1fb; font-size: 11px; font-weight: 620; }
+.silicon-legend small { display: block; margin-top: 1px; color: #7f95ab; font: 9.5px var(--font-geist-mono); }
+.silicon-legend p { margin: 10px 0 0; color: #7f95ab; font-size: 10px; }
+.silicon-selection { top: 86px; right: 16px; width: 300px; max-height: calc(100% - 210px); border-color: rgba(80,210,255,.32); padding: 12px 14px; background: rgba(6,10,16,.86); }
+.silicon-selection strong { display: block; margin-top: 4px; color: #f2f9ff; font-size: 15px; font-weight: 650; }
+.silicon-selection > p { margin: 6px 0 0; color: #a9bdd0; font-size: 11.5px; line-height: 1.45; }
+.silicon-selection dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; margin: 10px 0 0; font-size: 11px; }
+.silicon-selection dt { padding-top: 2px; color: #6f8aa5; font: 600 9px var(--font-geist-mono); letter-spacing: .08em; text-transform: uppercase; }
+.silicon-selection dd { margin: 0; color: #dbe8f4; }
+.silicon-selection ul { margin: 10px 0 0; padding-left: 16px; color: #a9bdd0; font-size: 11px; line-height: 1.45; }
+.silicon-zoom-to { height: 28px; margin-top: 12px; border: 1px solid rgba(90,220,255,.42); border-radius: 7px; padding: 0 12px; background: rgba(40,160,210,.18); color: #e2f7ff; font-size: 11px; font-weight: 650; cursor: pointer; }
+.silicon-zoom-to:hover { background: rgba(40,160,210,.3); }
+.silicon-underside { display: inline-block; margin-top: 8px; border-radius: 99px; padding: 3px 9px; background: rgba(255,201,120,.14); color: #ffd79a; font: 600 10px var(--font-geist-mono); }
 @media (max-width: 980px) { .silicon-help { display: none; } .silicon-perf span:nth-child(n+4) { display: none; } }
 @media (max-width: 720px) {
   .silicon-shell { height: calc(100vh - 110px); min-height: 520px; }
@@ -932,4 +978,7 @@ small { font-size: 10px !important; }
   .silicon-hud { right: 10px; bottom: 10px; left: 10px; max-width: none; padding: 10px 12px; }
   .silicon-meta { top: 104px; right: 10px; bottom: auto; }
   .silicon-perf span { display: none; }
+  .silicon-legend { top: auto; right: 10px; bottom: 132px; left: 10px; width: auto; max-height: 34%; }
+  .silicon-selection { top: auto; right: 10px; bottom: 132px; left: 10px; width: auto; max-height: 46%; }
+  .silicon-ruler { right: 6px; }
 }

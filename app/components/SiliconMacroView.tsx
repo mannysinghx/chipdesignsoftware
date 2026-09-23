@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { DIE, PHYS, PRESETS, SILICON_EVIDENCE, TILES } from '@/lib/silicon-macro';
+import { legendFor } from '@/lib/silicon-parts';
 import { getUiAudit } from '@/lib/ui-audit';
 import { useTrackedValue } from '@/lib/ui-audit-react';
-import type { SiliconEngine, SiliconHud } from './silicon/engine';
+import type { LabelMode, SiliconEngine, SiliconHud, SiliconSelection } from './silicon/engine';
 
 // Safari still ships only the prefixed Fullscreen API.
 type FullscreenElement = HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void };
@@ -18,6 +19,16 @@ const compact = (value: number) => (value >= 1e6 ? `${(value / 1e6).toFixed(2)}M
 // The routing stop sits between the Tensor PE and Cells presets.
 const ladderId = (stopId: string) => (stopId === 'routing' ? 'block' : stopId);
 const DIE_CAPTION = `Accelerator die · ${DIE.width.toFixed(1)} × ${DIE.depth.toFixed(1)} mm · ${TILES.length} compute tiles · ${PHYS.length} memory PHYs`;
+const LABEL_MODES: Array<{ id: LabelMode; label: string; title: string }> = [
+  { id: 'all', label: 'All', title: 'Label the regions and every kind of wire, via, and device in view' },
+  { id: 'key', label: 'Key', title: 'Label only the main regions and parts' },
+  { id: 'off', label: 'Off', title: 'Hide the labels (hover still names what is under the cursor)' },
+];
+const VIEW_NOTE: Record<SiliconHud['view'], string | null> = {
+  top: null,
+  underside: 'Underside · BGA balls face the board',
+  backside: 'Backside view · package hidden, looking up through the silicon',
+};
 
 export default function SiliconMacroView() {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -33,6 +44,10 @@ export default function SiliconMacroView() {
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [destination, setDestination] = useState('die');
+  const [labelMode, setLabelMode] = useState<LabelMode>('all');
+  // Open by default except on phone-width screens, where it would cover a third of the view.
+  const [legendOpen, setLegendOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches);
+  const [selection, setSelection] = useState<SiliconSelection | null>(null);
 
   useTrackedValue('ui.state', 'changed', 'silicon.glow', glow);
   useTrackedValue('ui.state', 'changed', 'silicon.bloom', bloom);
@@ -40,6 +55,9 @@ export default function SiliconMacroView() {
   useTrackedValue('ui.state', 'changed', 'silicon.autoRotate', autoRotate);
   useTrackedValue('ui.state', 'changed', 'silicon.fullscreen', fullscreen);
   useTrackedValue('ui.state', 'changed', 'silicon.destination', destination);
+  useTrackedValue('ui.state', 'changed', 'silicon.labels', labelMode);
+  useTrackedValue('ui.state', 'changed', 'silicon.legend', legendOpen);
+  useTrackedValue('ui.state', 'changed', 'silicon.selection', selection ? `${selection.title} (${selection.layer})` : null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -62,6 +80,7 @@ export default function SiliconMacroView() {
               onReady: () => setReady(true),
               onError: setError,
               onCameraGesture: (details) => getUiAudit()?.interaction('camera', details, { type: 'control', id: 'Silicon macro camera' }),
+              onSelect: setSelection,
             });
             engineRef.current = engine;
           } catch (reason) {
@@ -83,6 +102,7 @@ export default function SiliconMacroView() {
   useEffect(() => { engineRef.current?.setBloom(bloom); }, [bloom, ready]);
   useEffect(() => { engineRef.current?.setSection(section); }, [section, ready]);
   useEffect(() => { engineRef.current?.setAutoRotate(autoRotate); }, [autoRotate, ready]);
+  useEffect(() => { engineRef.current?.setLabelMode(labelMode); }, [labelMode, ready]);
 
   useEffect(() => {
     const shell = shellRef.current as FullscreenElement | null;
@@ -116,6 +136,9 @@ export default function SiliconMacroView() {
   };
 
   const activeRung = hud ? ladderId(hud.stop.id) : 'die';
+  const stopId = hud?.stop.id ?? 'die';
+  const legend = legendFor(stopId);
+  const viewNote = hud ? VIEW_NOTE[hud.view] : null;
 
   return (
     <section className={`silicon-shell${fullscreen ? ' fullscreen' : ''}`} ref={shellRef} data-audit-area="Silicon macro">
@@ -132,7 +155,14 @@ export default function SiliconMacroView() {
           <button className={glow ? 'active' : ''} aria-pressed={glow} onClick={() => setGlow((value) => !value)} title="Animated data pulses on active wires">Glow</button>
           <button className={bloom && !hud?.software ? 'active' : ''} aria-pressed={bloom && !hud?.software} disabled={hud?.software} onClick={() => setBloom((value) => !value)} title={hud?.software ? 'Bloom is off on software rendering (no GPU acceleration)' : 'Bloom on the glowing pathways'}>Bloom</button>
           <button className={section ? 'active' : ''} aria-pressed={section} onClick={() => setSection((value) => !value)} title="Cut a vertical section through the target to show the layer stack and deep trenches">Cross-section</button>
-          <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)}>Orbit</button>
+          <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)} title="Turn the chip slowly; drag any time to rotate it yourself">Orbit</button>
+          <span className="silicon-segment" role="group" aria-label="Labels">
+            <em>Labels</em>
+            {LABEL_MODES.map((mode) => (
+              <button key={mode.id} className={labelMode === mode.id ? 'active' : ''} aria-pressed={labelMode === mode.id} onClick={() => setLabelMode(mode.id)} title={mode.title}>{mode.label}</button>
+            ))}
+          </span>
+          <button className={legendOpen ? 'active' : ''} aria-pressed={legendOpen} onClick={() => setLegendOpen((value) => !value)} title="What each colour and structure is at this zoom">Legend</button>
           {fullscreenSupported && <button className={fullscreen ? 'active' : ''} aria-pressed={fullscreen} onClick={toggleFullscreen} title={fullscreen ? 'Exit full screen (Esc)' : 'Open the view full screen'}>{fullscreen ? '⤡ Exit' : '⤢ Full screen'}</button>}
         </div>
         <nav className="silicon-ladder" aria-label="Zoom ladder: fly to a scale">
@@ -144,12 +174,49 @@ export default function SiliconMacroView() {
         </nav>
       </div>
 
-      <div className="silicon-hud">
+      {legendOpen && (
+        <aside className="silicon-legend" data-silicon-occluder aria-label={`Legend: what the view shows at the ${hud?.stop.label ?? 'Die'} scale`}>
+          <header>
+            <span className="silicon-kicker">Legend · {hud?.stop.label ?? 'Die'}</span>
+            <button onClick={() => setLegendOpen(false)} aria-label="Close the legend">×</button>
+          </header>
+          <ul>
+            {legend.map((item) => (
+              <li key={item.id} title={item.role}>
+                <i className={item.glow ? 'glow' : ''} style={{ background: item.swatch }} />
+                <span><b>{item.title}</b><small>{item.layer}</small></span>
+              </li>
+            ))}
+          </ul>
+          <p>Hover anything to name it; click it for details.</p>
+        </aside>
+      )}
+
+      {selection && (
+        <aside className="silicon-selection" data-silicon-occluder aria-label={`Selected: ${selection.title}`} aria-live="polite">
+          <header>
+            <span className="silicon-kicker">{selection.layer}</span>
+            <button onClick={() => engineRef.current?.clearSelection()} aria-label="Clear the selected part">×</button>
+          </header>
+          <strong>{selection.title}</strong>
+          <p>{selection.role}</p>
+          <dl>
+            {selection.material && <><dt>Material</dt><dd>{selection.material}</dd></>}
+            <dt>Size</dt><dd>{selection.size}</dd>
+            <dt>Where</dt><dd>{selection.location.join(' › ')}</dd>
+          </dl>
+          {selection.notes.length > 0 && <ul>{selection.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
+          <button className="silicon-zoom-to" onClick={() => engineRef.current?.zoomToSelection()}>Zoom to it</button>
+        </aside>
+      )}
+
+      <div className="silicon-hud" data-silicon-occluder>
         {/* Announced only when the scale stop changes, not on every zoom tick. */}
         <div aria-live="polite">
           <span className="silicon-kicker">{hud ? hud.stop.label : 'Die'}</span>
           <strong>{hud ? hud.stop.layer : 'Global power mesh, seal ring, and I/O pads'}</strong>
         </div>
+        {viewNote && <span className="silicon-underside">{viewNote}</span>}
         <p>{!hud || hud.stop.id === 'package' || hud.stop.id === 'die' ? DIE_CAPTION : hud.location.join(' › ')}</p>
         {hud && (
           <div className="silicon-scale" aria-label={`Scale bar: ${hud.scale.label}`}>
@@ -159,7 +226,7 @@ export default function SiliconMacroView() {
         )}
       </div>
 
-      <div className="silicon-meta">
+      <div className="silicon-meta" data-silicon-occluder>
         <div className="silicon-perf" aria-label="Rendering performance">
           <b className={hud && hud.fps < 50 ? 'slow' : ''}>{hud ? `${hud.fps.toFixed(0)} fps` : '— fps'}</b>
           <span>{hud ? `${hud.frameMs.toFixed(1)} ms` : ''}</span>
@@ -173,7 +240,7 @@ export default function SiliconMacroView() {
         </div>
       </div>
 
-      <div className="silicon-help">Drag to orbit · right-drag to pan · scroll or pinch to zoom toward the cursor · double-click to dive, shift-double-click to back out</div>
+      <div className="silicon-help">Drag to rotate a full 360°, over the top and underneath · right-drag to pan · scroll or pinch to zoom · hover or click any part to identify it · double-click to dive</div>
 
       {!ready && !error && <div className="silicon-status">Growing the silicon…</div>}
       {error && <div className="silicon-status error" role="alert">{error}</div>}

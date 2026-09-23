@@ -5,14 +5,20 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { PACKAGE_GEOMETRY, SCENE_MM_PER_UNIT, STACK_PLACEMENTS } from '@/lib/package-connectors';
+import { CONNECTOR_SAMPLING, PACKAGE_GEOMETRY, SCENE_MM_PER_UNIT, STACK_PLACEMENTS } from '@/lib/package-connectors';
 import {
   DIE, FLOATS_PER_INSTANCE, LEVELS, MATERIAL_KEYS, PRESETS, STACK_MAX,
   chunkId, clipPlanesFor, craterFor, describeLocation, focusStopFor, generateChunk, generateGlobal, levelFade, scaleBar, sectionCaps, snapSection, windowChunks, zoomPanPath,
   type Batch, type ChunkData, type ChunkKey, type FocusStop, type MaterialKey, type SectionPlane,
 } from '@/lib/silicon-macro';
+import { PARTS, type PartId } from '@/lib/silicon-parts';
+import { createAnnotations, type Anchor, type LabelMode } from './annotations';
 import { createDieTextures, createStackSideTexture } from './die-texture';
+import { createInspector, describeTarget, type SiliconSelection, type StaticAnchor, type Target } from './inspector';
 import { FinishShader, createBackdrop, createChipMaterial, createDieSurfaceMaterial, createDieUniforms, createSharedUniforms, createStudioEnvironment, type DieUniforms, type LevelUniforms } from './materials';
+
+export type { LabelMode } from './annotations';
+export type { SiliconSelection } from './inspector';
 
 export type SiliconHud = {
   stop: FocusStop;
@@ -29,6 +35,8 @@ export type SiliconHud = {
   dpr: number;
   gpu: string;
   software: boolean;
+  /** From above, from below the package, or from below at chip zoom (package hidden). */
+  view: 'top' | 'underside' | 'backside';
 };
 
 export type SiliconEngineCallbacks = {
@@ -36,6 +44,7 @@ export type SiliconEngineCallbacks = {
   onReady: () => void;
   onError: (message: string) => void;
   onCameraGesture: (details: Record<string, unknown>) => void;
+  onSelect: (selection: SiliconSelection | null) => void;
 };
 
 export type SiliconEngine = {
@@ -44,14 +53,26 @@ export type SiliconEngine = {
   setBloom: (on: boolean) => void;
   setSection: (on: boolean) => void;
   setAutoRotate: (on: boolean) => void;
+  setLabelMode: (mode: LabelMode) => void;
+  clearSelection: () => void;
+  zoomToSelection: () => void;
   dispose: () => void;
 };
 
 const MIN_DISTANCE = 0.00022;
 const MAX_DISTANCE = 240;
 const FOV = 34;
-const MAX_POLAR = 1.2;
-const SECTION_MAX_POLAR = 1.53;
+// The orbit is unrestricted: all the way round, over the top, and underneath.
+// Flights stop just short of the poles, where the azimuth is undefined.
+const POLAR_MARGIN = 0.02;
+// Chip geometry nearer the camera than this fraction of the orbit distance is
+// cut away, so orbiting through the stack never slices wires at the near plane.
+const CULL_FRACTION = 0.12;
+// Seen from below at tile zoom or closer, the package hides and the circuitry
+// shows from its backside, as when imaging through the silicon in infrared.
+const BACKSIDE_WITHIN = 6;
+// Label placement work per frame; it continues over the next frames.
+const LABEL_BUDGET_MS = 1.2;
 // Above every structure: the crater floor rests here when no stop needs one.
 const FLOOR_OFF = STACK_MAX * 3;
 const GENERATION_BUDGET_MS = 5;
@@ -94,7 +115,8 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const hdrTargets = renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float');
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  // At 1.0 the brightest metal reflections stay below white instead of clipping.
+  renderer.toneMappingExposure = 1.0;
   renderer.info.autoReset = false;
   const deviceRatio = Math.min(window.devicePixelRatio || 1, 2);
   const dprRange = gpu.software ? { min: 0.5, max: 0.6 } : { min: 0.75, max: Math.max(1, deviceRatio) };
@@ -117,12 +139,13 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   scene.background = backdrop;
 
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 1000);
-  const key = new THREE.DirectionalLight('#fff3e4', 1.25);
+  // Kept low: flat metal mirrors a strong key straight into the lens at some angles.
+  const key = new THREE.DirectionalLight('#fff3e4', 0.55);
   key.position.set(-4.5, 10, 3.5);
   scene.add(key);
-  // Coaxial headlight, as on a microscope: brightens in the cross-section so
-  // cut metal faces (which mirror the dark room behind the camera) read as metal.
-  const headlight = new THREE.DirectionalLight('#f4f7ff', 0.3);
+  // Coaxial headlight, as on a microscope: a little light on cut metal faces
+  // in the cross-section (set per frame in constrain()).
+  const headlight = new THREE.DirectionalLight('#f4f7ff', 0);
   scene.add(headlight, headlight.target);
 
   const shared = createSharedUniforms();
@@ -136,7 +159,12 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
 
   // ------------------------------------------------------ die and package
   // Built in its own task by build(); section caps read staticBoxes.
-  const staticBoxes: Array<{ rect: [number, number, number, number]; y: [number, number]; section: THREE.Material }> = [];
+  const staticBoxes: Array<{ rect: [number, number, number, number]; y: [number, number]; section: THREE.Material; part: PartId }> = [];
+  // Package meshes that hover, selection, and labels can name (userData.part).
+  const staticMeshes: THREE.Object3D[] = [];
+  const packageAnchors: StaticAnchor[] = [];
+  let bgaMesh: THREE.InstancedMesh | null = null;
+  let substrateBottom = -Infinity;
   let dieUniforms: DieUniforms | null = null;
   function buildDieAndPackage() {
     const maxTexture = Math.min(renderer.capabilities.maxTextureSize, gpu.software ? 2048 : 4096);
@@ -180,26 +208,42 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     disposables.push(dieGeometry);
     const dieMesh = new THREE.Mesh(dieGeometry, [siliconSide, siliconSide, dieTop, siliconSide, siliconSide, siliconSide]);
     dieMesh.position.y = -DIE.thickness / 2;
+    dieMesh.userData.part = 'die';
     scene.add(dieMesh);
+    staticMeshes.push(dieMesh);
+    const anchor = (part: PartId, object: THREE.Object3D, x: number, y: number, z: number, box = new THREE.Box3().setFromObject(object)) => {
+      packageAnchors.push({ part, object, point: new THREE.Vector3(x, y, z), box });
+    };
+    anchor('die', dieMesh, DIE.width * 0.18, 0, -DIE.depth * 0.12);
 
-    const addBox = (width: number, depth: number, y0: number, y1: number, x: number, z: number, material: THREE.Material | THREE.Material[], section: THREE.Material) => {
+    const addBox = (width: number, depth: number, y0: number, y1: number, x: number, z: number, material: THREE.Material | THREE.Material[], section: THREE.Material, part: PartId) => {
       const geometry = new THREE.BoxGeometry(width, y1 - y0, depth);
       disposables.push(geometry);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(x, (y0 + y1) / 2, z);
+      mesh.userData.part = part;
       scene.add(mesh);
-      staticBoxes.push({ rect: [x - width / 2, z - depth / 2, x + width / 2, z + depth / 2], y: [y0, y1], section });
+      staticMeshes.push(mesh);
+      staticBoxes.push({ rect: [x - width / 2, z - depth / 2, x + width / 2, z + depth / 2], y: [y0, y1], section, part });
       return mesh;
     };
-    staticBoxes.push({ rect: [-DIE.width / 2, -DIE.depth / 2, DIE.width / 2, DIE.depth / 2], y: [-DIE.thickness, 0], section: sectionSilicon });
+    staticBoxes.push({ rect: [-DIE.width / 2, -DIE.depth / 2, DIE.width / 2, DIE.depth / 2], y: [-DIE.thickness, 0], section: sectionSilicon, part: 'die-section' });
     const interposerTop = -DIE.thickness - 0.02;
-    addBox(PACKAGE_GEOMETRY.interposer.width * MM, PACKAGE_GEOMETRY.interposer.depth * MM, interposerTop - 0.1, interposerTop, 0, 0, interposerMaterial, sectionSilicon);
+    const interposerWidth = PACKAGE_GEOMETRY.interposer.width * MM;
+    const interposerDepth = PACKAGE_GEOMETRY.interposer.depth * MM;
+    const interposer = addBox(interposerWidth, interposerDepth, interposerTop - 0.1, interposerTop, 0, 0, interposerMaterial, sectionSilicon, 'interposer');
+    for (const [x, z] of [[interposerWidth / 2 - 2.5, 0], [-interposerWidth / 2 + 2.5, 0], [0, interposerDepth / 2 - 2.5], [0, -interposerDepth / 2 + 2.5]]) anchor('interposer', interposer, x, interposerTop, z);
     const stackSize = PACKAGE_GEOMETRY.dramTier.size * MM;
     for (const placement of STACK_PLACEMENTS) {
-      addBox(stackSize, stackSize, interposerTop, 0.02, placement.x * MM, placement.z * MM, [stackSideMaterial, stackSideMaterial, stackTopMaterial, stackSideMaterial, stackSideMaterial, stackSideMaterial], stackSideMaterial);
+      const stack = addBox(stackSize, stackSize, interposerTop, 0.02, placement.x * MM, placement.z * MM, [stackSideMaterial, stackSideMaterial, stackTopMaterial, stackSideMaterial, stackSideMaterial, stackSideMaterial], stackSideMaterial, 'hbm');
+      anchor('hbm', stack, placement.x * MM, 0.02, placement.z * MM);
     }
     const substrateTop = interposerTop - 0.1 - 0.09;
-    addBox(PACKAGE_GEOMETRY.substrate.width * MM, PACKAGE_GEOMETRY.substrate.depth * MM, substrateTop - 1.1, substrateTop, 0, 0, substrateMaterial, substrateMaterial);
+    const substrateWidth = PACKAGE_GEOMETRY.substrate.width * MM;
+    const substrateDepth = PACKAGE_GEOMETRY.substrate.depth * MM;
+    const substrate = addBox(substrateWidth, substrateDepth, substrateTop - 1.1, substrateTop, 0, 0, substrateMaterial, substrateMaterial, 'substrate');
+    for (const [x, z] of [[substrateWidth / 2 - 3.5, 0], [-substrateWidth / 2 + 3.5, 0], [0, substrateDepth / 2 - 3.5], [0, -substrateDepth / 2 + 3.5]]) anchor('substrate', substrate, x, substrateTop, z);
+    substrateBottom = substrateTop - 1.1;
     {
       // Die-side decoupling capacitors (0402) around the interposer.
       const bodies: THREE.Matrix4[] = [];
@@ -226,7 +270,43 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       bodies.forEach((matrix, index) => bodyMesh.setMatrixAt(index, matrix));
       const endMesh = new THREE.InstancedMesh(unitBox, capEndMaterial, ends.length);
       ends.forEach((matrix, index) => endMesh.setMatrixAt(index, matrix));
+      bodyMesh.userData.part = 'capacitor';
+      endMesh.userData.part = 'capacitor';
       scene.add(bodyMesh, endMesh);
+      staticMeshes.push(bodyMesh, endMesh);
+      for (const index of [8, 25, 40, 58]) {
+        const position = new THREE.Vector3().setFromMatrixPosition(bodies[index]);
+        anchor('capacitor', bodyMesh, position.x, substrateTop + 0.5, position.z, new THREE.Box3().setFromCenterAndSize(position, new THREE.Vector3(1.1, 0.5, 1.1)));
+      }
+    }
+    {
+      // BGA balls under the substrate, at the 3D twin's sampled pitch; drawn
+      // only while the camera is below the package.
+      const { columns, rows, pitch } = CONNECTOR_SAMPLING.bga;
+      const radius = PACKAGE_GEOMETRY.bga.radius * MM;
+      const ballGeometry = new THREE.IcosahedronGeometry(1, 2);
+      const ballMaterial = new THREE.MeshStandardMaterial({ color: '#b9babf', metalness: 1, roughness: 0.4 });
+      disposables.push(ballGeometry, ballMaterial);
+      const balls = new THREE.InstancedMesh(ballGeometry, ballMaterial, columns * rows);
+      const matrix = new THREE.Matrix4();
+      const scale = new THREE.Vector3(radius, radius * 0.85, radius);
+      const rotation = new THREE.Quaternion();
+      let index = 0;
+      for (let i = 0; i < columns; i += 1) for (let j = 0; j < rows; j += 1) {
+        const x = (i - (columns - 1) / 2) * pitch * MM;
+        const z = (j - (rows - 1) / 2) * pitch * MM;
+        balls.setMatrixAt(index, matrix.compose(new THREE.Vector3(x, substrateBottom - radius * 0.7, z), rotation, scale));
+        index += 1;
+        if ((i === 4 || i === 12) && (j === 3 || j === 11)) {
+          const center = new THREE.Vector3(x, substrateBottom - radius * 0.7, z);
+          anchor('bga', balls, x, substrateBottom - radius * 1.5, z, new THREE.Box3().setFromCenterAndSize(center, new THREE.Vector3(radius * 2, radius * 1.7, radius * 2)));
+        }
+      }
+      balls.userData.part = 'bga';
+      balls.visible = false;
+      scene.add(balls);
+      staticMeshes.push(balls);
+      bgaMesh = balls;
     }
     return textures;
   }
@@ -296,7 +376,8 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   }
 
   // ------------------------------------------------------------ post stack
-  const bloomStrength = gpu.software ? 0.32 : 0.42;
+  // Subtle: only the data pulses cross the threshold, not metal reflections.
+  const bloomStrength = 0.3;
   let bloomEnabled = true;
   let post: { composer: EffectComposer; bloom: UnrealBloomPass | null; finish: ShaderPass; target: THREE.WebGLRenderTarget } | null = null;
   function createPost() {
@@ -304,7 +385,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     const composer = new EffectComposer(renderer, target);
     composer.addPass(new RenderPass(scene, camera));
     // Bloom's blur chain is seven programs; software GL goes without it.
-    const bloom = gpu.software ? null : new UnrealBloomPass(new THREE.Vector2(1, 1), bloomStrength, 0.5, hdrTargets ? 1.0 : 0.82);
+    const bloom = gpu.software ? null : new UnrealBloomPass(new THREE.Vector2(1, 1), bloomStrength, 0.45, hdrTargets ? 1.5 : 0.92);
     if (bloom) {
       bloom.enabled = bloomEnabled;
       composer.addPass(bloom);
@@ -324,7 +405,8 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   controls.screenSpacePanning = false;
   controls.minDistance = MIN_DISTANCE;
   controls.maxDistance = MAX_DISTANCE;
-  controls.maxPolarAngle = MAX_POLAR;
+  controls.minPolarAngle = 0;
+  controls.maxPolarAngle = Math.PI;
   controls.autoRotateSpeed = 0.35;
   const orbit = controls.target;
   const initial = PRESETS.find((preset) => preset.id === 'die') ?? PRESETS[0];
@@ -346,6 +428,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   const scratch = new THREE.Vector3();
   const spherical = new THREE.Spherical();
   let flight: null | { start: number; duration: number; path: ReturnType<typeof zoomPanPath>; polar: [number, number]; azimuth: [number, number] } = null;
+  let view: SiliconHud['view'] = 'top';
 
   // Camera gestures are reported once per burst, like the package twin.
   let gestures = 0;
@@ -391,7 +474,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   function flyTo(spec: { x: number; z: number; distance: number; polar?: number; azimuth?: number }) {
     spherical.setFromVector3(scratch.copy(camera.position).sub(orbit));
     const path = zoomPanPath({ x: orbit.x, z: orbit.z, width: spherical.radius }, { x: spec.x, z: spec.z, width: spec.distance });
-    const polarTarget = clamp(spec.polar ?? spherical.phi, 0.05, sectionOn ? SECTION_MAX_POLAR : MAX_POLAR);
+    const polarTarget = clamp(spec.polar ?? spherical.phi, POLAR_MARGIN, Math.PI - POLAR_MARGIN);
     const azimuthTarget = spherical.theta + wrapAngle((spec.azimuth ?? spherical.theta) - spherical.theta);
     flight = { start: performance.now(), duration: clamp(600 + path.length * 360, 700, 4500), path, polar: [spherical.phi, polarTarget], azimuth: [spherical.theta, azimuthTarget] };
     zoomImpulse = 0;
@@ -518,6 +601,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       const geometry = new THREE.BoxGeometry(section.axis === 0 ? capEps : span, box.y[1] - box.y[0], section.axis === 0 ? span : capEps);
       const mesh = new THREE.Mesh(geometry, box.section);
       mesh.position.set(section.axis === 0 ? section.value + offset : (x0 + x1) / 2, (box.y[0] + box.y[1]) / 2, section.axis === 0 ? (z0 + z1) / 2 : section.value + offset);
+      mesh.userData.part = box.part;
       staticCaps.add(mesh);
     }
     scene.add(staticCaps);
@@ -547,6 +631,132 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       sectionStamp = stamp;
       staticCapsEps = capEps;
       rebuildStaticCaps();
+    }
+  }
+
+  // ------------------------------------------- labels, hover, and selection
+  const annotations = createAnnotations(host);
+  const inspector = createInspector({
+    camera,
+    shared,
+    sectionPlane,
+    records: () => resident.values(),
+    levelVisible: (level) => levelGroups[level].visible && levelUniforms[level].uFade.value >= 0.5,
+    statics: () => {
+      const drawn = staticMeshes.filter((object) => object.visible);
+      if (staticCaps?.visible) drawn.push(...staticCaps.children);
+      return drawn;
+    },
+  }, scene);
+  let labelMode: LabelMode = 'all';
+  const selectTarget = (target: Target | null) => {
+    inspector.select(target);
+    annotations.setSelected(target?.key ?? null);
+    callbacks.onSelect(target ? describeTarget(target) : null);
+  };
+  // Package labels at the package stop; at the die stop the die itself needs none.
+  const packageAnchorsFor = (id: FocusStop['id']) => (id === 'package' ? packageAnchors : id === 'die' ? packageAnchors.filter((item) => item.part !== 'die') : []);
+
+  const pointer = { inside: false, dragging: false, dirty: false, x: 0, y: 0, down: null as null | { x: number; y: number; at: number } };
+  const ndcAt = (x: number, y: number) => new THREE.Vector2((x / cssWidth) * 2 - 1, -(y / cssHeight) * 2 + 1);
+  const onPointerMove = (event: PointerEvent) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = event.clientX - rect.left;
+    pointer.y = event.clientY - rect.top;
+    pointer.inside = true;
+    pointer.dragging = event.buttons !== 0;
+    pointer.dirty = true;
+  };
+  const onPointerLeave = () => {
+    pointer.inside = false;
+    pointer.dirty = true;
+  };
+  const onCanvasDown = (event: PointerEvent) => {
+    pointer.down = event.button === 0 ? { x: event.clientX, y: event.clientY, at: performance.now() } : null;
+  };
+  // A click (not a drag) names what is under the cursor; empty space clears.
+  const onCanvasUp = (event: PointerEvent) => {
+    const down = pointer.down;
+    pointer.down = null;
+    if (!down || event.button !== 0) return;
+    if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5 || performance.now() - down.at > 600) return;
+    const rect = canvas.getBoundingClientRect();
+    selectTarget(inspector.pick(ndcAt(event.clientX - rect.left, event.clientY - rect.top)));
+  };
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerleave', onPointerLeave);
+  canvas.addEventListener('pointerdown', onCanvasDown);
+  canvas.addEventListener('pointerup', onCanvasUp);
+
+  let hoverAt = 0;
+  let hoverText: [string, string] | null = null;
+  let planner: Generator<void, Anchor[]> | null = null;
+  let planAt = 0;
+  let planStamp = '';
+  let labelled = new Set<string>();
+  let movedAt = 0;
+  // Label positions need recomputing only when the camera, the anchors, the
+  // label mode, or the canvas size changed.
+  let labelsStale = true;
+  let rulerStale = true;
+  const lastCamera = new THREE.Matrix4();
+  let lastSize = '';
+  function annotate(now: number, distance: number) {
+    const size = `${cssWidth}x${cssHeight}`;
+    const moved = !lastCamera.equals(camera.matrixWorld) || size !== lastSize;
+    if (moved) {
+      lastCamera.copy(camera.matrixWorld);
+      lastSize = size;
+      movedAt = now;
+    }
+    // Hover read-out: at most ~16 picks a second, none while dragging or flying.
+    if (pointer.inside && !pointer.dragging && !flight) {
+      if ((pointer.dirty || moved) && now > hoverAt) {
+        hoverAt = now + 60;
+        pointer.dirty = false;
+        const target = inspector.pick(ndcAt(pointer.x, pointer.y));
+        inspector.hover(target);
+        hoverText = target && target.kind !== 'region' ? [PARTS[target.part].title, PARTS[target.part].layer] : null;
+      }
+      annotations.tooltip(hoverText?.[0] ?? null, hoverText?.[1], pointer.x, pointer.y);
+    } else if (hoverText || pointer.dirty) {
+      pointer.dirty = false;
+      hoverText = null;
+      inspector.hover(null);
+      annotations.tooltip(null);
+    }
+
+    // Labels: re-planned a few times a second while the view moves.
+    if (labelMode !== 'off') {
+      const stamp = `${stop.id}|${sectionOn}|${view}|${size}`;
+      if (planner && stamp !== planStamp) planner = null;
+      if (!planner && (now > planAt || stamp !== planStamp)) {
+        planStamp = stamp;
+        planner = inspector.plan({
+          stop, orbit: orbit.clone(), distance, width: cssWidth, height: cssHeight, keep: labelled,
+          section: { on: sectionOn, axis: section.axis, value: section.value }, packageAnchors: packageAnchorsFor(stop.id),
+        }, annotations, selectTarget);
+      }
+      if (planner) {
+        const started = performance.now();
+        let step = planner.next();
+        while (!step.done && performance.now() - started < LABEL_BUDGET_MS) step = planner.next();
+        if (step.done) {
+          annotations.setAnchors(step.value);
+          labelled = new Set(step.value.map((item) => item.targetKey));
+          labelsStale = true;
+          planner = null;
+          planAt = now + (now - movedAt < 400 ? 250 : 1200);
+        }
+      }
+    }
+    if (moved || labelsStale) {
+      labelsStale = false;
+      annotations.update(camera, cssWidth, cssHeight);
+    }
+    if (sectionOn && (moved || rulerStale)) {
+      rulerStale = false;
+      annotations.setRuler(inspector.ruler({ orbit, height: cssHeight, section: { on: true, axis: section.axis, value: section.value } }));
     }
   }
 
@@ -601,7 +811,6 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
   }
 
   // ------------------------------------------------------ camera rules
-  let polarLimit = MAX_POLAR;
   function constrain(dt: number) {
     const distance = camera.position.distanceTo(orbit);
     stop = focusStopFor(distance, stop.id);
@@ -634,15 +843,22 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     shared.uCrater.value.set(orbit.x, orbit.z, craterFloor, distance * (Math.sin(spherical.phi) + 1.1));
     shared.uCraterOn.value = craterFloor < FLOOR_OFF * 0.9 ? 1 : 0;
 
-    // Leaving the section view eases the camera back above the stack.
-    const limit = sectionOn ? SECTION_MAX_POLAR : MAX_POLAR;
-    polarLimit = sectionOn ? limit : Math.max(limit, polarLimit - dt * 0.9);
-    controls.maxPolarAngle = polarLimit;
     controls.screenSpacePanning = sectionOn;
+    shared.uCull.value.set(camera.position.x, camera.position.y, camera.position.z, distance * CULL_FRACTION);
+
+    // Below the die: the whole package from afar; at chip zoom the package
+    // hides and the circuitry shows from its backside. A cross-section keeps
+    // the package, whose cut faces are part of what it shows.
+    view = camera.position.y >= 0 ? 'top' : distance < BACKSIDE_WITHIN ? 'backside' : 'underside';
+    const packageShown = view !== 'backside' || sectionOn;
+    for (const object of staticMeshes) object.visible = packageShown && (object !== bgaMesh || camera.position.y < substrateBottom);
 
     headlight.position.copy(camera.position);
     headlight.target.position.copy(orbit);
-    headlight.intensity += ((sectionOn ? 1.3 : 0.3) - headlight.intensity) * (1 - Math.exp(-dt * 4));
+    // Cross-sections only, and faint: as a coaxial light its highlight sits
+    // mid-frame on any face square to the camera (a hot spot). Undersides and
+    // cut faces mostly mirror the studio's floor and horizon instead.
+    headlight.intensity += ((sectionOn ? 0.35 : 0) - headlight.intensity) * (1 - Math.exp(-dt * 4));
     // Head-on faces in a section converge at the vanishing point; less bloom there.
     if (post?.bloom) post.bloom.strength += ((sectionOn ? bloomStrength * 0.55 : bloomStrength) - post.bloom.strength) * (1 - Math.exp(-dt * 4));
     if (dieUniforms) {
@@ -688,6 +904,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
 
     renderer.info.reset();
     post.composer.render(dt);
+    annotate(now, distance);
 
     if (!readySent) {
       readySent = true;
@@ -733,6 +950,7 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
         dpr,
         gpu: gpu.name,
         software: gpu.software,
+        view,
       });
     }
   };
@@ -825,7 +1043,9 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       sectionStamp = '';
       capEps = 0;
       staticCapsEps = -1;
-      if (on) polarLimit = SECTION_MAX_POLAR;
+      planAt = 0;
+      rulerStale = true;
+      if (!on) annotations.setRuler(null);
       const distance = camera.position.distanceTo(orbit);
       updateSection(distance);
       if (on) {
@@ -842,6 +1062,35 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
     setAutoRotate(on) {
       controls.autoRotate = on;
     },
+    setLabelMode(mode) {
+      labelMode = mode;
+      annotations.setMode(mode);
+      labelsStale = true;
+      planAt = 0;
+    },
+    clearSelection() {
+      selectTarget(null);
+    },
+    zoomToSelection() {
+      const target = inspector.selected;
+      if (!target) return;
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+      if (target.kind === 'primitive') {
+        center.set(target.ref.x, 0, target.ref.z);
+        size.set(target.ref.sx, target.ref.y1 - target.ref.y0, target.ref.sz);
+      } else if (target.kind === 'static') {
+        target.box.getCenter(center);
+        target.box.getSize(size);
+      } else {
+        const r = target.label.rect;
+        center.set((r.x0 + r.x1) / 2, 0, (r.z0 + r.z1) / 2);
+        size.set(r.x1 - r.x0, 0, r.z1 - r.z0);
+      }
+      spherical.setFromVector3(scratch.copy(camera.position).sub(orbit));
+      // Frame the whole part, keeping the current viewing angle.
+      flyTo({ x: center.x, z: center.z, distance: clamp(Math.max(size.x, size.y, size.z) * 1.8, MIN_DISTANCE * 3, 150), polar: spherical.phi, azimuth: spherical.theta });
+    },
     dispose() {
       disposed = true;
       window.cancelAnimationFrame(raf);
@@ -852,7 +1101,14 @@ export function createSiliconEngine(host: HTMLElement, callbacks: SiliconEngineC
       host.removeEventListener('pointerdown', onPointerDown, { capture: true });
       canvas.removeEventListener('webglcontextlost', onContextLost);
       controls.removeEventListener('end', onControlsEnd);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
+      canvas.removeEventListener('pointerdown', onCanvasDown);
+      canvas.removeEventListener('pointerup', onCanvasUp);
       controls.dispose();
+      planner = null;
+      annotations.dispose();
+      inspector.dispose();
       for (const record of resident.values()) {
         disposeGroup(record.group);
         if (record.capGroup) disposeGroup(record.capGroup);

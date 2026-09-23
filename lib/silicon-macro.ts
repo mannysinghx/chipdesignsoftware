@@ -1183,17 +1183,41 @@ const rowOffset = (row: number, offset: number) => (rowFlipped(row) ? rowZ(row) 
 
 type RowVisitor = (row: number, blockIndex: number, leaf: Leaf, cells: PlacedCell[]) => void;
 
-function visitRows(bounds: Rect, leaves: LeafCache, visit: RowVisitor) {
+/**
+ * Region of one row block, from its exact centre. Wiring (level 3),
+ * transistors (level 4), and cellAt() must all agree on it, so it is never
+ * read through a quantized leaf cache.
+ */
+const rowBlockLeaf = (row: number, block: number) => leafAt((block + 0.5) * BLOCK, (row + 0.5) * ROW);
+
+function visitRows(bounds: Rect, visit: RowVisitor) {
   const r0 = Math.floor(bounds.z0 / ROW);
   const r1 = Math.floor(bounds.z1 / ROW);
   const b0 = Math.floor(bounds.x0 / BLOCK);
   const b1 = Math.floor(bounds.x1 / BLOCK);
   for (let row = r0; row <= r1; row += 1) for (let block = b0; block <= b1; block += 1) {
-    const leaf = leaves.at((block + 0.5) * BLOCK, (row + 0.5) * ROW);
+    const leaf = rowBlockLeaf(row, block);
     if (!ROW_LEAVES.includes(leaf)) continue;
     visit(row, block, leaf, blockCells(row, block, leaf));
   }
 }
+
+export type CellHit = { row: number; block: number; leaf: Leaf; cell: PlacedCell; n: number; vdd: 'top' | 'bottom' };
+
+/** The standard cell under a point, if the point lies in a cell row. */
+export function cellAt(x: number, z: number): CellHit | null {
+  const row = Math.floor(z / ROW);
+  const block = Math.floor(x / BLOCK);
+  const leaf = rowBlockLeaf(row, block);
+  if (!ROW_LEAVES.includes(leaf)) return null;
+  const n = Math.floor(x / CPP);
+  const cell = blockCells(row, block, leaf).find((item) => n >= item.start && n < item.start + item.width);
+  // Even rows have VSS on their lower edge and VDD on the upper one; odd rows flip.
+  return cell ? { row, block, leaf, cell, n, vdd: rowFlipped(row) ? 'bottom' : 'top' } : null;
+}
+
+/** Supply carried by the rail on a row boundary (the rail below row `row`). */
+export const railSupply = (row: number): 'VDD' | 'VSS' => (rowFlipped(row) ? 'VDD' : 'VSS');
 
 // ---------------------------------------------------------------------------
 // Level 3: local interconnect M0-M3 over standard cells and SRAM
@@ -1208,7 +1232,7 @@ function level3(builder: ChunkBuilder) {
   const b = builder.bounds;
   const leaves = new LeafCache(um(0.108));
 
-  visitRows(b, leaves, (row, blockIndex, leaf, cells) => {
+  visitRows(b, (row, blockIndex, leaf, cells) => {
     const x0 = blockIndex * BLOCK;
     const railZ = rowZ(row);
     // Rails at every row boundary: VSS below even rows, VDD below odd rows.
@@ -1306,7 +1330,7 @@ function level4(builder: ChunkBuilder) {
   const b = builder.bounds;
   const leaves = new LeafCache(um(0.054));
 
-  visitRows(b, leaves, (row, blockIndex, leaf, cells) => {
+  visitRows(b, (row, blockIndex, leaf, cells) => {
     const x0 = blockIndex * BLOCK;
     const x1 = x0 + BLOCK;
     const railZ = rowZ(row);
