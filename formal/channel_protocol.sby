@@ -1,0 +1,15 @@
+[options]
+mode bmc
+depth 12
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read -formal -D FORMAL -D PROTOCOL_CHECKS aimem_secded_64.sv aimem_t0_channel.sv aimem_t0_channel_sby.sv
+prep -top aimem_t0_channel_sby
+
+[files]
+../rtl/aimem_secded_64.sv
+../rtl/aimem_t0_channel.sv
+aimem_t0_channel_sby.sv
