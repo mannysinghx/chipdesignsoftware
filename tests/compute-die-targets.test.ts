@@ -84,7 +84,7 @@ test('calibration, held-out, and target roles are disjoint and consistent', () =
   for (const id of targets.calibration.regression_chips ?? []) {
     assert.equal(chips.get(id)!.role, 'regression', `${id} is a consumed held-out chip`);
     assert.ok(!calibration.has(id) && !heldOut.has(id), `${id} cannot calibrate or validate again`);
-    for (const row of targets.measured.mlperf_inference.filter((entry: { chip: string }) => entry.chip === id)) assert.equal(row.use, 'regression');
+    for (const row of targets.measured.mlperf_frontier.filter((entry: { chip: string }) => entry.chip === id)) assert.equal(row.use, 'regression');
   }
   const history = targets.calibration.held_out_history;
   const consumed = history.flatMap((entry: { chips: string[] }) => entry.chips.filter((chip) => !heldOut.has(chip)));
@@ -128,6 +128,24 @@ test('transformer GEMM and attention shapes follow from the pinned model configs
   const llama405 = targets.models['llama3.1-405b'];
   assert.equal((llama405.heads + 2 * llama405.kv_heads) * llama405.head_dim, 18432, 'fused QKV width');
   for (const scenario of targets.benchmarks.llm_serving) assert.ok(targets.models[scenario.model], `${scenario.id} names unknown model`);
+});
+
+test('best-submission rows: sourced, scored only for Offline, and roles follow the chip', () => {
+  const calibration = new Set(targets.calibration.calibration_chips);
+  const heldOut = new Set(targets.calibration.held_out_chips);
+  const regression = new Set(targets.calibration.regression_chips);
+  assert.deepEqual(targets.calibration.scoring.qualification_scenarios, ['Offline']);
+  for (const row of targets.measured.mlperf_frontier) {
+    assert.ok(chips.has(row.chip), `frontier row names unknown chip ${row.chip}`);
+    assert.equal(row.source, 'mlperf-frontier');
+    assert.ok(row.best_submission.round && row.best_submission.submitter && row.submissions_considered >= 1);
+    assert.ok(row.mean_output_tokens > 0 && Number.isInteger(row.accelerators));
+    const expected = calibration.has(row.chip) ? (row.scenario === 'Offline' ? 'calibrate' : 'report')
+      : heldOut.has(row.chip) ? (row.scenario === 'Offline' ? 'held-out' : 'held-out-report')
+        : regression.has(row.chip) ? 'regression' : 'unexpected';
+    assert.equal(row.use, expected, `${row.chip} ${row.model} ${row.scenario}`);
+  }
+  for (const row of targets.measured.mlperf_inference) assert.equal(row.use, 'history', 'single-submission rows are history since C1 v3');
 });
 
 test('calibration tolerances are set, and held out is never stricter than calibration', () => {

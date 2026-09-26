@@ -1,9 +1,19 @@
 {
   "evidence_class": "modeled",
   "step": "C1",
-  "model_version": 2,
-  "targets_sha256": "d4013b4ed25209da0597356397aa7ee7a42ab05ba7249595a8f3bb5604a9c83c",
-  "model_sha256": "c28c0e0a0fa280f5a027a98b2ae1d621b71e9abff0ff78774dadd60dc24d18b4",
+  "model_version": 3,
+  "scoring": {
+    "version": "C1 v3 onward; owner approved in chat on 2026-09-26",
+    "reference": "Each chip's best closed-division, generally available MLPerf submission per model and scenario (measured.mlperf_frontier), not a single hand-picked submission",
+    "qualification_scenarios": [
+      "Offline"
+    ],
+    "server_rows": "Reported, not scored",
+    "evidence": "Across about 170 paired MLPerf submissions: identical GB200 NVL72 hardware from one submitter went 0.64, 0.79, 0.91 Server/Offline on Llama 3.1 405B over three rounds (GB300: 0.76 to 0.96), so Server is dominated by software maturity. The best Offline submissions per chip cluster within 3-8% of the median (B200 17 submissions, H200 39, MI355X 10), while weak submissions fall to 0.3-0.8x",
+    "calibration_rows": "Offline frontier rows of the calibration chips"
+  },
+  "targets_sha256": "13ea68b77027c65412898ec3451e655e9d33fcc2ca727b7b881b7a0dd4b779f8",
+  "model_sha256": "2ae82b5650a74e101fd098394dbb2c1c300f2770f59588e5dfbf2ad1caebcdce",
   "assumptions": {
     "memoryReserveFraction": 0.1,
     "kvCacheBytes": 1,
@@ -148,6 +158,30 @@
           "relativeError": -0.0033337029702971144
         }
       ]
+    },
+    {
+      "chip": "gb200-nvl",
+      "impliedTensorClockGhz": 2.0619985219594597,
+      "rows": [
+        {
+          "precision": "bf16",
+          "targetTflops": 2500,
+          "modeledTflops": 2500,
+          "relativeError": 0
+        },
+        {
+          "precision": "fp8",
+          "targetTflops": 5000,
+          "modeledTflops": 5000,
+          "relativeError": 0
+        },
+        {
+          "precision": "fp4",
+          "targetTflops": 10000,
+          "modeledTflops": 10000,
+          "relativeError": 0
+        }
+      ]
     }
   ],
   "calibration": {
@@ -174,9 +208,49 @@
         "source": "mean-of-calibrated-families"
       }
     },
-    "serving_efficiency": 0.6680502993918276,
-    "serving_rows": 10,
+    "serving_efficiency": 0.6841497058802675,
+    "serving_rows": 6,
     "rows": [
+      {
+        "id": "6.0-0048",
+        "chip": "b200-hgx",
+        "model": "llama2-70b-99",
+        "scenario": "Offline",
+        "weights": "fp4",
+        "measuredPerAccelerator": 12994.25,
+        "predictedPerAccelerator": 12097.476791106601,
+        "relativeError": -0.0690130795462146,
+        "detail": {
+          "perAcceleratorTokensPerS": 12097.476791106601,
+          "tensorParallel": 1,
+          "batch": 2100,
+          "iterationMs": 173.5899176548786,
+          "prefillShare": 0.30402950519402905,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "compute"
+        },
+        "withinTolerance": true
+      },
+      {
+        "id": "5.1-0028",
+        "chip": "b200-hgx",
+        "model": "llama3.1-405b",
+        "scenario": "Offline",
+        "weights": "fp4",
+        "measuredPerAccelerator": 207.58875,
+        "predictedPerAccelerator": 215.62522070795285,
+        "relativeError": 0.03871342116541876,
+        "detail": {
+          "perAcceleratorTokensPerS": 215.62522070795285,
+          "tensorParallel": 4,
+          "batch": 167,
+          "iterationMs": 193.62299021850993,
+          "prefillShare": 0.7881434564676038,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "memory"
+        },
+        "withinTolerance": true
+      },
       {
         "id": "5.0-0057",
         "chip": "h100-sxm",
@@ -184,18 +258,120 @@
         "scenario": "Offline",
         "weights": "fp8",
         "measuredPerAccelerator": 3913.35,
-        "predictedPerAccelerator": 3719.6973324451865,
-        "relativeError": -0.049485138705920306,
+        "predictedPerAccelerator": 3780.0007880092307,
+        "relativeError": -0.03407546270861772,
         "detail": {
-          "perAcceleratorTokensPerS": 3719.6973324451865,
+          "perAcceleratorTokensPerS": 3780.0007880092307,
           "tensorParallel": 2,
           "batch": 1247,
-          "iterationMs": 167.62116491616132,
-          "prefillShare": 0.322059487187647,
+          "iterationMs": 164.94705556089883,
+          "prefillShare": 0.32728069155962536,
           "limitedBy": "kv-capacity",
           "decodeBound": "compute"
         },
         "withinTolerance": true
+      },
+      {
+        "id": "5.0-0065",
+        "chip": "h100-sxm",
+        "model": "llama3.1-405b",
+        "scenario": "Offline",
+        "weights": "fp8",
+        "measuredPerAccelerator": 54.52725,
+        "predictedPerAccelerator": 59.973746428995454,
+        "relativeError": 0.09988577140779054,
+        "detail": {
+          "perAcceleratorTokensPerS": 59.973746428995454,
+          "tensorParallel": 8,
+          "batch": 67,
+          "iterationMs": 139.64443608530257,
+          "prefillShare": 0.7064903267284885,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "memory"
+        },
+        "withinTolerance": true
+      },
+      {
+        "id": "5.0-0051",
+        "chip": "h200-sxm",
+        "model": "llama2-70b-99",
+        "scenario": "Offline",
+        "weights": "fp8",
+        "measuredPerAccelerator": 4431.625,
+        "predictedPerAccelerator": 4640.281347310098,
+        "relativeError": 0.047083484570580314,
+        "detail": {
+          "perAcceleratorTokensPerS": 4640.281347310098,
+          "tensorParallel": 1,
+          "batch": 964,
+          "iterationMs": 207.74602396874417,
+          "prefillShare": 0.3110496463382927,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "compute"
+        },
+        "withinTolerance": true
+      },
+      {
+        "id": "5.0-0011",
+        "chip": "h200-sxm",
+        "model": "llama3.1-405b",
+        "scenario": "Offline",
+        "weights": "fp8",
+        "measuredPerAccelerator": 71.696625,
+        "predictedPerAccelerator": 74.23803887758531,
+        "relativeError": 0.03544677141476771,
+        "detail": {
+          "perAcceleratorTokensPerS": 74.23803887758531,
+          "tensorParallel": 8,
+          "batch": 242,
+          "iterationMs": 407.4730482829791,
+          "prefillShare": 0.8448832130575685,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "memory"
+        },
+        "withinTolerance": true
+      }
+    ],
+    "all_within_tolerance": true,
+    "max_abs_relative_error": 0.09988577140779054,
+    "server_report": [
+      {
+        "id": "6.0-0048",
+        "chip": "b200-hgx",
+        "model": "llama2-70b-99",
+        "scenario": "Server",
+        "weights": "fp4",
+        "measuredPerAccelerator": 12954.375,
+        "predictedPerAccelerator": 12108.37382704741,
+        "relativeError": -0.06530621299387973,
+        "detail": {
+          "perAcceleratorTokensPerS": 12108.37382704741,
+          "tensorParallel": 1,
+          "batch": 2097,
+          "iterationMs": 173.185931484521,
+          "prefillShare": 0.30319398407100917,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "compute"
+        }
+      },
+      {
+        "id": "5.1-0073",
+        "chip": "b200-hgx",
+        "model": "llama3.1-405b",
+        "scenario": "Server",
+        "weights": "fp4",
+        "measuredPerAccelerator": 159.94125,
+        "predictedPerAccelerator": 152.66126448007384,
+        "relativeError": -0.04551662263441203,
+        "detail": {
+          "perAcceleratorTokensPerS": 152.66126448007384,
+          "tensorParallel": 4,
+          "batch": 27,
+          "iterationMs": 44.21553838813543,
+          "prefillShare": 0.5537506667520329,
+          "limitedBy": "ttft-queue",
+          "decodeBound": "memory"
+        }
       },
       {
         "id": "5.0-0057",
@@ -204,309 +380,155 @@
         "scenario": "Server",
         "weights": "fp8",
         "measuredPerAccelerator": 3888.2875,
-        "predictedPerAccelerator": 3723.504620825774,
-        "relativeError": -0.04237929401419671,
+        "predictedPerAccelerator": 3783.94952876619,
+        "relativeError": -0.026833913704634726,
         "detail": {
-          "perAcceleratorTokensPerS": 3723.504620825774,
+          "perAcceleratorTokensPerS": 3783.94952876619,
           "tensorParallel": 2,
           "batch": 1245,
-          "iterationMs": 167.18120786484914,
-          "prefillShare": 0.3211783826541973,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "compute"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.0-0060",
-        "chip": "h200-sxm",
-        "model": "llama2-70b-99",
-        "scenario": "Offline",
-        "weights": "fp8",
-        "measuredPerAccelerator": 4373.525,
-        "predictedPerAccelerator": 4567.86557941503,
-        "relativeError": 0.0444356850401062,
-        "detail": {
-          "perAcceleratorTokensPerS": 4567.86557941503,
-          "tensorParallel": 1,
-          "batch": 963,
-          "iterationMs": 210.82056449728623,
-          "prefillShare": 0.30535510605170785,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "compute"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.0-0060",
-        "chip": "h200-sxm",
-        "model": "llama2-70b-99",
-        "scenario": "Server",
-        "weights": "fp8",
-        "measuredPerAccelerator": 4133.9375,
-        "predictedPerAccelerator": 4571.218443652185,
-        "relativeError": 0.10577831514196445,
-        "detail": {
-          "perAcceleratorTokensPerS": 4571.218443652185,
-          "tensorParallel": 1,
-          "batch": 914,
-          "iterationMs": 199.94669063982812,
-          "prefillShare": 0.30474289596240217,
-          "limitedBy": "tpot",
-          "decodeBound": "compute"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.0-0060",
-        "chip": "h200-sxm",
-        "model": "llama3.1-405b",
-        "scenario": "Offline",
-        "weights": "fp8",
-        "measuredPerAccelerator": 70.081375,
-        "predictedPerAccelerator": 72.80235966740501,
-        "relativeError": 0.03882607422307305,
-        "detail": {
-          "perAcceleratorTokensPerS": 72.80235966740501,
-          "tensorParallel": 8,
-          "batch": 242,
-          "iterationMs": 415.50851013890275,
-          "prefillShare": 0.8442565795077479,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "memory"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.0-0060",
-        "chip": "h200-sxm",
-        "model": "llama3.1-405b",
-        "scenario": "Server",
-        "weights": "fp8",
-        "measuredPerAccelerator": 36.42175,
-        "predictedPerAccelerator": 29.520346460507028,
-        "relativeError": -0.18948577538127565,
-        "detail": {
-          "perAcceleratorTokensPerS": 29.520346460507028,
-          "tensorParallel": 8,
-          "batch": 8,
-          "iterationMs": 33.87494118125687,
-          "prefillShare": 0.3430748514364398,
-          "limitedBy": "ttft-queue",
-          "decodeBound": "memory"
-        },
-        "withinTolerance": false
-      },
-      {
-        "id": "5.1-0069",
-        "chip": "b200-hgx",
-        "model": "llama2-70b-99",
-        "scenario": "Offline",
-        "weights": "fp4",
-        "measuredPerAccelerator": 12690.875,
-        "predictedPerAccelerator": 11898.973364587548,
-        "relativeError": -0.06239929361942753,
-        "detail": {
-          "perAcceleratorTokensPerS": 11898.973364587548,
-          "tensorParallel": 1,
-          "batch": 2100,
-          "iterationMs": 176.48581399886106,
-          "prefillShare": 0.2989314088443572,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "compute"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.1-0069",
-        "chip": "b200-hgx",
-        "model": "llama2-70b-99",
-        "scenario": "Server",
-        "weights": "fp4",
-        "measuredPerAccelerator": 12390.375,
-        "predictedPerAccelerator": 11909.44718997508,
-        "relativeError": -0.03881462909919353,
-        "detail": {
-          "perAcceleratorTokensPerS": 11909.44718997508,
-          "tensorParallel": 1,
-          "batch": 2097,
-          "iterationMs": 176.07870176922862,
-          "prefillShare": 0.29810417793896665,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "compute"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.1-0069",
-        "chip": "b200-hgx",
-        "model": "llama3.1-405b",
-        "scenario": "Offline",
-        "weights": "fp4",
-        "measuredPerAccelerator": 203.01375,
-        "predictedPerAccelerator": 214.52992730736986,
-        "relativeError": 0.05672609518995575,
-        "detail": {
-          "perAcceleratorTokensPerS": 214.52992730736986,
-          "tensorParallel": 4,
-          "batch": 167,
-          "iterationMs": 194.61154219374845,
-          "prefillShare": 0.7841399900653556,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "memory"
-        },
-        "withinTolerance": true
-      },
-      {
-        "id": "5.1-0069",
-        "chip": "b200-hgx",
-        "model": "llama3.1-405b",
-        "scenario": "Server",
-        "weights": "fp4",
-        "measuredPerAccelerator": 155.0525,
-        "predictedPerAccelerator": 152.67103438546263,
-        "relativeError": -0.015359092014236353,
-        "detail": {
-          "perAcceleratorTokensPerS": 152.67103438546263,
-          "tensorParallel": 4,
-          "batch": 28,
-          "iterationMs": 45.85021663196736,
-          "prefillShare": 0.5559030246501371,
-          "limitedBy": "ttft-queue",
-          "decodeBound": "memory"
-        },
-        "withinTolerance": true
-      }
-    ],
-    "all_within_tolerance": false,
-    "max_abs_relative_error": 0.18948577538127565
-  },
-  "regression": {
-    "note": "Consumed held-out chips, reported for diagnosis only; not validation",
-    "rows": [
-      {
-        "id": "6.0-0073",
-        "chip": "b300-hgx",
-        "model": "llama2-70b-99",
-        "scenario": "Offline",
-        "weights": "fp4",
-        "measuredPerAccelerator": 14119.25,
-        "predictedPerAccelerator": 12891.74110771587,
-        "relativeError": -0.08693867537469269,
-        "detail": {
-          "perAcceleratorTokensPerS": 12891.74110771587,
-          "tensorParallel": 1,
-          "batch": 3482,
-          "iterationMs": 270.09540223515495,
-          "prefillShare": 0.2947526761712449,
+          "iterationMs": 164.5106509131941,
+          "prefillShare": 0.32639217980202495,
           "limitedBy": "kv-capacity",
           "decodeBound": "compute"
         }
       },
       {
-        "id": "6.0-0073",
-        "chip": "b300-hgx",
+        "id": "5.1-0016",
+        "chip": "h100-sxm",
+        "model": "llama3.1-405b",
+        "scenario": "Server",
+        "weights": "fp8",
+        "measuredPerAccelerator": 35.216875,
+        "predictedPerAccelerator": 27.91148148393042,
+        "relativeError": -0.2074401410139196,
+        "detail": {
+          "perAcceleratorTokensPerS": 27.91148148393042,
+          "tensorParallel": 8,
+          "batch": 10,
+          "iterationMs": 44.78443756988203,
+          "prefillShare": 0.3352553890451566,
+          "limitedBy": "ttft-queue",
+          "decodeBound": "memory"
+        }
+      },
+      {
+        "id": "5.1-0007",
+        "chip": "h200-sxm",
         "model": "llama2-70b-99",
         "scenario": "Server",
-        "weights": "fp4",
-        "measuredPerAccelerator": 13414.75,
-        "predictedPerAccelerator": 12876.285204951324,
-        "relativeError": -0.040139756242097424,
+        "weights": "fp8",
+        "measuredPerAccelerator": 4274.225,
+        "predictedPerAccelerator": 4648.983293220778,
+        "relativeError": 0.08767865360873084,
         "detail": {
-          "perAcceleratorTokensPerS": 12876.285204951324,
+          "perAcceleratorTokensPerS": 4648.983293220778,
           "tensorParallel": 1,
-          "batch": 2575,
-          "iterationMs": 199.98003764391876,
-          "prefillShare": 0.29591626093949003,
+          "batch": 929,
+          "iterationMs": 199.82863809269494,
+          "prefillShare": 0.30950359182620735,
           "limitedBy": "tpot",
           "decodeBound": "compute"
         }
       },
       {
-        "id": "6.0-0073",
-        "chip": "b300-hgx",
-        "model": "llama3.1-405b",
-        "scenario": "Offline",
-        "weights": "fp4",
-        "measuredPerAccelerator": 243.95,
-        "predictedPerAccelerator": 246.91310285577367,
-        "relativeError": 0.012146353169804058,
-        "detail": {
-          "perAcceleratorTokensPerS": 246.91310285577367,
-          "tensorParallel": 2,
-          "batch": 102,
-          "iterationMs": 206.5503993515889,
-          "prefillShare": 0.7231859642637759,
-          "limitedBy": "kv-capacity",
-          "decodeBound": "memory"
-        }
-      },
-      {
-        "id": "6.0-0073",
-        "chip": "b300-hgx",
+        "id": "5.1-0079",
+        "chip": "h200-sxm",
         "model": "llama3.1-405b",
         "scenario": "Server",
-        "weights": "fp4",
-        "measuredPerAccelerator": 182.53125,
-        "predictedPerAccelerator": 169.02324435849323,
-        "relativeError": -0.07400379738541629,
+        "weights": "fp8",
+        "measuredPerAccelerator": 36.940375,
+        "predictedPerAccelerator": 27.718917403573816,
+        "relativeError": -0.24963086044541205,
         "detail": {
-          "perAcceleratorTokensPerS": 169.02324435849323,
-          "tensorParallel": 4,
-          "batch": 35,
-          "iterationMs": 51.76802772429047,
-          "prefillShare": 0.5856810286156586,
+          "perAcceleratorTokensPerS": 27.718917403573816,
+          "tensorParallel": 8,
+          "batch": 7,
+          "iterationMs": 31.56688940121398,
+          "prefillShare": 0.31641910600320755,
           "limitedBy": "ttft-queue",
           "decodeBound": "memory"
         }
       }
     ]
   },
-  "held_out": {
-    "chips": [
-      "gb300-nvl72",
-      "mi355x"
-    ],
+  "regression": {
+    "note": "Consumed held-out chips, reported for diagnosis only; not validation",
     "rows": [
       {
-        "id": "6.0-0002",
-        "chip": "mi355x",
+        "id": "6.0-0010",
+        "chip": "b300-hgx",
         "model": "llama2-70b-99",
         "scenario": "Offline",
         "weights": "fp4",
-        "measuredPerAccelerator": 12935,
-        "predictedPerAccelerator": 15231.456055658828,
-        "relativeError": 0.17753815660292438,
+        "measuredPerAccelerator": 14466.25,
+        "predictedPerAccelerator": 13109.301442326547,
+        "relativeError": -0.0938009890381718,
         "detail": {
-          "perAcceleratorTokensPerS": 15231.456055658828,
+          "perAcceleratorTokensPerS": 13109.301442326547,
           "tensorParallel": 1,
-          "batch": 3701,
-          "iterationMs": 242.98399223789215,
-          "prefillShare": 0.27769331158353744,
+          "batch": 3482,
+          "iterationMs": 265.61293256691175,
+          "prefillShare": 0.2997269065967091,
           "limitedBy": "kv-capacity",
           "decodeBound": "compute"
-        },
-        "withinTolerance": true
+        }
       },
       {
-        "id": "6.0-0002",
-        "chip": "mi355x",
+        "id": "6.0-0010",
+        "chip": "b300-hgx",
         "model": "llama2-70b-99",
         "scenario": "Server",
         "weights": "fp4",
-        "measuredPerAccelerator": 12535.25,
-        "predictedPerAccelerator": 15218.322548505203,
-        "relativeError": 0.2140422048627033,
+        "measuredPerAccelerator": 14313,
+        "predictedPerAccelerator": 13104.723953998728,
+        "relativeError": -0.08441808467835343,
         "detail": {
-          "perAcceleratorTokensPerS": 15218.322548505203,
+          "perAcceleratorTokensPerS": 13104.723953998728,
           "tensorParallel": 1,
-          "batch": 3043,
-          "iterationMs": 199.95633489177783,
-          "prefillShare": 0.27863034999690406,
+          "batch": 2620,
+          "iterationMs": 199.9279045630368,
+          "prefillShare": 0.3000617382699649,
           "limitedBy": "tpot",
           "decodeBound": "compute"
-        },
-        "withinTolerance": false
+        }
+      },
+      {
+        "id": "6.0-0010",
+        "chip": "b300-hgx",
+        "model": "llama3.1-405b",
+        "scenario": "Offline",
+        "weights": "fp4",
+        "measuredPerAccelerator": 246.38875,
+        "predictedPerAccelerator": 248.89943760028024,
+        "relativeError": 0.010189944144285201,
+        "detail": {
+          "perAcceleratorTokensPerS": 248.89943760028024,
+          "tensorParallel": 2,
+          "batch": 102,
+          "iterationMs": 204.90202987884365,
+          "prefillShare": 0.7275166951854345,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "memory"
+        }
+      },
+      {
+        "id": "6.0-0089",
+        "chip": "b300-hgx",
+        "model": "llama3.1-405b",
+        "scenario": "Server",
+        "weights": "fp4",
+        "measuredPerAccelerator": 185.55,
+        "predictedPerAccelerator": 170.55329212536725,
+        "relativeError": -0.08082300121063202,
+        "detail": {
+          "perAcceleratorTokensPerS": 170.55329212536725,
+          "tensorParallel": 4,
+          "batch": 34,
+          "iterationMs": 49.837794944186555,
+          "prefillShare": 0.5827696202389036,
+          "limitedBy": "ttft-queue",
+          "decodeBound": "memory"
+        }
       },
       {
         "id": "6.0-0078",
@@ -515,18 +537,17 @@
         "scenario": "Offline",
         "weights": "fp4",
         "measuredPerAccelerator": 15650.694444444445,
-        "predictedPerAccelerator": 15697.035110217885,
-        "relativeError": 0.00296093351882476,
+        "predictedPerAccelerator": 15966.379166041908,
+        "relativeError": 0.02017065266452267,
         "detail": {
-          "perAcceleratorTokensPerS": 15697.035110217885,
+          "perAcceleratorTokensPerS": 15966.379166041908,
           "tensorParallel": 1,
           "batch": 3764,
-          "iterationMs": 239.79050652373508,
-          "prefillShare": 0.2831269801481208,
+          "iterationMs": 235.74537225105257,
+          "prefillShare": 0.2879851312964649,
           "limitedBy": "kv-capacity",
           "decodeBound": "compute"
-        },
-        "withinTolerance": true
+        }
       },
       {
         "id": "6.0-0078",
@@ -535,18 +556,17 @@
         "scenario": "Server",
         "weights": "fp4",
         "measuredPerAccelerator": 12059.416666666666,
-        "predictedPerAccelerator": 15705.40443852278,
-        "relativeError": 0.30233533450535455,
+        "predictedPerAccelerator": 15975.112426639169,
+        "relativeError": 0.3247002627246345,
         "detail": {
-          "perAcceleratorTokensPerS": 15705.40443852278,
+          "perAcceleratorTokensPerS": 15975.112426639169,
           "tensorParallel": 1,
-          "batch": 3141,
-          "iterationMs": 199.99484968980755,
-          "prefillShare": 0.28255078473219375,
+          "batch": 3195,
+          "iterationMs": 199.9985924776469,
+          "prefillShare": 0.2874030127654882,
           "limitedBy": "tpot",
           "decodeBound": "compute"
-        },
-        "withinTolerance": false
+        }
       },
       {
         "id": "6.0-0078",
@@ -555,18 +575,17 @@
         "scenario": "Offline",
         "weights": "fp4",
         "measuredPerAccelerator": 270.99583333333334,
-        "predictedPerAccelerator": 293.3105007351664,
-        "relativeError": 0.08234321217177287,
+        "predictedPerAccelerator": 295.4694021609471,
+        "relativeError": 0.09030976058406948,
         "detail": {
-          "perAcceleratorTokensPerS": 293.3105007351664,
+          "perAcceleratorTokensPerS": 295.4694021609471,
           "tensorParallel": 2,
           "batch": 115,
-          "iterationMs": 196.03798655649715,
-          "prefillShare": 0.6895000186511385,
+          "iterationMs": 194.60559902131183,
+          "prefillShare": 0.694575058820552,
           "limitedBy": "kv-capacity",
           "decodeBound": "memory"
-        },
-        "withinTolerance": true
+        }
       },
       {
         "id": "6.0-0078",
@@ -575,107 +594,147 @@
         "scenario": "Server",
         "weights": "fp4",
         "measuredPerAccelerator": 258.71666666666664,
-        "predictedPerAccelerator": 225.66313779024745,
-        "relativeError": -0.12775956532791033,
+        "predictedPerAccelerator": 225.42458697374195,
+        "relativeError": -0.12868161963380031,
         "detail": {
-          "perAcceleratorTokensPerS": 225.66313779024745,
+          "perAcceleratorTokensPerS": 225.42458697374195,
           "tensorParallel": 4,
-          "batch": 69,
-          "iterationMs": 76.44137260926405,
-          "prefillShare": 0.6501575101068036,
+          "batch": 66,
+          "iterationMs": 73.1952100767161,
+          "prefillShare": 0.6494702219373139,
           "limitedBy": "ttft-queue",
+          "decodeBound": "memory"
+        }
+      },
+      {
+        "id": "6.0-0002",
+        "chip": "mi355x",
+        "model": "llama2-70b-99",
+        "scenario": "Offline",
+        "weights": "fp4",
+        "measuredPerAccelerator": 12935,
+        "predictedPerAccelerator": 15494.826523977825,
+        "relativeError": 0.19789922875746613,
+        "detail": {
+          "perAcceleratorTokensPerS": 15494.826523977825,
+          "tensorParallel": 1,
+          "batch": 3701,
+          "iterationMs": 238.8539164522302,
+          "prefillShare": 0.28249496792246886,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "compute"
+        }
+      },
+      {
+        "id": "6.0-0002",
+        "chip": "mi355x",
+        "model": "llama2-70b-99",
+        "scenario": "Server",
+        "weights": "fp4",
+        "measuredPerAccelerator": 12535.25,
+        "predictedPerAccelerator": 15481.118655264045,
+        "relativeError": 0.23500677332036024,
+        "detail": {
+          "perAcceleratorTokensPerS": 15481.118655264045,
+          "tensorParallel": 1,
+          "batch": 3096,
+          "iterationMs": 199.98554813396947,
+          "prefillShare": 0.28344185080263723,
+          "limitedBy": "tpot",
+          "decodeBound": "compute"
+        }
+      }
+    ]
+  },
+  "held_out": {
+    "chips": [
+      "gb200-nvl"
+    ],
+    "rows": [
+      {
+        "id": "5.1-0008",
+        "chip": "gb200-nvl",
+        "model": "llama2-70b-99",
+        "scenario": "Offline",
+        "weights": "fp4",
+        "measuredPerAccelerator": 13015.4,
+        "predictedPerAccelerator": 14097.486915646141,
+        "relativeError": 0.08313896734991943,
+        "detail": {
+          "perAcceleratorTokensPerS": 14097.486915646141,
+          "tensorParallel": 1,
+          "batch": 2192,
+          "iterationMs": 155.48870611592494,
+          "prefillShare": 0.2951362200009057,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "compute"
+        },
+        "withinTolerance": true
+      },
+      {
+        "id": "6.0-0075",
+        "chip": "gb200-nvl",
+        "model": "llama3.1-405b",
+        "scenario": "Offline",
+        "weights": "fp4",
+        "measuredPerAccelerator": 214.74305555555554,
+        "predictedPerAccelerator": 237.0310653338747,
+        "relativeError": 0.10378919923933516,
+        "detail": {
+          "perAcceleratorTokensPerS": 237.0310653338747,
+          "tensorParallel": 4,
+          "batch": 175,
+          "iterationMs": 184.5749625196811,
+          "prefillShare": 0.771260744169051,
+          "limitedBy": "kv-capacity",
           "decodeBound": "memory"
         },
         "withinTolerance": true
       }
     ],
     "tolerance": 0.2,
-    "passed": false,
-    "max_abs_relative_error": 0.30233533450535455,
-    "power_sensitivity": [
+    "passed": true,
+    "max_abs_relative_error": 0.10378919923933516,
+    "unscored_rows": [
       {
-        "chip": "gb300-nvl72",
-        "power_w": 1100,
-        "scored": false,
-        "rows": [
-          {
-            "id": "6.0-0078",
-            "chip": "gb300-nvl72",
-            "model": "llama2-70b-99",
-            "scenario": "Offline",
-            "weights": "fp4",
-            "measuredPerAccelerator": 15650.694444444445,
-            "predictedPerAccelerator": 12879.61099928444,
-            "relativeError": -0.17705817815283353,
-            "detail": {
-              "perAcceleratorTokensPerS": 12879.61099928444,
-              "tensorParallel": 1,
-              "batch": 3764,
-              "iterationMs": 292.24485120001833,
-              "prefillShare": 0.2956662301306883,
-              "limitedBy": "kv-capacity",
-              "decodeBound": "compute"
-            }
-          },
-          {
-            "id": "6.0-0078",
-            "chip": "gb300-nvl72",
-            "model": "llama2-70b-99",
-            "scenario": "Server",
-            "weights": "fp4",
-            "measuredPerAccelerator": 12059.416666666666,
-            "predictedPerAccelerator": 12887.341850775447,
-            "relativeError": 0.06865383351395771,
-            "detail": {
-              "perAcceleratorTokensPerS": 12887.341850775447,
-              "tensorParallel": 1,
-              "batch": 2577,
-              "iterationMs": 199.96365657398457,
-              "prefillShare": 0.29508429258008023,
-              "limitedBy": "tpot",
-              "decodeBound": "compute"
-            }
-          },
-          {
-            "id": "6.0-0078",
-            "chip": "gb300-nvl72",
-            "model": "llama3.1-405b",
-            "scenario": "Offline",
-            "weights": "fp4",
-            "measuredPerAccelerator": 270.99583333333334,
-            "predictedPerAccelerator": 251.59284470830414,
-            "relativeError": -0.0715988448470457,
-            "detail": {
-              "perAcceleratorTokensPerS": 251.59284470830414,
-              "tensorParallel": 2,
-              "batch": 115,
-              "iterationMs": 228.54386048484525,
-              "prefillShare": 0.7336625405717385,
-              "limitedBy": "kv-capacity",
-              "decodeBound": "memory"
-            }
-          },
-          {
-            "id": "6.0-0078",
-            "chip": "gb300-nvl72",
-            "model": "llama3.1-405b",
-            "scenario": "Server",
-            "weights": "fp4",
-            "measuredPerAccelerator": 258.71666666666664,
-            "predictedPerAccelerator": 169.65384753156653,
-            "relativeError": -0.3442484795533085,
-            "detail": {
-              "perAcceleratorTokensPerS": 169.65384753156653,
-              "tensorParallel": 4,
-              "batch": 35,
-              "iterationMs": 51.57560601961554,
-              "prefillShare": 0.5841159301581328,
-              "limitedBy": "ttft-queue",
-              "decodeBound": "memory"
-            }
-          }
-        ]
+        "id": "5.1-0070",
+        "chip": "gb200-nvl",
+        "model": "llama2-70b-99",
+        "scenario": "Server",
+        "weights": "fp4",
+        "measuredPerAccelerator": 12339.9,
+        "predictedPerAccelerator": 14133.612521316283,
+        "relativeError": 0.14535875666061182,
+        "detail": {
+          "perAcceleratorTokensPerS": 14133.612521316283,
+          "tensorParallel": 1,
+          "batch": 2183,
+          "iterationMs": 154.45449609628142,
+          "prefillShare": 0.2925751025233764,
+          "limitedBy": "kv-capacity",
+          "decodeBound": "compute"
+        }
+      },
+      {
+        "id": "6.0-0075",
+        "chip": "gb200-nvl",
+        "model": "llama3.1-405b",
+        "scenario": "Server",
+        "weights": "fp4",
+        "measuredPerAccelerator": 196.30416666666667,
+        "predictedPerAccelerator": 188.69790353228763,
+        "relativeError": -0.03874733411693099,
+        "detail": {
+          "perAcceleratorTokensPerS": 188.69790353228763,
+          "tensorParallel": 4,
+          "batch": 43,
+          "iterationMs": 56.96936637221618,
+          "prefillShare": 0.6110184281469633,
+          "limitedBy": "ttft-queue",
+          "decodeBound": "memory"
+        }
       }
-    ]
+    ],
+    "power_sensitivity": []
   }
 }

@@ -4,10 +4,76 @@
 **Step:** C1 of [`COMPUTE_DIE_PLAN.md`](../COMPUTE_DIE_PLAN.md)
 **Evidence class:** `modeled`
 **Files:**
-- Model: [`lib/perf-model.ts`](../../lib/perf-model.ts), version 2, frozen at sha256 `c28c0e0a…18b4`
-- Evidence: [`evidence/c1-perf-model.json`](../../evidence/c1-perf-model.json) (version 2) and [`evidence/c1-perf-model-v1.json`](../../evidence/c1-perf-model-v1.json) (version 1, unchanged)
+- Model: [`lib/perf-model.ts`](../../lib/perf-model.ts), version 3, frozen at sha256 `2ae82b56…dcce`
+- Evidence: [`evidence/c1-perf-model.json`](../../evidence/c1-perf-model.json) (version 3); [`-v2.json`](../../evidence/c1-perf-model-v2.json) and [`-v1.json`](../../evidence/c1-perf-model-v1.json) unchanged
+- Best-submission extraction: [`tools/mlperf/extract_frontier.py`](../../tools/mlperf/extract_frontier.py)
 - Tests: `tests/perf-model.test.ts`
 - Regenerate: `npm run evaluate:perf-model`
+
+# Version 3: scored against best submissions, Offline only (C1 complete)
+
+## Outcome
+
+**C1's exit criteria are met** under the scoring rules the owner approved on 2026-09-26:
+
+| Exit criterion | Version 3 result |
+|---|---|
+| Peaks reproduced exactly | **Met** (MI355X within AMD's two-significant-figure rounding) |
+| Calibration within ±15% | **Met:** all 6 Offline best-submission rows, largest error +10.0% |
+| Held out within ±20% | **Met:** GB200 Llama 2 70B **+8.3%**, Llama 3.1 405B **+10.4%** |
+
+The physics is version 2's, unchanged: rooflines, a power ceiling, KV-capacity batching, and TTFT/TPOT limits. Nothing was tuned after calibration. The fitted values are BF16 TFLOPS per watt of 1.117 (Hopper) and 1.250 (Blackwell), memory efficiency of 0.913 and 0.869, and a serving efficiency of 0.684.
+
+**What "qualified" covers, and what it doesn't:**
+- The model may be used for **`modeled`, Offline** throughput claims about chips described by its parameters.
+- **Limits of the check.** It rests on 2 scored held-out rows. GB200's results were seen during the variance analysis, so the check is blind to fitting, not to the author. The next MLPerf round is the first genuinely unseen test.
+- **A1 is not covered yet.** A1 has no measured TFLOPS per watt, memory efficiency, or serving efficiency. Until C2, C3, and C5 produce them from RTL and layout, any A1 figure from this model must state those three as assumptions, and it stays `modeled`.
+
+## Why the scoring changed (owner-approved, based on data, not on the model's errors)
+
+Version 3 was first planned as version 2 plus a "rack-scale Server" term. Before building it, about 170 paired MLPerf submissions (Server and Offline from the same system) were checked, and the premise did not hold:
+
+1. **No rack-scale Server effect exists to model.** Llama 2 70B Server/Offline on rack systems is 0.98 (H100 ×32), 0.90 (MI300X), 0.91 (MI325X), 0.98 (MI355X ×88), and 0.91 (GB200 NVL72). GB300's 0.77 is a single submission.
+2. **Server results are dominated by software.** Identical GB200 NVL72 hardware from the same submitter went 0.64 → 0.79 → 0.91 Server/Offline on Llama 3.1 405B over three rounds, and GB300 went 0.76 → 0.96. No hardware model can hold such rows within ±20%.
+3. **Best submissions are a stable measure of hardware.** Per-GPU Offline results for one chip spread widely (B200's weakest is 0.77× its median; MI355X's 0.51×), but the best submissions sit within 3–8% of the median.
+
+The approved rules, recorded in the targets file under `calibration.scoring`:
+- score each chip against its **best closed-division, generally available submission**;
+- **qualify on Offline**, and report Server rows without scoring them;
+- **GB200 is the held-out chip.**
+
+This is not a rescoping to rescue a failed model. Version 2 is not rescored under the new rules, and its failure stays on record.
+
+## Best-submission rows
+
+Extracted by `tools/mlperf/extract_frontier.py` from the MLCommons summary files for v5.0 to v6.1. Matching uses exact accelerator names, so H100 PCIe/NVL, virtualized, power-capped, and mixed systems are excluded. v6.1's closed division has no rows for these benchmarks; it has only the stricter llama2-70b-99.9 variant, a different benchmark.
+
+| Chip | Workload | Best /GPU | Submission | Modeled | Error |
+|---|---|---|---|---|---|
+| H100 | Llama 2 70B | 3,913 | 5.0-0057 NVIDIA | 3,780 | −3.4% |
+| H100 | 405B | 54.5 | 5.0-0065 QCT | 60.0 | +10.0% |
+| H200 | Llama 2 70B | 4,432 | 5.0-0051 Lenovo | 4,640 | +4.7% |
+| H200 | 405B | 71.7 | 5.0-0011 Cisco | 74.2 | +3.5% |
+| B200 | Llama 2 70B | 12,994 | 6.0-0048 HPE | 12,098 | −6.9% |
+| B200 | 405B | 207.6 | 5.1-0028 Dell | 215.6 | +3.9% |
+| **GB200 (held out)** | Llama 2 70B | 13,015 | 5.1-0008 Azure | 14,098 | **+8.3%** |
+| **GB200 (held out)** | 405B | 214.7 | 6.0-0075 NVIDIA | 237.0 | **+10.4%** |
+
+**Unscored Server rows:**
+- Calibration chips: −25.0% to +8.8%.
+- GB200: +14.5% and −3.9%.
+- Consumed chips, diagnostic only:
+  - B300: −9.4% to +1.0%
+  - GB300 Offline: +2.0% and +9.0%
+  - MI355X Offline: +19.8%, still overpredicted with no AMD data
+
+## What C1 means for A1
+
+1. **Throughput per watt decides parity, not peak FLOPS.** The power ceiling is what made the model generalize: from B200 at 1,000 W, it predicts GB200 at 1,200 W and GB300 at 1,400 W within about 10%.
+2. **To reach B200-class serving, A1 needs B200-class sustained TFLOPS per watt at the target precision, and B200-class memory bandwidth.** A1's lever beyond that is AIMEM's bytes-per-token reduction, which the model can express through bandwidth and KV traffic.
+3. **C2, C3, and C5 must measure the three A1 parameters** the model needs. The GT2N/ASAP7 bracket from C3 is where TFLOPS per watt at 3 nm-class will come from.
+
+---
 
 # Version 2: power ceiling
 

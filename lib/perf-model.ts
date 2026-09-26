@@ -1,15 +1,17 @@
-// C1 performance model (version 2) for the AIMEM-A1 compute-die plan (docs/COMPUTE_DIE_PLAN.md).
+// C1 performance model (version 3) for the AIMEM-A1 compute-die plan (docs/COMPUTE_DIE_PLAN.md).
 // Roofline kernels with sustained rates measured on real chips, composed into an LLM serving
 // model. Every output is evidence class `modeled`.
 //
 // Version 2 adds a power ceiling: sustained tensor throughput is the lesser of an architectural
 // ceiling and what the chip's power rating can feed, with energy per FLOP proportional to operand
 // bits. Version 1 (evidence/c1-perf-model-v1.json) scaled with peak FLOPS and overpredicted B300.
+// Version 3 keeps version 2's physics and calibrates against each chip's best MLPerf submission
+// (measured.mlperf_frontier), Offline rows only, under the scoring rules in the targets file.
 //
 // Parameters come only from calibration data, in three groups:
 //   1. Sustained BF16 tensor throughput per watt, per GPU family, from measured large GEMMs.
 //   2. Memory efficiency per GPU family, from measured sustained HBM bandwidth.
-//   3. One global serving efficiency, fitted across the calibration chips' MLPerf rows.
+//   3. One global serving efficiency, fitted across the calibration chips' best Offline MLPerf rows.
 // A family with no calibration data uses the mean of the calibrated families (declared before
 // version 2 was built). Held-out chips are never read by calibrate(); tests/perf-model.test.ts proves it.
 
@@ -25,7 +27,8 @@ type ReferenceChip = {
   power_w?: Figure & { conflict?: { alternatives: { value: number }[] } };
 };
 type MlperfRow = {
-  id: string;
+  id?: string;
+  best_submission?: { round: string; id: string | null; submitter: string; system: string };
   chip: string;
   model: string;
   scenario: 'Offline' | 'Server';
@@ -43,7 +46,7 @@ type MlperfWorkload = { model: string; mean_input_tokens: number; server_ttft_ms
 
 export type Targets = {
   reference_chips: ReferenceChip[];
-  measured: { mlperf_inference: MlperfRow[]; gemm: GemmRow[]; memory_bandwidth: BandwidthRow[] };
+  measured: { mlperf_inference: MlperfRow[]; mlperf_frontier: MlperfRow[]; gemm: GemmRow[]; memory_bandwidth: BandwidthRow[] };
   models: Record<string, ModelConfig>;
   benchmarks: { mlperf_workloads: Record<string, MlperfWorkload | string> };
   calibration: { calibration_chips: string[]; held_out_chips: string[]; regression_chips?: string[]; tolerances_relative: Record<string, number> };
@@ -56,6 +59,7 @@ export const MICROARCH: Record<string, { family: Family; sms: number; flopsPerCl
   'h200-sxm': { family: 'hopper', sms: 132, flopsPerClockPerSm: { bf16: 4096, fp8: 8192 }, basis: 'Same GH100 die as H100' },
   'b200-hgx': { family: 'blackwell', sms: 148, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 32768 }, basis: 'Chips and Cheese: 1,024 16-bit MAC/clk per SM sub-partition, 4 per SM; FP8 2x, FP4 4x' },
   'b300-hgx': { family: 'blackwell', sms: 160, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 49152 }, basis: 'Blackwell Ultra blog: 160 SMs; NVFP4 at 3x the FP8 rate' },
+  'gb200-nvl': { family: 'blackwell', sms: 148, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 32768 }, basis: 'Same Blackwell die as B200, higher power bin' },
   'gb300-nvl72': { family: 'blackwell', sms: 160, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 49152 }, basis: 'Same Blackwell Ultra die as B300, higher power bin' },
   mi355x: { family: 'cdna4', sms: 256, flopsPerClockPerSm: { bf16: 4096, fp8: 8192, fp4: 16384 }, statedClockGhz: 2.4, basis: 'AMD: 256 CUs at 2.4 GHz peak engine clock; AMD rounds its peaks to about two significant figures' },
 };
@@ -325,7 +329,7 @@ export function calibrate(targets: Targets): Calibration {
     };
   }
 
-  const rows = targets.measured.mlperf_inference.filter((row) => allowed(row) && calibrationChips.has(row.chip));
+  const rows = targets.measured.mlperf_frontier.filter((row) => allowed(row) && calibrationChips.has(row.chip));
   const logError = (servingEfficiency: number) => rows.reduce((sum, row) => {
     const chip = chipModel(targets, row.chip);
     const prediction = predictServing(chip, families[chip.family], servingEfficiency, servingWorkload(targets, row));
@@ -349,7 +353,7 @@ export function evaluateMlperfRow(targets: Targets, calibration: Calibration, ro
   const prediction = predictServing(chip, calibration.families[chip.family], calibration.servingEfficiency, servingWorkload(targets, row));
   const measured = row.system_result_tokens_per_s / row.accelerators;
   return {
-    id: row.id,
+    id: row.id ?? row.best_submission?.id ?? `${row.best_submission?.round} ${row.best_submission?.system}`,
     chip: row.chip,
     model: row.model,
     scenario: row.scenario,

@@ -1,7 +1,7 @@
 # AIMEM-A1: an AI Compute Die Built and Improved by Agents
 
 **Plan date:** 26 September 2026
-**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). C1 versions 1 and 2 were built and evaluated the same day. Version 2 adds a power ceiling. All three Offline held-out rows (GB300 NVL72, MI355X) are within 20%, but two Server rows are not, so the model **still fails its held-out check** and may not be used for A1 claims (see [C1 status](#c1-status-2026-09-26-version-2)). The next C1 step is the owner's choice; C2 to C6 are proposed.
+**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). **C1 complete** the same day, after three model versions: version 3 meets every exit criterion under owner-approved scoring (best MLPerf submission per chip, Offline qualifies). Its held-out GB200 predictions are +8.3% and +10.4%. Versions 1 and 2 failed their held-out checks, and those results stay on record (see [C1 status](#c1-status-2026-09-26-version-3)). C2 to C6 are proposed.
 **Extends:** [`RSI_PLATFORM_PLAN.md`](RSI_PLATFORM_PLAN.md). That plan builds the machinery that lets agents improve designs (L1), themselves (L2), and their models (L3). This plan adds what they build next: a compute die that pairs with the AIMEM memory stacks. It also sets the autonomy policy for running those loops unattended.
 
 ---
@@ -127,6 +127,18 @@ What C0 changed in this plan:
 - The benchmark set is defined precisely enough for C1 to compute it: GEMM shapes, attention shapes, and decode and prefill scenarios with model, batch, sequence length, and precision.
 - Open blocks and tools are chosen, with licenses compatible with the project.
 - The architecture direction in section 5 is confirmed or revised from the dossier.
+
+### C1 status (2026-09-26, version 3): complete
+
+Before version 3 was built, a variance analysis of about 170 MLPerf submission pairs found no systematic rack-scale Server effect. It found that Server results are dominated by software maturity: identical GB200 NVL72 hardware went 0.64 → 0.91 Server/Offline over three rounds. The owner then approved three scoring rules: score against each chip's **best** closed-division submission, qualify on **Offline**, and hold out **GB200**.
+
+| Criterion | Result |
+|---|---|
+| Peaks | Met |
+| Calibration (6 Offline best-submission rows) | Met: all within ±15%, largest +10.0% |
+| Held out (GB200) | Met: +8.3% and +10.4% against ±20% |
+
+Version 3 uses version 2's physics unchanged, frozen at sha256 `2ae82b56…`. It is qualified for `modeled` Offline claims. For A1 it still needs three measured parameters (TFLOPS per watt, memory efficiency, serving efficiency), which C2, C3, and C5 produce; until then they are stated assumptions. Full results: [`C1_PERF_MODEL.md`](compute-die/C1_PERF_MODEL.md).
 
 ### C1 status (2026-09-26, version 2)
 
