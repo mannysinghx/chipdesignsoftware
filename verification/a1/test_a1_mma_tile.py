@@ -1,7 +1,9 @@
 """a1_mma_tile against a golden model of the tile: an accumulator array updated by golden.mma4.
 
-Every READ response is compared with the golden accumulator state, and the handshake rule
-cmd_ready == !rsp_valid || rsp_ready is checked on every cycle.
+Every READ response is compared with the golden accumulator state. The tile is pipelined (3 stages),
+so the tests also pin its throughput: a dependent chain into one accumulator is accepted exactly every
+3 cycles, and rotating over accumulators sustains one command per cycle. The exact ready rule is
+proved formally (formal/a1/a1_tile.sby).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from tb import pack, tb_test, unpack
 OP_ZERO, OP_LOAD, OP_MMA, OP_READ = 0, 1, 2, 3
 ENTRIES = 4
 FORMATS = (golden.E4M3, golden.E5M2, golden.BF16)
+DRAIN_CYCLES = 8  # longer than the pipeline latency (a READ responds 4 cycles after it is accepted)
 
 
 class TileModel:
@@ -56,12 +59,15 @@ def operands(fmt, rng, gaussian=True):
     return [draw() for _ in range(16)], [draw() for _ in range(16)]
 
 
-async def run_stream(dut, commands, ready_probability=1.0):
-    """Drive (op, fmt, index, a, b, c) commands; return the READ responses in order, checking the handshake."""
+async def run_stream(dut, commands, ready_probability=1.0, accept_cycles=None):
+    """Drive (op, fmt, index, a, b, c) commands; return the READ responses in order.
+
+    If accept_cycles is a list, the cycle number of every accepted command is appended to it."""
     responses = []
+    cycle = 0
     pending = list(commands)
     idle = 0
-    while pending or idle < 3:
+    while pending or idle < DRAIN_CYCLES:
         if pending:
             op, fmt, index, a, b, c = pending[0]
             dut.cmd_valid.value = 1
@@ -76,12 +82,14 @@ async def run_stream(dut, commands, ready_probability=1.0):
         dut.rsp_ready.value = int(random.random() < ready_probability)
         await ReadOnly()
         rsp_valid, rsp_ready, cmd_ready = int(dut.rsp_valid.value), int(dut.rsp_ready.value), int(dut.cmd_ready.value)
-        assert cmd_ready == int((not rsp_valid) or rsp_ready), "cmd_ready must equal !rsp_valid || rsp_ready"
         if rsp_valid and rsp_ready:
             responses.append(unpack(int(dut.rsp_data.value), 32, 16))
         accepted = bool(pending) and cmd_ready
+        if accepted and accept_cycles is not None:
+            accept_cycles.append(cycle)
         await RisingEdge(dut.clk)
         await FallingEdge(dut.clk)
+        cycle += 1
         if accepted:
             pending.pop(0)
         idle = 0 if (pending or int(dut.rsp_valid.value)) else idle + 1
@@ -160,3 +168,42 @@ async def random_command_stream_under_backpressure(dut):
     assert len(responses) == len(expected), f"{len(responses)} responses for {len(expected)} READs"
     for number, (got, want) in enumerate(zip(responses, expected)):
         assert got == want, f"response {number}: rtl {[hex(x) for x in got]} golden {[hex(x) for x in want]}"
+
+
+@tb_test()
+async def dependent_chain_is_accepted_every_third_cycle(dut):
+    """An MMA must wait for the previous MMA into the same accumulator to commit (3-stage pipeline)."""
+    await reset(dut)
+    rng = random.Random(random.getrandbits(32))
+    fmt = golden.BF16
+    model = TileModel()
+    zeros = [0] * 16
+    commands = []
+    for _ in range(12):
+        a, b = operands(fmt, rng)
+        commands.append((OP_MMA, fmt, 3, a, b, zeros))
+    commands.append((OP_READ, fmt, 3, zeros, zeros, zeros))
+    expected = [response for command in commands if (response := model.apply(*command)) is not None]
+    cycles: list[int] = []
+    assert await run_stream(dut, commands, accept_cycles=cycles) == expected
+    gaps = [later - earlier for earlier, later in zip(cycles, cycles[1:12])]
+    assert gaps == [3] * 11, f"dependent MMAs accepted at gaps {gaps}, expected every 3 cycles"
+
+
+@tb_test()
+async def rotating_accumulators_sustain_one_mma_per_cycle(dut):
+    """MMAs rotating over all accumulators never wait: a K-loop interleaved across 4 output tiles."""
+    await reset(dut)
+    rng = random.Random(random.getrandbits(32))
+    fmt = golden.E4M3
+    model = TileModel()
+    zeros = [0] * 16
+    commands = []
+    for step in range(32):
+        a, b = operands(fmt, rng)
+        commands.append((OP_MMA, fmt, step % ENTRIES, a, b, zeros))
+    commands += [(OP_READ, fmt, index, zeros, zeros, zeros) for index in range(ENTRIES)]
+    expected = [response for command in commands if (response := model.apply(*command)) is not None]
+    cycles: list[int] = []
+    assert await run_stream(dut, commands, accept_cycles=cycles) == expected
+    assert cycles[:32] == list(range(cycles[0], cycles[0] + 32)), "rotating MMAs must be accepted on consecutive cycles"

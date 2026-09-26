@@ -35,8 +35,8 @@ class Suite:
 
 
 SUITES = [
-    Suite("fp_dot4", "a1_fp_dot4", ("a1_fp_dot4.sv",), "test_a1_fp_dot4"),
-    Suite("mma_tile", "a1_mma_tile", ("a1_fp_dot4.sv", "a1_mma_tile.sv"), "test_a1_mma_tile"),
+    Suite("fp_dot4", "a1_fp_dot4", ("a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv"), "test_a1_fp_dot4"),
+    Suite("mma_tile", "a1_mma_tile", ("a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv", "a1_mma_tile.sv"), "test_a1_mma_tile"),
 ]
 
 

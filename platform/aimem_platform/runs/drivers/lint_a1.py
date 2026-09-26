@@ -9,8 +9,8 @@ import lint  # noqa: E402
 
 # (top module, files) pairs: the full tile plus the dot-product unit on its own.
 lint.TARGETS = [
-    ("a1_mma_tile", ["a1_fp_dot4.sv", "a1_mma_tile.sv"]),
-    ("a1_fp_dot4", ["a1_fp_dot4.sv"]),
+    ("a1_mma_tile", ["a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv", "a1_mma_tile.sv"]),
+    ("a1_fp_dot4", ["a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv"]),
 ]
 
 if __name__ == "__main__":

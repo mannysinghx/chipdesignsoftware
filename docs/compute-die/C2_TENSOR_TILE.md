@@ -1,4 +1,40 @@
-# C2 Result: Tensor Tile RTL, Increment 1
+# C2 Result: Tensor Tile RTL
+
+## Increment 2a: pipelining (26 September 2026)
+
+The tile is now a 3-stage pipeline, as C3's physical flow needs.
+- **Stage modules.** The dot unit is split into three: `a1_dot_terms` (decode and multiply), `a1_dot_sum` (align and exact sum), and `a1_dot_round` (normalize and round). `a1_fp_dot4` is their composition, so the existing golden cosimulation, exhaustive tests, and proofs cover exactly the logic the pipeline uses.
+- **Accumulator ordering.**
+  - An MMA reads its accumulator in stage 1 and commits in stage 3.
+  - A READ reads at stage 3, after every older write, so it never sees stale data.
+  - ZERO and LOAD commit in program order.
+- **The one hazard.** An MMA whose accumulator an older in-flight command will write is held by a scoreboard until that write commits.
+- **Throughput.** A dependent chain into one accumulator is accepted exactly every 3 cycles; rotating over 3 or more accumulators sustains one MMA per cycle, the way tensor cores hide accumulator latency. Tests pin both rates exactly.
+
+| Check | Result |
+|---|---|
+| Cosimulation | 15/15, including the new exact-throughput tests |
+| Tile control proof (k-induction, base case 8) | Pass. The invariants were rewritten for the pipeline: a committed shadow of one accumulator, no MMA ever reads an accumulator with an older uncommitted write, and in-flight READs plus the response slot always equal accepted READs minus taken responses. Four covers are reached: a hazard hold, a full pipeline, backpressure, and LOAD then READ back |
+| Dot-unit proofs | Pass: operand swap (42 s) and special values. Term-order independence is now proved on the sum stage for any term bundle (about 30 s) |
+| Lint | 0 errors, 0 warnings |
+| Audited runs | `a1.lint` 899d1d52, `a1.sim` 0d54a1e6, `a1.formal` 07d25c90 (7/7 tasks, 7 min). Each rebuilds from the audit log 7/7; lint and simulation reproduce identically |
+
+**Planted bugs, all caught:**
+- a scoreboard that forgets stage 2 (also caught by 4 cosimulation tests);
+- no stall under backpressure;
+- a commit to the wrong entry.
+
+With a base-case depth of 4 these showed as `UNKNOWN`: the induction step failed, but no concrete trace was found. The depth was raised to 8 so each produces a real counterexample trace.
+
+**Formal performance, a lesson recorded in the job files.** Splitting the unit into modules made two whole-unit proofs slow: operand swap went from 47 s to over 10 minutes, and term-order independence did not finish in 30 minutes. The fixes:
+- `prep -flatten` restores swap to 42 s;
+- order independence moved to the sum stage, where it needs no multipliers.
+
+The first audited formal run (`1cdc2e29`) used the unflattened jobs; it was stopped after 30 minutes and is recorded as errored.
+
+---
+
+# Increment 1
 
 **Date:** 26 September 2026
 **Step:** C2 of [`COMPUTE_DIE_PLAN.md`](../COMPUTE_DIE_PLAN.md)

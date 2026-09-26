@@ -1,5 +1,6 @@
 // SymbiYosys harness for a1_fp_dot4: arithmetic invariants proved for every input (combinational,
-// so a depth-1 proof covers the whole input space). Bit-exactness against the golden model is checked
+// so a depth-1 proof covers the whole input space). Term-order independence is proved on the sum
+// stage alone (a1_dot_sum_sby.sv), where it does not have to reason through the multipliers. Bit-exactness against the golden model is checked
 // by cosimulation (verification/a1); these properties hold for any correct implementation of the spec.
 module a1_fp_dot4_sby (
   input wire clk
@@ -13,10 +14,9 @@ module a1_fp_dot4_sby (
   localparam [63:0] UPPER_BYTES = 64'hFF00_FF00_FF00_FF00;
   localparam [31:0] QNAN = 32'h7FC00000;
 
-  wire [31:0] d, d_swapped, d_rotated, d_noisy;
+  wire [31:0] d, d_swapped, d_noisy;
   a1_fp_dot4 base    (.fmt(fmt), .a(a), .b(b), .c(c), .d(d));
   a1_fp_dot4 swapped (.fmt(fmt), .a(b), .b(a), .c(c), .d(d_swapped));
-  a1_fp_dot4 rotated (.fmt(fmt), .a({a[15:0], a[63:16]}), .b({b[15:0], b[63:16]}), .c(c), .d(d_rotated));
   a1_fp_dot4 noisy   (.fmt(fmt), .a(a ^ (noise & UPPER_BYTES)), .b(b ^ ({noise[31:0], noise[63:32]} & UPPER_BYTES)), .c(c), .d(d_noisy));
 
   // Property groups are proved as separate tasks (a1_dot4.sby) so that each has its own solver budget.
@@ -29,9 +29,6 @@ module a1_fp_dot4_sby (
 `endif
 `ifdef CHECK_SWAP
     assert (d == d_swapped);                                        // a*b == b*a, lane by lane
-`endif
-`ifdef CHECK_ROTATE
-    assert (d == d_rotated);                                        // term order does not matter (exact sum)
 `endif
     cover (d[30:23] != 8'h00 && d[30:23] != 8'hFF && fmt == 2'd2);  // a normal BF16 result is reachable
     cover (d == QNAN && fmt == 2'd0);                               // an E4M3 NaN result is reachable

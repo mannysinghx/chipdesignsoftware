@@ -1,0 +1,19 @@
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+cover: mode cover
+depth 1
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read -formal a1_dot_sum.sv a1_dot_sum_sby.sv
+prep -flatten -top a1_dot_sum_sby
+
+[files]
+../../rtl/a1/a1_dot_sum.sv
+a1_dot_sum_sby.sv
