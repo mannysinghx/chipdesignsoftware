@@ -134,7 +134,7 @@ The pinned toolchain is Yosys, Icarus, Verilator, SymbiYosys, cocotb, and OpenRO
 | NVDLA | Inference accelerator | Non-SPDX NVIDIA license | Dormant since 2022 | tmake preprocessing | **Excluded** |
 | Tenstorrent Tensix | — | Not open source | — | — | Not available: Tenstorrent publishes only peripheral RTL (Ocelot vector unit, UCIe bridge, debug IP) |
 
-**To verify before C5** (not researched in C0): a DMA engine (PULP iDMA is the obvious candidate) and whether the pinned oss-cad-suite includes yosys-slang.
+**To verify before C5:** a DMA engine (PULP iDMA is the obvious candidate). yosys-slang is available through the pinned ORFS image's `SYNTH_HDL_FRONTEND=slang` (section 6).
 
 ---
 
@@ -156,16 +156,26 @@ The pinned toolchain is Yosys, Icarus, Verilator, SymbiYosys, cocotb, and OpenRO
 
 ## 6. Process kits
 
-| PDK | Manufacturable | In ORFS | Role |
+**What the pinned toolchain has** (`platform/toolchains.lock.json`):
+- The image is `openroad/orfs:26Q3-605-g2d29bdaf8`, built from ORFS commit [2d29bdaf8](https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/tree/2d29bdaf8/flow/platforms) (2026-09-22).
+- That commit ships the platforms `asap7`, `gf180`, `gt2n`, `ihp-sg13g2`, `nangate45`, and `sky130hd/hs`, and its `.dockerignore` excludes none of them. This was read from the source tree; the image itself was not inspected, so confirm at C3.
+- It supports `SYNTH_HDL_FRONTEND=slang` (yosys-slang), which PULP-style SystemVerilog needs.
+- It has **no** JVM, sbt, mill, or firtool.
+
+| PDK | License | Manufacturable | Role |
 |---|---|---|---|
-| sky130hd | Yes (SkyWater 130 nm) | Yes; the T0 channel already runs through it (169.5 MHz, DRC/LVS clean) | C3 executed tile |
-| ASAP7 | **No:** predictive 7 nm academic kit | Yes: ORFS ships ASAP7 designs, including CVA6 and ibex. Whether the pinned image includes the platform is not yet verified | C3 closer-to-modern tile |
-| gf180, IHP sg13g2 | Yes | Yes | Not needed now |
-| nangate45 | No (predictive 45 nm) | Yes | Not needed |
+| sky130hd | Apache-2.0 | Yes (SkyWater 130 nm) | C3 executed tile; the T0 channel already runs here (169.5 MHz, DRC/LVS clean) |
+| ASAP7 | BSD-3-Clause | **No:** predictive 7 nm (2016). Its SRAMs are FakeRAM abstracts, so scratchpad PPA there is a placeholder | C3 low end of the advanced-node bracket |
+| **GT2N** | BSD-3-Clause | **No:** predictive 2 nm nanosheet with backside power (ISCAS 2026), added to ORFS 2026-06-15 | C3 high end of the bracket |
+| gf180, IHP sg13g2 | Apache-2.0 | Yes | Not needed now |
+| nangate45 | Apache-2.0 (ORFS platform) | No | Not needed |
 
-**Scaling to 3 nm-class** is a C3 deliverable, and no method is chosen yet. Candidates are published device-scaling tools and IRDS roadmap factors. Any projection is `modeled` and carries its method and uncertainty band. ASAP7 results are not signoff for any real 7 nm process.
+**Scaling to 3 nm-class (method chosen).** Published scaling tools stop at 7 nm. DeepScaleTool covers 130→7 nm with 1.7% area, 2.5% delay, and 5% power error ([arXiv 2102.10195](https://arxiv.org/abs/2102.10195)); Stillmaker & Baas covers 180→7 nm. Neither reaches 3 nm. C3 therefore:
+1. runs the same tile on **ASAP7 and GT2N**, both in the pinned image;
+2. reports the 3 nm-class estimate as the range between them, adjusted by IRDS pitch ratios ([2023 More Moore](https://irds.ieee.org/images/files/pdf/2023/2023IRDS_MM.pdf));
+3. labels it `modeled`, "predictive, not foundry".
 
----
+**Needs a platform change at C3:** the `physical.orfs` adapter is hard-wired to `aimem_t0_channel` on sky130hd.
 
 ## 7. C0 exit criteria
 
@@ -180,7 +190,6 @@ The pinned toolchain is Yosys, Icarus, Verilator, SymbiYosys, cocotb, and OpenRO
 - Owner decision 3 (disk or worker) before C3.
 - Owner decision 4 (hosted-model spend ceiling).
 - Die areas for B200, B300, and Rubin, needed for per-mm² comparisons and not published.
-- The C3 scaling method.
 
 ## 8. Next step (not started)
 

@@ -17,6 +17,7 @@
     "correlate:ramulator": "PYTHONPATH=.cache/ramulator2/python python3 tools/ramulator2/run_correlation.py && node --experimental-strip-types scripts/generate-correlation.mjs",
     "bootstrap:physical": "bash tools/physical/bootstrap-sky130.sh",
     "verify:physical": "node --experimental-wasm-exnref scripts/verify-physical.mjs",
+    "evaluate:perf-model": "node --experimental-strip-types scripts/evaluate-perf-model.mjs",
     "evidence": "npm run validate:spec && npm test && npm run verify:rtl && npm run verify:physical && node --experimental-strip-types scripts/generate-correlation.mjs && node --experimental-strip-types scripts/generate-evidence.mjs",
     "platform:dev": "platform/.venv/bin/uvicorn aimem_platform.app:create_app --factory --app-dir platform --host 127.0.0.1 --port 8100",
     "platform:migrate": "cd platform && .venv/bin/alembic upgrade head",

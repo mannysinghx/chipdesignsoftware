@@ -1,7 +1,7 @@
 # AIMEM-A1: an AI Compute Die Built and Improved by Agents
 
 **Plan date:** 26 September 2026
-**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). C1 to C6 are proposed.
+**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). C1 version 1 was built and evaluated the same day: peaks exact and 9 of 10 calibration rows within tolerance, but it **failed its held-out check** (B300 overpredicted by 27–41%), so it may not be used for A1 claims (see [C1 status](#c1-status-2026-09-26-version-1)). C1 version 2 and C2 to C6 are proposed.
 **Extends:** [`RSI_PLATFORM_PLAN.md`](RSI_PLATFORM_PLAN.md). That plan builds the machinery that lets agents improve designs (L1), themselves (L2), and their models (L3). This plan adds what they build next: a compute die that pairs with the AIMEM memory stacks. It also sets the autonomy policy for running those loops unattended.
 
 ---
@@ -127,6 +127,18 @@ What C0 changed in this plan:
 - The benchmark set is defined precisely enough for C1 to compute it: GEMM shapes, attention shapes, and decode and prefill scenarios with model, batch, sequence length, and precision.
 - Open blocks and tools are chosen, with licenses compatible with the project.
 - The architecture direction in section 5 is confirmed or revised from the dossier.
+
+### C1 status (2026-09-26, version 1)
+
+**Built:** [`lib/perf-model.ts`](../lib/perf-model.ts) (frozen at sha256 `9cf9786b…`), [`scripts/evaluate-perf-model.mjs`](../scripts/evaluate-perf-model.mjs), [`evidence/c1-perf-model.json`](../evidence/c1-perf-model.json), and `tests/perf-model.test.ts` (8 tests, including the check that calibration never reads the held-out chip). Full results: [`compute-die/C1_PERF_MODEL.md`](compute-die/C1_PERF_MODEL.md).
+
+| Exit criterion | Result |
+|---|---|
+| Peaks reproduced exactly | Met: one implied tensor clock per chip, zero error |
+| Calibration within tolerance | Partly met: 9 of 10 MLPerf rows within ±15%; H200 405B Server at −19.7% |
+| Held-out B300 predicted and recorded | Recorded. **Failed:** +26.6% to +41.3% against ±20% |
+
+**What it means:** throughput does not follow peak FLOPS. B300 has 1.5× B200's FP4 peak and delivers 1.11× the throughput; power is the most likely missing term. A1 must therefore be judged at a power budget. B300 is consumed as a held-out set. Version 2 needs a new held-out set, which is an evaluator change the owner approves before the model is built.
 
 ### C1: Calibrated performance model
 

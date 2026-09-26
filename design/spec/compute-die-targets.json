@@ -40,7 +40,10 @@
     "blog-b200-cublas": { "url": "https://www.paulwillchan.com/articles/outperforming-cublas-b200", "kind": "blog" },
     "hf-llama2-70b": { "url": "https://huggingface.co/meta-llama/Llama-2-70b-hf/blob/main/config.json", "kind": "model config" },
     "llama3-paper": { "url": "https://arxiv.org/abs/2407.21783", "kind": "paper", "note": "Llama 3 herd of models, Table 3" },
-    "deepseek-v3-paper": { "url": "https://arxiv.org/abs/2412.19437", "kind": "paper" }
+    "deepseek-v3-paper": { "url": "https://arxiv.org/abs/2412.19437", "kind": "paper" },
+    "mlperf-rules": { "url": "https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc", "kind": "benchmark" },
+    "mlperf-llm-v5-blog": { "url": "https://mlcommons.org/2025/04/llm-inference-v5/", "kind": "benchmark", "note": "Llama 3.1 405B dataset: mean input 9,400 and output 680 tokens" },
+    "mlperf-openorca-measured": { "url": "https://huggingface.co/datasets/ctuning/MLPerf-OpenOrca", "kind": "measured by this project", "note": "The 24,576-sample MLPerf OpenOrca set tokenized with the Llama 2 tokenizer (hf-internal-testing/llama-tokenizer) using MLPerf's prompt template from language/llama2-70b/processorca.py: mean 221.3, median 151, max 1,020 tokens. The max under MLPerf's 1,024 filter confirms the match" }
   },
   "reference_chips": [
     {
@@ -180,22 +183,22 @@
   ],
   "measured": {
     "mlperf_inference": [
-      { "id": "5.0-0057", "chip": "h100-sxm", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 31306.8, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
-      { "id": "5.0-0057", "chip": "h100-sxm", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 31106.3, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
-      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 34988.2, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
-      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 33071.5, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
-      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 560.651, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
-      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 291.374, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
-      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 101527, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
-      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 99123, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
-      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1624.11, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
-      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1240.42, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 112954, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 107318, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1951.6, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1460.25, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 103480, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" },
-      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 100282, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" }
+      { "id": "5.0-0057", "chip": "h100-sxm", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 31306.8, "accelerators": 8, "weights": "fp8", "mean_output_tokens": 291.8, "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0057", "chip": "h100-sxm", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 31106.3, "accelerators": 8, "weights": "fp8", "mean_output_tokens": 292.9, "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 34988.2, "accelerators": 8, "weights": "fp8", "mean_output_tokens": 291.5, "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 33071.5, "accelerators": 8, "weights": "fp8", "mean_output_tokens": 292.3, "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 560.651, "accelerators": 8, "weights": "fp8", "mean_output_tokens": 648.6, "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 291.374, "accelerators": 8, "weights": "fp8", "mean_output_tokens": 647.2, "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 101527, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 273.4, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 99123, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 274.4, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1624.11, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 651.5, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1240.42, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 654.0, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 112954, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 273.1, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 107318, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 271.7, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1951.6, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 636.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1460.25, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 638.6, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 103480, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 284.2, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" },
+      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 100282, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 283.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" }
     ],
     "gemm": [
       { "chip": "h100-sxm", "precision": "bf16", "shape": [16384, 16384, 16384], "achieved_tflops": 797, "kernel": "ThunderKittens", "source": "arxiv-2410.20399", "confidence": "med", "use": "calibrate" },
@@ -205,7 +208,7 @@
       { "chip": "h800-pcie", "precision": "fp8", "shape": null, "achieved_tflops_range": [1417.2, 1455], "peak_tflops": 1513, "kernel": "wgmma m64n256k32, FP32 accumulate", "source": "arxiv-2501.12084", "confidence": "high", "use": "cross-check", "note": "Different SKU (114 SMs, 350 W cap); informs per-SM efficiency only" }
     ],
     "memory_bandwidth": [
-      { "chip": "h800-pcie", "achieved_tbps": 1.8615, "peak_tbps": 2.039, "source": "arxiv-2501.12084", "confidence": "high", "use": "cross-check", "note": "Different SKU; informs sustained fraction only" },
+      { "chip": "h800-pcie", "family": "hopper", "achieved_tbps": 1.8615, "peak_tbps": 2.039, "source": "arxiv-2501.12084", "confidence": "high", "use": "calibrate", "note": "Different SKU, same GH100 die and HBM controller; the only high-confidence Hopper bandwidth measurement, so it calibrates the Hopper family's sustained fraction (amended before C1 froze the targets)" },
       { "chip": "b200-hgx", "achieved_tbps_range": [6.8, 7.1], "source": "arxiv-2605.04178", "confidence": "med", "use": "calibrate" }
     ],
     "excluded": [
@@ -238,6 +241,11 @@
       "decode": { "kv_len": [4096, 32768, 131072], "batch": [1, 64, 256], "kv_precision": "fp8" },
       "metrics": ["time_us", "bytes_moved", "fraction_of_bandwidth_roof"]
     },
+    "mlperf_workloads": {
+      "llama2-70b-99": { "model": "llama2-70b", "mean_input_tokens": 221.3, "input_source": "mlperf-openorca-measured", "server_ttft_ms": 2000, "server_tpot_ms": 200, "limits_source": "mlperf-rules", "confidence": "high" },
+      "llama3.1-405b": { "model": "llama3.1-405b", "mean_input_tokens": 9400, "input_source": "mlperf-llm-v5-blog", "server_ttft_ms": 6000, "server_tpot_ms": 175, "limits_source": "mlperf-rules", "confidence": "high" },
+      "output_tokens": "Each MLPerf row's mean_output_tokens is its own TOKENS_PER_SAMPLE from the MLCommons summary: a property of the work done, not of speed"
+    },
     "llm_serving": [
       { "id": "mlperf-llama2-70b", "model": "llama2-70b", "scenarios": ["Offline", "Server"], "weights": ["fp8", "fp4"], "calibrated_by": "measured.mlperf_inference" },
       { "id": "mlperf-llama3.1-405b", "model": "llama3.1-405b", "scenarios": ["Offline", "Server"], "weights": ["fp8", "fp4"], "calibrated_by": "measured.mlperf_inference" },
@@ -256,7 +264,7 @@
       "mlperf_per_accelerator_calibration": 0.15,
       "mlperf_per_accelerator_held_out": 0.20
     },
-    "status": "proposed 2026-09-26; frozen when C1 starts"
+    "status": "frozen 2026-09-26 at C1 start; changes need the owner's approval"
   },
   "parity": {
     "primary_target": "b200-hgx",
