@@ -1,5 +1,33 @@
 # C2 Result: Tensor Tile RTL
 
+## Increment 2c: tile DMA and the tensor core (26 September 2026)
+
+**What was added:**
+- **`a1_tile_dma`.** A descriptor-driven operand engine in the spirit of Hopper's Tensor Memory Accelerator.
+  - One descriptor runs a K-loop into one accumulator: format, accumulator, step count, A base with row and step strides, B base with column and step strides, and MX scales.
+  - For each step it fetches A's 4 rows and B's 4 columns (eight 64-bit words) over a valid/ready memory port, then issues one MMA.
+  - Two 8-word ping-pong fill buffers with 16 words of credit let the next step stream in while the current step completes, so responses never stall.
+  - `done` pulses when the last MMA is accepted.
+- **`a1_tensor_core`.** The DMA feeding the tile, plus a host port for ZERO, LOAD, READ, and direct MMAs. DMA MMAs take priority.
+
+**Operand bandwidth sets the rate.** With one 64-bit word per cycle, the engine issues **exactly one MMA every 8 cycles**, and a test pins this. The tile itself can take one per cycle. So at this port width the tensor core is bandwidth-bound, 8× below its math rate, which is the imbalance C1's model and AIMEM are about. A wider port, or operands reused across steps from on-chip memory, raises the rate. That is a C5 design question, with numbers from C3.
+
+| Check | Result |
+|---|---|
+| End-to-end cosimulation | 4/4, against golden `mma4` replayed over the exact words each descriptor addresses. A memory model applies random request backpressure (30%) and random 1–6-cycle latency. Covers: every format (MX-scaled FP4 included), exact 8-cycle issue with ideal memory, zero-step descriptors, and back-to-back descriptors with host LOAD, ZERO, and READ between them |
+| DMA proof (k-induction, base case 24) | Pass. A response never lands in a full buffer; the credit never exceeds 16; every fetched word of an unissued step is in flight, in a fill buffer, or in the issue buffer (word conservation); ping-pong order; an MMA is held stable until taken; completion after the last MMA. Covers are reached for a two-step completion and for backpressure with both buffers full |
+| Planted bugs | 4 of 4 caught. In cosimulation: B addressed with A's stride, and B's step base not advancing. By the proof, with concrete traces: one credit too many, and a dropped MMA under backpressure |
+| Lint | 0 errors, 0 warnings, on 4 targets (the tensor core, then each block) |
+| Audited runs | `a1.lint` b8fd1440, `a1.sim` f86be5fc (22/22), and `a1.formal` 80c35b48 (**12/12**: the DMA proof plus every earlier job). All rebuild from the audit log 7/7; lint and simulation reproduce identically |
+
+**Getting the proof to close exposed four imprecise properties, none of them design bugs:**
+1. A counter that a zero-step descriptor resets, while the design's own counter stays stale while idle. Harmless: it is only meaningful when active.
+2. A ping-pong invariant that missed the reachable state where both buffers are full.
+3. An idle state with mismatched buffer pointers, which is unreachable.
+4. A base case too shallow for concrete traces.
+
+Each was fixed in the property, not the design. One real throughput flaw was found by review before the first run, and fixed: a single fill buffer would have allowed only one step per 9–10 cycles.
+
 ## Increment 2b: MX scaling, FP4, and packed elements (26 September 2026)
 
 **What changed:**
@@ -73,7 +101,7 @@ The first audited formal run (`1cdc2e29`) used the unflattened jobs; it was stop
 **Evidence class:** `executed` (simulation, formal, and lint, run in the pinned sandbox). This is not silicon and not a physical implementation.
 
 **Files:**
-- RTL: [`rtl/a1/a1_fp_dot4.sv`](../../rtl/a1/a1_fp_dot4.sv), [`rtl/a1/a1_mma_tile.sv`](../../rtl/a1/a1_mma_tile.sv)
+- RTL: [`rtl/a1/a1_fp_dot4.sv`](../../rtl/a1/a1_fp_dot4.sv) and its stages (`a1_dot_terms`, `a1_dot_sum`, `a1_dot_round`), [`rtl/a1/a1_mma_tile.sv`](../../rtl/a1/a1_mma_tile.sv), [`rtl/a1/a1_tile_dma.sv`](../../rtl/a1/a1_tile_dma.sv), [`rtl/a1/a1_tensor_core.sv`](../../rtl/a1/a1_tensor_core.sv)
 - Golden model and specification: [`verification/a1/golden.py`](../../verification/a1/golden.py)
 - Accuracy check: [`verification/a1/golden_accuracy.py`](../../verification/a1/golden_accuracy.py)
 - Tests: `verification/a1/test_a1_fp_dot4.py`, `verification/a1/test_a1_mma_tile.py`; runner `verification/a1/run_regression.py`

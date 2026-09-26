@@ -1,0 +1,20 @@
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+prove: depth 24
+cover: mode cover
+cover: depth 40
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+read -formal -D FORMAL a1_tile_dma.sv a1_tile_dma_sby.sv
+prep -flatten -top a1_tile_dma_sby
+
+[files]
+../../rtl/a1/a1_tile_dma.sv
+a1_tile_dma_sby.sv

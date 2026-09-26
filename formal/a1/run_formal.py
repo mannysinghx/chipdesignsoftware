@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 JOBS = [
     {"file": "a1_dot4.sby", "title": "Dot product: operand and scale swap, FTZ, canonical NaN, NaN data and scale propagation (all inputs)"},
     {"file": "a1_dot_sum.sby", "title": "Dot product sum stage: term order does not change the result (any term bundle)"},
+    {"file": "a1_dma.sby", "title": "Tile DMA: credit and buffers never overflow, word conservation, MMA held until taken, completion (k-induction proof, cover)"},
     {"file": "a1_tile.sby", "title": "Tile control: one response per READ, held until taken, addressed writes and reads (k-induction proof, cover)"},
 ]
 ASSERT_FAILED = re.compile(r"Assert(?:ion)? failed in ([^:]+): (\S+)")

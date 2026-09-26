@@ -7,8 +7,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lint  # noqa: E402
 
-# (top module, files) pairs: the full tile plus the dot-product unit on its own.
+# (top module, files) pairs: the tensor core, then each block on its own.
 lint.TARGETS = [
+    ("a1_tensor_core", ["a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv", "a1_mma_tile.sv", "a1_tile_dma.sv", "a1_tensor_core.sv"]),
+    ("a1_tile_dma", ["a1_tile_dma.sv"]),
     ("a1_mma_tile", ["a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv", "a1_mma_tile.sv"]),
     ("a1_fp_dot4", ["a1_dot_terms.sv", "a1_dot_sum.sv", "a1_dot_round.sv", "a1_fp_dot4.sv"]),
 ]
