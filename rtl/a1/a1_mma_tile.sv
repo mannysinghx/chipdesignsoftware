@@ -1,12 +1,15 @@
 // AIMEM-A1 tensor tile (C2 of docs/COMPUTE_DIE_PLAN.md), pipelined.
-// A 4x4x4 matrix-multiply-accumulate per accepted command, D = C + A x B, into an accumulator memory
-// of ACC_ENTRIES 4x4 FP32 tiles held beside the array (the TMEM idea: accumulators never pass through a
-// register file). Sixteen dot-product units, each split into the three stages of a1_fp_dot4.
+// A 4x4xK matrix-multiply-accumulate per accepted command, D = C + Xa Xb (A x B), into an accumulator
+// memory of ACC_ENTRIES 4x4 FP32 tiles held beside the array (the TMEM idea: accumulators never pass
+// through a register file). Sixteen dot-product units, each split into the three stages of a1_fp_dot4.
+// Each 64-bit operand row packs K = 4 BF16, 8 FP8, or 16 FP4 elements, so one step does 64, 128, or 256
+// multiplies from the same 512 operand bits. Xa (per A row) and Xb (per B column) are OCP MX E8M0 scales.
 //
 // Commands (valid/ready): ZERO acc[i] <- +0 | LOAD acc[i] <- cmd_c | MMA acc[i] <- acc[i] + A x B |
 // READ -> one response with acc[i]. Responses (valid/ready) are held stable until taken.
-// Operand lanes are row-major: A[i][k] at cmd_a[16*(4i+k) +: 16], B[k][j] at cmd_b[16*(4k+j) +: 16],
-// C/D[i][j] at 32*(4i+j).
+// Operands: row i of A at cmd_a[64i +: 64] and column j of B at cmd_b[64j +: 64], elements packed as in
+// a1_fp_dot4; scale of A row i at cmd_scale_a[8i +: 8], of B column j at cmd_scale_b[8j +: 8];
+// C/D[i][j] at 32*(4i+j). fmt: 0 = FP8 E4M3, 1 = FP8 E5M2, 2 = BF16, 3 = FP4 E2M1.
 //
 // Pipeline (in order, one command per cycle):
 //   S1  MMA reads its accumulator; decode and multiply (a1_dot_terms)
@@ -32,6 +35,8 @@ module a1_mma_tile #(
   input  wire [IDX_W-1:0]  cmd_acc,
   input  wire [255:0]      cmd_a,
   input  wire [255:0]      cmd_b,
+  input  wire [31:0]       cmd_scale_a,
+  input  wire [31:0]       cmd_scale_b,
   input  wire [511:0]      cmd_c,
   output reg               rsp_valid,
   input  wire              rsp_ready,
@@ -47,6 +52,7 @@ module a1_mma_tile #(
   reg [1:0]       s1_fmt;
   reg [IDX_W-1:0] s1_idx, s2_idx, s3_idx;
   reg [255:0]     s1_a, s1_b;
+  reg [31:0]      s1_scale_a, s1_scale_b;
   reg [511:0]     s1_c, s2_c, s3_c;
 
   // A READ in S3 whose response slot is still occupied holds the whole pipeline.
@@ -65,10 +71,10 @@ module a1_mma_tile #(
   assign mma_d = abstract_d;
 `else
   wire [511:0]  s1_acc = acc[s1_idx];
-  reg  [4319:0] s2_terms;    // 16 x 270
-  reg  [959:0]  s3_partial;  // 16 x 60
-  wire [4319:0] s1_terms_next;
-  wire [959:0]  s2_partial_next;
+  reg  [4895:0] s2_terms;    // 16 x 306
+  reg  [991:0]  s3_partial;  // 16 x 62
+  wire [4895:0] s1_terms_next;
+  wire [991:0]  s2_partial_next;
 
   genvar gi, gj;
   generate
@@ -78,12 +84,14 @@ module a1_mma_tile #(
         a1_dot_terms u_terms (
           .fmt(s1_fmt),
           .a(s1_a[64*gi +: 64]),
-          .b({s1_b[16*(12+gj) +: 16], s1_b[16*(8+gj) +: 16], s1_b[16*(4+gj) +: 16], s1_b[16*gj +: 16]}),
+          .b(s1_b[64*gj +: 64]),
           .c(s1_acc[32*N +: 32]),
-          .terms(s1_terms_next[270*N +: 270])
+          .scale_a(s1_scale_a[8*gi +: 8]),
+          .scale_b(s1_scale_b[8*gj +: 8]),
+          .terms(s1_terms_next[306*N +: 306])
         );
-        a1_dot_sum u_sum (.terms(s2_terms[270*N +: 270]), .partial(s2_partial_next[60*N +: 60]));
-        a1_dot_round u_round (.partial(s3_partial[60*N +: 60]), .d(mma_d[32*N +: 32]));
+        a1_dot_sum u_sum (.terms(s2_terms[306*N +: 306]), .partial(s2_partial_next[62*N +: 62]));
+        a1_dot_round u_round (.partial(s3_partial[62*N +: 62]), .d(mma_d[32*N +: 32]));
       end
     end
   endgenerate
@@ -135,6 +143,8 @@ module a1_mma_tile #(
         s1_idx <= cmd_acc;
         s1_a <= cmd_a;
         s1_b <= cmd_b;
+        s1_scale_a <= cmd_scale_a;
+        s1_scale_b <= cmd_scale_b;
         s1_c <= cmd_c;
       end
     end

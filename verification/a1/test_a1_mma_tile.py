@@ -1,5 +1,8 @@
 """a1_mma_tile against a golden model of the tile: an accumulator array updated by golden.mma4.
 
+A and B travel as four packed 64-bit rows (of A) and columns (of B): 4 BF16, 8 FP8, or 16 FP4 elements
+each, with an OCP MX E8M0 scale per row and per column.
+
 Every READ response is compared with the golden accumulator state. The tile is pipelined (3 stages),
 so the tests also pin its throughput: a dependent chain into one accumulator is accepted exactly every
 3 cycles, and rotating over accumulators sustains one command per cycle. The exact ready rule is
@@ -19,7 +22,11 @@ from tb import pack, tb_test, unpack
 
 OP_ZERO, OP_LOAD, OP_MMA, OP_READ = 0, 1, 2, 3
 ENTRIES = 4
-FORMATS = (golden.E4M3, golden.E5M2, golden.BF16)
+FORMATS = (golden.E4M3, golden.E5M2, golden.BF16, golden.E2M1)
+UNIT = golden.UNIT_SCALE
+ZERO_ROWS = [0] * 4
+ZERO_TILE = [0] * 16
+UNIT_SCALES = [UNIT] * 4
 DRAIN_CYCLES = 8  # longer than the pipeline latency (a READ responds 4 cycles after it is accepted)
 
 
@@ -27,14 +34,18 @@ class TileModel:
     def __init__(self) -> None:
         self.acc = [[0] * 16 for _ in range(ENTRIES)]
 
-    def apply(self, op, fmt, index, a, b, c):
+    def apply(self, op, fmt, index, a, b, c, scales_a, scales_b):
         if op == OP_ZERO:
             self.acc[index] = [0] * 16
         elif op == OP_LOAD:
             self.acc[index] = list(c)
         elif op == OP_MMA:
-            self.acc[index] = golden.mma4(a, b, self.acc[index], fmt)
+            self.acc[index] = golden.mma4(a, b, self.acc[index], fmt, scales_a, scales_b)
         return list(self.acc[index]) if op == OP_READ else None
+
+
+def command(op, fmt, index, a=ZERO_ROWS, b=ZERO_ROWS, c=ZERO_TILE, scales_a=UNIT_SCALES, scales_b=UNIT_SCALES):
+    return (op, fmt, index, a, b, c, scales_a, scales_b)
 
 
 async def reset(dut) -> None:
@@ -47,6 +58,8 @@ async def reset(dut) -> None:
     dut.cmd_acc.value = 0
     dut.cmd_a.value = 0
     dut.cmd_b.value = 0
+    dut.cmd_scale_a.value = 0
+    dut.cmd_scale_b.value = 0
     dut.cmd_c.value = 0
     for _ in range(3):
         await RisingEdge(dut.clk)
@@ -55,12 +68,17 @@ async def reset(dut) -> None:
 
 
 def operands(fmt, rng, gaussian=True):
-    draw = (lambda: gaussian_value(fmt, rng)) if gaussian else (lambda: rng.getrandbits(16 if fmt == golden.BF16 else 8))
-    return [draw() for _ in range(16)], [draw() for _ in range(16)]
+    """Four packed rows of A and four packed columns of B."""
+    n = 64 // golden.ELEMENT_BITS[fmt]
+    if gaussian:
+        packed = lambda: golden.pack_row([gaussian_value(fmt, rng) for _ in range(n)], fmt)  # noqa: E731
+    else:
+        packed = lambda: rng.getrandbits(64)  # noqa: E731
+    return [packed() for _ in range(4)], [packed() for _ in range(4)]
 
 
 async def run_stream(dut, commands, ready_probability=1.0, accept_cycles=None):
-    """Drive (op, fmt, index, a, b, c) commands; return the READ responses in order.
+    """Drive commands (see command()); return the READ responses in order.
 
     If accept_cycles is a list, the cycle number of every accepted command is appended to it."""
     responses = []
@@ -69,13 +87,15 @@ async def run_stream(dut, commands, ready_probability=1.0, accept_cycles=None):
     idle = 0
     while pending or idle < DRAIN_CYCLES:
         if pending:
-            op, fmt, index, a, b, c = pending[0]
+            op, fmt, index, a, b, c, scales_a, scales_b = pending[0]
             dut.cmd_valid.value = 1
             dut.cmd_op.value = op
             dut.cmd_fmt.value = fmt
             dut.cmd_acc.value = index
-            dut.cmd_a.value = pack(a, 16)
-            dut.cmd_b.value = pack(b, 16)
+            dut.cmd_a.value = pack(a, 64)
+            dut.cmd_b.value = pack(b, 64)
+            dut.cmd_scale_a.value = pack(scales_a, 8)
+            dut.cmd_scale_b.value = pack(scales_b, 8)
             dut.cmd_c.value = pack(c, 32)
         else:
             dut.cmd_valid.value = 0
@@ -101,8 +121,7 @@ async def run_stream(dut, commands, ready_probability=1.0, accept_cycles=None):
 @tb_test()
 async def reset_clears_every_accumulator(dut):
     await reset(dut)
-    zeros = [0] * 16
-    responses = await run_stream(dut, [(OP_READ, 0, i, zeros, zeros, zeros) for i in range(ENTRIES)])
+    responses = await run_stream(dut, [command(OP_READ, 0, i) for i in range(ENTRIES)])
     assert responses == [[0] * 16] * ENTRIES
 
 
@@ -110,9 +129,8 @@ async def reset_clears_every_accumulator(dut):
 async def load_then_read_returns_the_tile(dut):
     await reset(dut)
     tiles = [[random.getrandbits(32) for _ in range(16)] for _ in range(ENTRIES)]
-    zeros = [0] * 16
-    commands = [(OP_LOAD, 0, i, zeros, zeros, tiles[i]) for i in range(ENTRIES)]
-    commands += [(OP_READ, 0, i, zeros, zeros, zeros) for i in reversed(range(ENTRIES))]
+    commands = [command(OP_LOAD, 0, i, c=tiles[i]) for i in range(ENTRIES)]
+    commands += [command(OP_READ, 0, i) for i in reversed(range(ENTRIES))]
     assert await run_stream(dut, commands) == list(reversed(tiles))
 
 
@@ -124,27 +142,25 @@ async def single_mma_matches_golden_in_every_format(dut):
         model = TileModel()
         a, b = operands(fmt, rng)
         c = [random.getrandbits(32) & 0xBFFFFFFF for _ in range(16)]  # finite, moderate-magnitude addends
-        zeros = [0] * 16
-        commands = [(OP_LOAD, fmt, 1, a, b, c), (OP_MMA, fmt, 1, a, b, c), (OP_READ, fmt, 1, a, b, c)]
-        expected = [response for command in commands if (response := model.apply(*command)) is not None]
+        commands = [command(OP_LOAD, fmt, 1, c=c), command(OP_MMA, fmt, 1, a, b), command(OP_READ, fmt, 1)]
+        expected = [response for item in commands if (response := model.apply(*item)) is not None]
         assert await run_stream(dut, commands) == expected, f"fmt {golden.FORMATS[fmt]}"
-        await run_stream(dut, [(OP_ZERO, fmt, 1, zeros, zeros, zeros)])
+        await run_stream(dut, [command(OP_ZERO, fmt, 1)])
 
 
 @tb_test()
 async def k_loop_accumulates_like_golden(dut):
-    """A K = 32 reduction as 8 successive MMAs into one accumulator, per format."""
+    """8 successive MMAs into one accumulator per format: K = 32 BF16, 64 FP8, or 128 FP4."""
     await reset(dut)
     rng = random.Random(random.getrandbits(32))
     for fmt in FORMATS:
         model = TileModel()
-        zeros = [0] * 16
-        commands = [(OP_ZERO, fmt, 2, zeros, zeros, zeros)]
+        commands = [command(OP_ZERO, fmt, 2)]
         for _ in range(8):
             a, b = operands(fmt, rng)
-            commands.append((OP_MMA, fmt, 2, a, b, zeros))
-        commands.append((OP_READ, fmt, 2, zeros, zeros, zeros))
-        expected = [response for command in commands if (response := model.apply(*command)) is not None]
+            commands.append(command(OP_MMA, fmt, 2, a, b))
+        commands.append(command(OP_READ, fmt, 2))
+        expected = [response for item in commands if (response := model.apply(*item)) is not None]
         assert await run_stream(dut, commands) == expected, f"fmt {golden.FORMATS[fmt]}"
 
 
@@ -160,9 +176,12 @@ async def random_command_stream_under_backpressure(dut):
         index = rng.randrange(ENTRIES)
         a, b = operands(fmt, rng, gaussian=rng.random() < 0.7)
         c = [rng.getrandbits(32) for _ in range(16)]
-        command = (op, fmt, index, a, b, c)
-        commands.append(command)
-        if (response := model.apply(*command)) is not None:
+        scaled = rng.random() < 0.3
+        scales_a = [rng.randint(UNIT - 10, UNIT + 10) for _ in range(4)] if scaled else UNIT_SCALES
+        scales_b = [rng.randint(UNIT - 10, UNIT + 10) for _ in range(4)] if scaled else UNIT_SCALES
+        item = command(op, fmt, index, a, b, c, scales_a, scales_b)
+        commands.append(item)
+        if (response := model.apply(*item)) is not None:
             expected.append(response)
     responses = await run_stream(dut, commands, ready_probability=0.6)
     assert len(responses) == len(expected), f"{len(responses)} responses for {len(expected)} READs"
@@ -177,13 +196,12 @@ async def dependent_chain_is_accepted_every_third_cycle(dut):
     rng = random.Random(random.getrandbits(32))
     fmt = golden.BF16
     model = TileModel()
-    zeros = [0] * 16
     commands = []
     for _ in range(12):
         a, b = operands(fmt, rng)
-        commands.append((OP_MMA, fmt, 3, a, b, zeros))
-    commands.append((OP_READ, fmt, 3, zeros, zeros, zeros))
-    expected = [response for command in commands if (response := model.apply(*command)) is not None]
+        commands.append(command(OP_MMA, fmt, 3, a, b))
+    commands.append(command(OP_READ, fmt, 3))
+    expected = [response for item in commands if (response := model.apply(*item)) is not None]
     cycles: list[int] = []
     assert await run_stream(dut, commands, accept_cycles=cycles) == expected
     gaps = [later - earlier for earlier, later in zip(cycles, cycles[1:12])]
@@ -197,13 +215,31 @@ async def rotating_accumulators_sustain_one_mma_per_cycle(dut):
     rng = random.Random(random.getrandbits(32))
     fmt = golden.E4M3
     model = TileModel()
-    zeros = [0] * 16
     commands = []
     for step in range(32):
         a, b = operands(fmt, rng)
-        commands.append((OP_MMA, fmt, step % ENTRIES, a, b, zeros))
-    commands += [(OP_READ, fmt, index, zeros, zeros, zeros) for index in range(ENTRIES)]
-    expected = [response for command in commands if (response := model.apply(*command)) is not None]
+        commands.append(command(OP_MMA, fmt, step % ENTRIES, a, b))
+    commands += [command(OP_READ, fmt, index) for index in range(ENTRIES)]
+    expected = [response for item in commands if (response := model.apply(*item)) is not None]
     cycles: list[int] = []
     assert await run_stream(dut, commands, accept_cycles=cycles) == expected
     assert cycles[:32] == list(range(cycles[0], cycles[0] + 32)), "rotating MMAs must be accepted on consecutive cycles"
+
+
+@tb_test()
+async def mx_scaled_fp4_k_loop(dut):
+    """MXFP4: K = 64 as two 32-element blocks (2 MMAs each), each block with its own row and column scales."""
+    await reset(dut)
+    rng = random.Random(random.getrandbits(32))
+    fmt = golden.E2M1
+    model = TileModel()
+    commands = [command(OP_ZERO, fmt, 0)]
+    for _block in range(2):
+        scales_a = [rng.randint(UNIT - 6, UNIT + 6) for _ in range(4)]
+        scales_b = [rng.randint(UNIT - 6, UNIT + 6) for _ in range(4)]
+        for _half in range(2):  # 16 FP4 elements per MMA, 32 per block
+            a, b = operands(fmt, rng)
+            commands.append(command(OP_MMA, fmt, 0, a, b, scales_a=scales_a, scales_b=scales_b))
+    commands.append(command(OP_READ, fmt, 0))
+    expected = [response for item in commands if (response := model.apply(*item)) is not None]
+    assert await run_stream(dut, commands) == expected

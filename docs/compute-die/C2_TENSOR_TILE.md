@@ -1,5 +1,37 @@
 # C2 Result: Tensor Tile RTL
 
+## Increment 2b: MX scaling, FP4, and packed elements (26 September 2026)
+
+**What changed:**
+- **Packed elements.** A 64-bit operand row now packs **4 BF16, 8 FP8, or 16 FP4** elements, so one MMA step does 64, 128, or 256 multiplies from the same 512 operand bits. This is how tensor cores reach FP8 = 2× and FP4 = 4× the BF16 rate, and it is the throughput C1's model assumes.
+- **FP4.** FP4 E2M1 (OCP MX) takes format code 3.
+- **MX scales.** Each A row and each B column carries an OCP MX **E8M0 scale** (a power of two; 255 is NaN). Software holds a block's scale constant across the commands that span its 32 elements.
+- **B layout.** B is now given as columns, so each dot unit reads one contiguous row of A and one column of B.
+- **Pipeline re-cut.** Stage 1 now ends at each term's alignment distance: 306 bits per dot, against 270 before, although the dot product grew from 5 to 17 terms. Stage 2 aligns and sums 17 terms exactly; stage 3 rounds.
+
+**Product slots and area.** Slots 0–3 carry 8×8-bit multipliers (every format), slots 4–7 carry 4×4 (FP8 and FP4), and slots 8–15 carry 2×2 (FP4 only). Size in generic Yosys cells:
+
+| | Increment 1 | Increment 2b |
+|---|---|---|
+| Dot unit | 6.6k | 16.8k |
+| Tile (cells) | 106k | 285k |
+| Tile (flip-flops) | 2.6k | 10.5k |
+
+C3 turns these into mm² on real process kits.
+
+| Check | Result |
+|---|---|
+| Cosimulation | **18/18** (2 min). New: exhaustive FP4 products in **every one of the 16 slots**, FP8 products in all 8 slots, random MX scales including NaN and the extremes, scale-transfer invariance (Xa·2, Xb/2 give the same result), and an MXFP4 K = 64 loop over two scaled 32-element blocks |
+| Accuracy against exact arithmetic (4,000 cases per format and distribution) | No bound violations. With a realistic K-loop accumulator, **all four formats are 100% exactly rounded, worst 0.5 ulp** |
+| Planted bugs | 5 of 5 caught: FP4 subnormal exponent, MX scale bias, crossed FP4 slot wiring, FP4 window placement, NaN scale ignored |
+| Lint | 0 errors, 0 warnings |
+| Proofs | **10/10** (audited run `bb87850d`, about 20 min). Covered: special values (FTZ, canonical NaN, NaN data and NaN scale propagation); operand-and-scale swap per format; order independence of all 17 terms, all classes rotated at once (17 min); the pipelined tile control proof. The new order proof was mutation-checked: an asymmetric FP4 slot shift fails in 2 s |
+| Audited runs | `a1.lint` d1b88e15, `a1.sim` c3171609 (18/18), `a1.formal` bb87850d (10/10). All rebuild from the audit log 7/7; lint and simulation reproduce identically |
+
+**Accuracy caveat, measured and not hidden.** When an accumulator of arbitrary magnitude meets products that cancel exactly, the products still set the alignment window, and a much smaller accumulator loses low bits. Example: FP4 products that cancel exactly, with c = 5.7×10⁻¹¹, return c with 3 significant bits. This follows from the specified max-exponent truncation, which GPU tensor cores share, and the error bound holds. The effect appears only in the "arbitrary c" distribution (FP4 99.0% exactly rounded); realistic accumulators are unaffected. A fix would be a separate full-precision path for the accumulator: exact product sum first, then one correctly rounded add. That is a design option for a later increment, not a defect.
+
+**Formal cost.** Operand swap over all four formats with 16 multiplier slots ran for over 15 minutes. Proving it once per format (fixing `fmt` lets the solver drop unused slots) takes 3 s, 3 s, 80 s, and 144 s, and the four tasks together cover every value of `fmt`. The FP8 upper-byte property from increment 1 no longer applies, since every bit of a row is now an element; NaN-scale propagation replaces it.
+
 ## Increment 2a: pipelining (26 September 2026)
 
 The tile is now a 3-stage pipeline, as C3's physical flow needs.

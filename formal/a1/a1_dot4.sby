@@ -1,11 +1,17 @@
 [tasks]
 specials
-swap
+swap_e4m3
+swap_e5m2
+swap_bf16
+swap_e2m1
 cover
 
 [options]
 specials: mode prove
-swap: mode prove
+swap_e4m3: mode prove
+swap_e5m2: mode prove
+swap_bf16: mode prove
+swap_e2m1: mode prove
 cover: mode cover
 depth 1
 
@@ -14,7 +20,10 @@ smtbmc bitwuzla
 
 [script]
 specials: read -formal -D CHECK_SPECIALS a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
-swap: read -formal -D CHECK_SWAP a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
+swap_e4m3: read -formal -D CHECK_SWAP -D SWAP_FMT=2'd0 a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
+swap_e5m2: read -formal -D CHECK_SWAP -D SWAP_FMT=2'd1 a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
+swap_bf16: read -formal -D CHECK_SWAP -D SWAP_FMT=2'd2 a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
+swap_e2m1: read -formal -D CHECK_SWAP -D SWAP_FMT=2'd3 a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
 cover: read -formal a1_dot_terms.sv a1_dot_sum.sv a1_dot_round.sv a1_fp_dot4.sv a1_fp_dot4_sby.sv
 # Flatten so the solver sees the stages of every copy as one expression: unflattened, the swap proof
 # took over 10 minutes instead of 42 s once the unit was split into stage modules.

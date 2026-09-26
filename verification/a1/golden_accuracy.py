@@ -1,7 +1,8 @@
 """Checks the golden model's numerics against exact rational arithmetic (no RTL involved).
 
-For random finite inputs of every format, the exact value c + sum(a_i * b_i) is computed with
-fractions and rounded correctly to FP32 (same Inf/FTZ rules). The golden result must be within the
+For random finite inputs of every format (one 64-bit row of 4 BF16, 8 FP8, or 16 FP4 elements per
+operand), the exact value c + sum(a_i * b_i) is computed with fractions and rounded correctly to FP32
+(same Inf/FTZ rules). The golden result must be within the
 error bound its algorithm guarantees: half an ulp of rounding plus at most one unit of the 40-bit
 window per truncated term. Also reports how often the golden result is exactly the correctly rounded
 one. Deterministic for a given seed.
@@ -53,7 +54,7 @@ def round_fp32_exact(value: Fraction) -> int:
 
 def random_finite(fmt: int, rng: random.Random) -> int:
     while True:
-        x = rng.getrandbits(16 if fmt == golden.BF16 else 8)
+        x = rng.getrandbits(golden.ELEMENT_BITS[fmt])
         cls = golden.decode_input(x, fmt)[0]
         if cls in (golden.FINITE, golden.ZERO):
             return x
@@ -67,7 +68,7 @@ def gaussian_value(fmt: int, rng: random.Random) -> int:
     import bisect
 
     if fmt not in _TABLES:
-        width = 16 if fmt == golden.BF16 else 8
+        width = golden.ELEMENT_BITS[fmt]
         table = {}
         for x in range(1 << width):
             value = golden.to_value(x, fmt)
@@ -82,7 +83,16 @@ def gaussian_value(fmt: int, rng: random.Random) -> int:
     return min(candidates, key=lambda entry: abs(entry[0] - target))[1]
 
 
+def realistic_c(rng: random.Random, n: int) -> int:
+    """An accumulator of the size a K-loop over N(0, 1) data produces: N(0, sqrt(k)) for a few steps."""
+    while True:
+        bits = round_fp32_exact(Fraction(rng.gauss(0.0, (n * rng.randint(1, 8)) ** 0.5)))
+        if golden.decode_fp32(bits)[0] in (golden.FINITE, golden.ZERO):
+            return bits
+
+
 def random_c(rng: random.Random, scale_like: Fraction | None) -> int:
+    """Zero, a near-cancelling addend, or arbitrary FP32 bits (any magnitude)."""
     choice = rng.random()
     if choice < 0.2:
         return 0
@@ -99,6 +109,7 @@ def random_c(rng: random.Random, scale_like: Fraction | None) -> int:
 
 
 def top_anchor(a, b, c, fmt) -> int | None:
+    """Largest anchor among nonzero terms, for element lists a and b (unit scales)."""
     q = golden.significand_bits(fmt)
     anchors = []
     for x, y in zip(a, b):
@@ -121,20 +132,24 @@ def run(seed: int, cases: int) -> dict:
     rng = random.Random(seed)
     report = {"seed": seed, "cases_per_format": cases, "formats": {}}
     violations = []
-    for (fmt, name), distribution in [(item, dist) for dist in ("uniform-bits", "gaussian") for item in golden.FORMATS.items()]:
+    # uniform-bits: random encodings, any c. gaussian: N(0,1) data with a realistic K-loop accumulator.
+    # gaussian-any-c: N(0,1) data with c from random_c (near-cancelling or arbitrary magnitude), the case
+    # where exactly cancelling products push a tiny c below the 40-bit window.
+    for (fmt, name), distribution in [(item, dist) for dist in ("uniform-bits", "gaussian", "gaussian-any-c") for item in golden.FORMATS.items()]:
         draw = random_finite if distribution == "uniform-bits" else gaussian_value
         exact_matches = 0
         checked = 0
         worst_ulps = Fraction(0)
         for _ in range(cases):
-            a = [draw(fmt, rng) for _ in range(4)]
-            b = [draw(fmt, rng) for _ in range(4)]
+            n = 64 // golden.ELEMENT_BITS[fmt]
+            a = [draw(fmt, rng) for _ in range(n)]
+            b = [draw(fmt, rng) for _ in range(n)]
             products = sum(golden.to_value(x, fmt) * golden.to_value(y, fmt) for x, y in zip(a, b))
-            c = random_c(rng, products if products else None)
+            c = realistic_c(rng, n) if distribution == "gaussian" else random_c(rng, products if products else None)
             exact = golden.to_value(c) + products
             if abs(exact) >= TWO ** 128:
                 continue  # beyond FP32 range; overflow handling is covered by the RTL directed tests
-            got = golden.dot4(a, b, c, fmt)
+            got = golden.dot(golden.pack_row(a, fmt), golden.pack_row(b, fmt), c, fmt)
             want = round_fp32_exact(exact)
             if got == want:
                 exact_matches += 1
@@ -144,7 +159,7 @@ def run(seed: int, cases: int) -> dict:
             checked += 1
             error = abs(golden.to_value(got) - exact)
             top = top_anchor(a, b, c, fmt)
-            bound = ulp(got) / 2 + 5 * TWO ** (top - golden.WINDOW + 1)
+            bound = ulp(got) / 2 + (n + 1) * TWO ** (top - golden.WINDOW + 1)
             if error > bound:
                 violations.append({"fmt": name, "a": a, "b": b, "c": c, "got": got, "want": want})
             worst_ulps = max(worst_ulps, error / ulp(got))

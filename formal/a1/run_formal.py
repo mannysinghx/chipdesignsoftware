@@ -22,7 +22,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 JOBS = [
-    {"file": "a1_dot4.sby", "title": "Dot product: operand swap, FP8 upper byte, FTZ, canonical NaN, NaN propagation (all inputs)"},
+    {"file": "a1_dot4.sby", "title": "Dot product: operand and scale swap, FTZ, canonical NaN, NaN data and scale propagation (all inputs)"},
     {"file": "a1_dot_sum.sby", "title": "Dot product sum stage: term order does not change the result (any term bundle)"},
     {"file": "a1_tile.sby", "title": "Tile control: one response per READ, held until taken, addressed writes and reads (k-induction proof, cover)"},
 ]
