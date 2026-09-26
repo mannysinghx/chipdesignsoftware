@@ -1,0 +1,272 @@
+{
+  "schema_version": "1.0.0",
+  "id": "aimem-a1-compute-die-targets",
+  "title": "AIMEM-A1 compute die: reference chips, benchmarks, and calibration targets",
+  "status": "planned",
+  "evidence_class": "planned",
+  "retrieved": "2026-09-26",
+  "plan": "docs/COMPUTE_DIE_PLAN.md",
+  "dossier": "docs/compute-die/C0_RESEARCH_DOSSIER.md",
+  "rules": [
+    "Every peak figure is DENSE. When a vendor quotes a sparse figure, the dense value is stored with quoted_sparse, and value must equal quoted_sparse / 2.",
+    "Every figure names a source key from sources and a confidence (high, med, low). Only high or med measured data may be used to calibrate; low data is cross-check only.",
+    "Per-GPU MLPerf throughput is never stored; it is computed as system_result / accelerators, because MLPerf reports systems.",
+    "SKU power bins are not mixed: calibration uses the HGX/DGX bins, because the MLPerf calibration systems are DGX systems.",
+    "Source conflicts are kept, with the alternatives and the resolution, never silently resolved.",
+    "Changing a tolerance, the calibration set, or the held-out set after C1 starts is an evaluator change and needs the owner's approval (plan section 4, item 4)."
+  ],
+  "sources": {
+    "nvidia-h100": { "url": "https://www.nvidia.com/en-us/data-center/h100/", "kind": "vendor" },
+    "nvidia-h200": { "url": "https://www.nvidia.com/en-us/data-center/h200/", "kind": "vendor" },
+    "nvidia-hopper-blog": { "url": "https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/", "kind": "vendor" },
+    "nvidia-hgx": { "url": "https://www.nvidia.com/en-us/data-center/hgx/", "kind": "vendor" },
+    "nvidia-dgx-b200": { "url": "https://www.nvidia.com/en-us/data-center/dgx-b200/", "kind": "vendor" },
+    "nvidia-dgx-b300": { "url": "https://www.nvidia.com/en-us/data-center/dgx-b300/", "kind": "vendor" },
+    "nvidia-bw-ultra-blog": { "url": "https://developer.nvidia.com/blog/inside-nvidia-blackwell-ultra-the-chip-powering-the-ai-factory-era/", "kind": "vendor" },
+    "nvidia-blackwell-tuning": { "url": "https://docs.nvidia.com/cuda/blackwell-tuning-guide/index.html", "kind": "vendor" },
+    "nvidia-rubin-blog": { "url": "https://developer.nvidia.com/blog/inside-the-nvidia-rubin-platform-six-new-chips-one-ai-supercomputer/", "kind": "vendor" },
+    "nvidia-rubin-gpu-blog": { "url": "https://developer.nvidia.com/blog/inside-nvidia-rubin-gpu-architecture-powering-the-era-of-agentic-ai/", "kind": "vendor" },
+    "nvidia-vr-nvl72": { "url": "https://www.nvidia.com/en-us/data-center/vera-rubin-nvl72/", "kind": "vendor" },
+    "chipsandcheese-b200": { "url": "https://chipsandcheese.com/p/nvidias-b200-keeping-the-cuda-juggernaut", "kind": "third-party measurement" },
+    "amd-mi355x": { "url": "https://www.amd.com/en/products/accelerators/instinct/mi350/mi355x.html", "kind": "vendor" },
+    "google-tpu7x": { "url": "https://docs.cloud.google.com/tpu/docs/tpu7x", "kind": "vendor" },
+    "mlperf-inf-v5.0": { "url": "https://github.com/mlcommons/inference_results_v5.0", "kind": "benchmark" },
+    "mlperf-inf-v5.1": { "url": "https://github.com/mlcommons/inference_results_v5.1", "kind": "benchmark" },
+    "mlperf-inf-v6.0": { "url": "https://github.com/mlcommons/inference_results_v6.0", "kind": "benchmark" },
+    "arxiv-2501.12084": { "url": "https://arxiv.org/abs/2501.12084", "kind": "paper", "note": "Hopper microbenchmarks on H800 PCIe (GH100, 114 SMs, 350 W cap)" },
+    "arxiv-2410.20399": { "url": "https://arxiv.org/abs/2410.20399", "kind": "paper", "note": "ThunderKittens" },
+    "arxiv-2404.13195": { "url": "https://arxiv.org/abs/2404.13195", "kind": "paper", "note": "GH200 STREAM" },
+    "arxiv-2605.04178": { "url": "https://arxiv.org/abs/2605.04178", "kind": "paper", "note": "B200 sustained tensor and HBM throughput" },
+    "blog-b200-cublas": { "url": "https://www.paulwillchan.com/articles/outperforming-cublas-b200", "kind": "blog" },
+    "hf-llama2-70b": { "url": "https://huggingface.co/meta-llama/Llama-2-70b-hf/blob/main/config.json", "kind": "model config" },
+    "llama3-paper": { "url": "https://arxiv.org/abs/2407.21783", "kind": "paper", "note": "Llama 3 herd of models, Table 3" },
+    "deepseek-v3-paper": { "url": "https://arxiv.org/abs/2412.19437", "kind": "paper" }
+  },
+  "reference_chips": [
+    {
+      "id": "h100-sxm",
+      "name": "NVIDIA H100 SXM (80 GB)",
+      "role": "calibration",
+      "sku_bin": "SXM, up to 700 W (DGX H100)",
+      "architecture": { "process": "TSMC 4N", "transistors_billion": 80, "dies": 1, "die_area_mm2": 814, "sms": 132, "tensor_cores_per_sm": 4, "l2_mb": 50, "source": "nvidia-hopper-blog", "confidence": "high" },
+      "peak_dense_tflops": {
+        "fp8": { "value": 1979, "quoted_sparse": 3958, "source": "nvidia-h100", "confidence": "high" },
+        "bf16": { "value": 989.5, "quoted_sparse": 1979, "source": "nvidia-h100", "confidence": "high" },
+        "tf32": { "value": 494.5, "quoted_sparse": 989, "source": "nvidia-h100", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 80, "source": "nvidia-h100", "confidence": "high" },
+        "bandwidth_tbps": { "value": 3.35, "source": "nvidia-h100", "confidence": "high" }
+      },
+      "scale_up_tbps": { "value": 0.9, "source": "nvidia-h100", "confidence": "high" },
+      "power_w": { "value": 700, "source": "nvidia-h100", "confidence": "high" }
+    },
+    {
+      "id": "h200-sxm",
+      "name": "NVIDIA H200 SXM (141 GB)",
+      "role": "calibration",
+      "sku_bin": "SXM, up to 700 W",
+      "architecture": { "process": "TSMC 4N", "note": "Same GH100 die as H100 (assumed; NVIDIA's H200 page does not restate die facts)", "confidence": "low" },
+      "peak_dense_tflops": {
+        "fp8": { "value": 1979, "quoted_sparse": 3958, "source": "nvidia-h200", "confidence": "high" },
+        "bf16": { "value": 989.5, "quoted_sparse": 1979, "source": "nvidia-h200", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 141, "source": "nvidia-h200", "confidence": "high" },
+        "bandwidth_tbps": { "value": 4.8, "source": "nvidia-h200", "confidence": "high" }
+      },
+      "scale_up_tbps": { "value": 0.9, "source": "nvidia-h200", "confidence": "high" },
+      "power_w": { "value": 700, "source": "nvidia-h200", "confidence": "high" }
+    },
+    {
+      "id": "b200-hgx",
+      "name": "NVIDIA B200 (HGX/DGX bin, 180 GB)",
+      "role": "calibration-and-primary-target",
+      "sku_bin": "HGX/DGX B200; DGX system ~14.3 kW for 8 GPUs. GB200 runs a higher bin with ~10% more compute per GPU and is not used here",
+      "architecture": { "process": "TSMC 4NP", "transistors_billion": 208, "dies": 2, "sms": 148, "l2_mb": 126, "source": "nvidia-bw-ultra-blog", "note": "SM count from Chips and Cheese; L2 from the Blackwell tuning guide", "confidence": "med" },
+      "peak_dense_tflops": {
+        "fp4": { "value": 9000, "note": "HGX page quotes 144 sparse | 72 dense PFLOPS for 8 GPUs", "source": "nvidia-hgx", "confidence": "high" },
+        "fp8": { "value": 4500, "quoted_sparse": 9000, "source": "nvidia-hgx", "confidence": "high" },
+        "bf16": { "value": 2250, "quoted_sparse": 4500, "source": "nvidia-hgx", "confidence": "high" },
+        "tf32": { "value": 1125, "quoted_sparse": 2250, "source": "nvidia-hgx", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 180, "note": "1,440 GB / 8", "source": "nvidia-dgx-b200", "confidence": "high" },
+        "bandwidth_tbps": {
+          "value": 8, "note": "64 TB/s / 8", "source": "nvidia-dgx-b200", "confidence": "high",
+          "conflict": { "alternatives": [{ "value": 7.7, "source": "Lenovo B200 product guide (reseller)" }], "resolution": "Use NVIDIA's 8 TB/s as the peak; sustained bandwidth is calibrated separately from measured data" }
+        }
+      },
+      "scale_up_tbps": { "value": 1.8, "note": "14.4 TB/s / 8", "source": "nvidia-dgx-b200", "confidence": "high" },
+      "power_w": { "value": 1000, "note": "Per-GPU HGX figure is from secondary sources; NVIDIA states 'up to 1,200 W' for B200 (GB200 bin)", "source": "nvidia-bw-ultra-blog", "confidence": "low" }
+    },
+    {
+      "id": "b300-hgx",
+      "name": "NVIDIA B300 / Blackwell Ultra (HGX/DGX bin, 270 GB)",
+      "role": "held-out",
+      "sku_bin": "HGX/DGX B300; DGX system ~14 kW for 8 GPUs",
+      "architecture": { "process": "TSMC 4NP", "transistors_billion": 208, "dies": 2, "sms": 160, "tmem_kb_per_sm": 256, "sfu_exp_tera_per_s": 10.7, "source": "nvidia-bw-ultra-blog", "note": "Whether shipping parts enable all 160 SMs is not stated", "confidence": "med" },
+      "peak_dense_tflops": {
+        "fp4": { "value": 13500, "note": "HGX page quotes 144 sparse | 108 dense PFLOPS for 8 GPUs", "source": "nvidia-hgx", "confidence": "high" },
+        "fp8": { "value": 4500, "quoted_sparse": 9000, "source": "nvidia-hgx", "confidence": "high" },
+        "bf16": { "value": 2250, "quoted_sparse": 4500, "source": "nvidia-hgx", "confidence": "high" },
+        "tf32": { "value": 1125, "quoted_sparse": 2250, "source": "nvidia-hgx", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 270, "note": "MLPerf system description B300-SXM-270GB; the blog's 288 GB is the GB300 part", "source": "mlperf-inf-v6.0", "confidence": "high" },
+        "bandwidth_tbps": { "value": 8, "source": "nvidia-bw-ultra-blog", "confidence": "high" }
+      },
+      "scale_up_tbps": { "value": 1.8, "source": "nvidia-dgx-b300", "confidence": "high" },
+      "power_w": { "value": 1100, "note": "Secondary sources only; GB300 is up to 1,400 W", "source": "nvidia-bw-ultra-blog", "confidence": "low" }
+    },
+    {
+      "id": "rubin",
+      "name": "NVIDIA Rubin (VR200, 288 GB HBM4)",
+      "role": "stretch-target",
+      "sku_bin": "Vera Rubin NVL72",
+      "architecture": { "transistors_billion": 336, "dies": 2, "sms": 224, "tensor_cores": 896, "source": "nvidia-rubin-gpu-blog", "note": "Process (TSMC N3P) from secondary sources only", "confidence": "high" },
+      "peak_dense_tflops": {
+        "fp4": {
+          "value": 35000, "note": "NVFP4 training figure; the 50 PF inference figure is footnoted 'Sparse specification' on the product page", "source": "nvidia-vr-nvl72", "confidence": "med",
+          "conflict": { "alternatives": [{ "value": 50000, "source": "nvidia-rubin-blog" }], "resolution": "Store 35 PF as dense; 50 PF relies on sparsity or adaptive compression" }
+        },
+        "fp8": { "value": 17500, "source": "nvidia-vr-nvl72", "confidence": "high" },
+        "bf16": { "value": 4000, "source": "nvidia-vr-nvl72", "confidence": "high" },
+        "tf32": { "value": 2000, "source": "nvidia-vr-nvl72", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 288, "source": "nvidia-rubin-blog", "confidence": "high" },
+        "bandwidth_tbps": {
+          "value": 22, "source": "nvidia-rubin-blog", "confidence": "med",
+          "conflict": { "alternatives": [{ "value": 19.2, "source": "nvidia-vr-nvl72" }], "resolution": "Use the higher value, the harder stretch target; revisit when NVIDIA publishes a datasheet" }
+        }
+      },
+      "scale_up_tbps": {
+        "value": 3.6, "source": "nvidia-rubin-blog", "confidence": "med",
+        "conflict": { "alternatives": [{ "value": 3.0, "source": "nvidia-vr-nvl72" }], "resolution": "Use the higher value as the stretch target" }
+      }
+    },
+    {
+      "id": "mi355x",
+      "name": "AMD Instinct MI355X (288 GB)",
+      "role": "comparator",
+      "architecture": { "process": "TSMC N3P compute + N6 I/O", "transistors_billion": 185, "dies": 10, "compute_units": 256, "clock_ghz": 2.4, "source": "amd-mi355x", "confidence": "high" },
+      "peak_dense_tflops": {
+        "fp4": { "value": 10100, "note": "MXFP4; no sparse figure listed", "source": "amd-mi355x", "confidence": "high" },
+        "fp8": { "value": 5000, "source": "amd-mi355x", "confidence": "high" },
+        "bf16": { "value": 2500, "source": "amd-mi355x", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 288, "source": "amd-mi355x", "confidence": "high" },
+        "bandwidth_tbps": { "value": 8, "source": "amd-mi355x", "confidence": "high" }
+      },
+      "power_w": { "value": 1400, "source": "amd-mi355x", "confidence": "high" }
+    },
+    {
+      "id": "tpu7x",
+      "name": "Google TPU v7 (Ironwood)",
+      "role": "comparator",
+      "architecture": { "dies": 2, "note": "Each chiplet: 1 TensorCore, 2 SparseCores, 96 GB HBM", "source": "google-tpu7x", "confidence": "high" },
+      "peak_dense_tflops": {
+        "fp8": { "value": 4614, "note": "Google quotes no sparse figure; dense is presumed", "source": "google-tpu7x", "confidence": "med" },
+        "bf16": { "value": 2307, "source": "google-tpu7x", "confidence": "med" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 206.2, "note": "192 GiB", "source": "google-tpu7x", "confidence": "high" },
+        "bandwidth_tbps": { "value": 7.38, "source": "google-tpu7x", "confidence": "high" }
+      },
+      "scale_up_tbps": { "value": 1.2, "note": "ICI, bidirectional", "source": "google-tpu7x", "confidence": "high" }
+    }
+  ],
+  "measured": {
+    "mlperf_inference": [
+      { "id": "5.0-0057", "chip": "h100-sxm", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 31306.8, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0057", "chip": "h100-sxm", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 31106.3, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 34988.2, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 33071.5, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 560.651, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.0-0060", "chip": "h200-sxm", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 291.374, "accelerators": 8, "weights": "fp8", "source": "mlperf-inf-v5.0", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 101527, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 99123, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1624.11, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1240.42, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 112954, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 107318, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1951.6, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1460.25, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 103480, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" },
+      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 100282, "accelerators": 8, "weights": "fp4", "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" }
+    ],
+    "gemm": [
+      { "chip": "h100-sxm", "precision": "bf16", "shape": [16384, 16384, 16384], "achieved_tflops": 797, "kernel": "ThunderKittens", "source": "arxiv-2410.20399", "confidence": "med", "use": "calibrate" },
+      { "chip": "h100-sxm", "precision": "bf16", "shape": [4096, 4096, 4096], "achieved_tflops": 767, "kernel": "ThunderKittens", "source": "arxiv-2410.20399", "confidence": "med", "use": "calibrate" },
+      { "chip": "b200-hgx", "precision": "bf16", "shape": null, "achieved_tflops_range": [1100, 1400], "kernel": "sustained tensor-core throughput (paper's microbenchmark)", "source": "arxiv-2605.04178", "confidence": "med", "use": "calibrate" },
+      { "chip": "b200-hgx", "precision": "bf16", "shape": [8192, 8192, 8192], "achieved_tflops": 1551, "kernel": "cuBLAS", "source": "blog-b200-cublas", "confidence": "low", "use": "cross-check" },
+      { "chip": "h800-pcie", "precision": "fp8", "shape": null, "achieved_tflops_range": [1417.2, 1455], "peak_tflops": 1513, "kernel": "wgmma m64n256k32, FP32 accumulate", "source": "arxiv-2501.12084", "confidence": "high", "use": "cross-check", "note": "Different SKU (114 SMs, 350 W cap); informs per-SM efficiency only" }
+    ],
+    "memory_bandwidth": [
+      { "chip": "h800-pcie", "achieved_tbps": 1.8615, "peak_tbps": 2.039, "source": "arxiv-2501.12084", "confidence": "high", "use": "cross-check", "note": "Different SKU; informs sustained fraction only" },
+      { "chip": "b200-hgx", "achieved_tbps_range": [6.8, 7.1], "source": "arxiv-2605.04178", "confidence": "med", "use": "calibrate" }
+    ],
+    "excluded": [
+      { "source": "https://arxiv.org/abs/2512.02189", "reason": "Internally inconsistent: reports throughput above NVIDIA's dense peaks (H200 BF16 1,513.5 TF; B200 FP6 5,134 TF) and two different B200 FP8 figures in two tables. Do not calibrate on it." }
+    ]
+  },
+  "models": {
+    "llama2-70b": { "hidden": 8192, "layers": 80, "heads": 64, "kv_heads": 8, "head_dim": 128, "ffn": 28672, "vocab": 32000, "params_billion": 70, "source": "hf-llama2-70b" },
+    "llama3.1-405b": { "hidden": 16384, "layers": 126, "heads": 128, "kv_heads": 8, "head_dim": 128, "ffn": 53248, "vocab": 128256, "params_billion": 405, "source": "llama3-paper" },
+    "deepseek-v3": { "hidden": 7168, "layers": 61, "heads": 128, "routed_experts": 256, "active_routed_experts": 8, "shared_experts": 1, "moe_ffn": 2048, "params_billion": 671, "active_params_billion": 37, "attention": "MLA", "source": "deepseek-v3-paper" }
+  },
+  "benchmarks": {
+    "gemm_square": { "sizes": [4096, 8192, 16384], "precisions": ["bf16", "fp8", "fp4"], "metrics": ["achieved_tflops", "fraction_of_peak"] },
+    "transformer_gemm": {
+      "models": ["llama2-70b", "llama3.1-405b"],
+      "tokens_m": [1, 8, 64, 512, 4096, 16384],
+      "ops": {
+        "qkv": { "k": "hidden", "n": "(heads + 2 * kv_heads) * head_dim" },
+        "attn_out": { "k": "heads * head_dim", "n": "hidden" },
+        "ffn_up_gate": { "k": "hidden", "n": "2 * ffn" },
+        "ffn_down": { "k": "ffn", "n": "hidden" }
+      },
+      "precisions": ["fp8", "fp4"],
+      "metrics": ["time_us", "achieved_tflops", "bytes_moved"]
+    },
+    "attention": {
+      "models": ["llama2-70b", "llama3.1-405b"],
+      "shape_from_model": "head_dim, heads, and kv_heads come from models.<id>; GQA group = heads / kv_heads (8 for llama2-70b, 16 for llama3.1-405b)",
+      "prefill": { "seq_len": [8192, 32768], "causal": true },
+      "decode": { "kv_len": [4096, 32768, 131072], "batch": [1, 64, 256], "kv_precision": "fp8" },
+      "metrics": ["time_us", "bytes_moved", "fraction_of_bandwidth_roof"]
+    },
+    "llm_serving": [
+      { "id": "mlperf-llama2-70b", "model": "llama2-70b", "scenarios": ["Offline", "Server"], "weights": ["fp8", "fp4"], "calibrated_by": "measured.mlperf_inference" },
+      { "id": "mlperf-llama3.1-405b", "model": "llama3.1-405b", "scenarios": ["Offline", "Server"], "weights": ["fp8", "fp4"], "calibrated_by": "measured.mlperf_inference" },
+      { "id": "decode-sweep", "model": "llama3.1-405b", "input_tokens": 2048, "output_tokens": 512, "batch": [1, 32, 256], "weights": ["fp8", "fp4"], "calibrated_by": null },
+      { "id": "moe-decode", "model": "deepseek-v3", "input_tokens": 8192, "output_tokens": 1024, "batch": [32, 256], "weights": ["fp8", "fp4"], "calibrated_by": null }
+    ],
+    "metrics_per_package": ["tokens_per_s", "tokens_per_s_per_w", "time_to_first_token_ms", "time_per_output_token_ms", "bytes_moved_per_token"]
+  },
+  "calibration": {
+    "calibration_chips": ["h100-sxm", "h200-sxm", "b200-hgx"],
+    "held_out_chips": ["b300-hgx"],
+    "tolerances_relative": {
+      "peak_reproduction": 0.000001,
+      "gemm_achieved": 0.10,
+      "memory_bandwidth_achieved": 0.05,
+      "mlperf_per_accelerator_calibration": 0.15,
+      "mlperf_per_accelerator_held_out": 0.20
+    },
+    "status": "proposed 2026-09-26; frozen when C1 starts"
+  },
+  "parity": {
+    "primary_target": "b200-hgx",
+    "stretch_target": "rubin",
+    "evidence_class_of_any_parity_claim": "modeled",
+    "a1_meets_target_when": [
+      "peak dense FP8 and FP4 per package >= target",
+      "modeled mlperf-llama2-70b and mlperf-llama3.1-405b Offline tokens/s per package >= target, from a model that passed its held-out check",
+      "modeled decode-sweep tokens/s per package >= target at batch 32",
+      "modeled tokens/s per watt >= target, reported with the target's power confidence"
+    ]
+  }
+}

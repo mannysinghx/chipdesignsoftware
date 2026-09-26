@@ -3,6 +3,7 @@
 **Plan date:** 22 September 2026
 **Status:** Phase 0 built and verified on 22 September 2026 (see [Phase 0 status](#phase-0-status-2026-09-22)). Phase 1 built and executed the same day, with all three exit criteria met (see [Phase 1 status](#phase-1-status-2026-09-22)). Phase 2 increment 1 (agent runtime, model gateway, approvals) built the same day (see [Phase 2 status](#phase-2-status-2026-09-22-increment-1)). Phases 3 to 6 are proposed.
 **Extends:** `../AIMEM_X1_AI_DESIGN_PLATFORM_DEVELOPMENT_PLAN.md` (31 Aug 2026). That plan defines the product, evidence classes, and agent authority boundaries. This plan adds three things: a working backend and real agents, **recursive self-improvement (RSI)**, and **mandatory logging of every action and feature**.
+**Extended by:** [`COMPUTE_DIE_PLAN.md`](COMPUTE_DIE_PLAN.md) (26 Sep 2026): the AIMEM-A1 compute die that these loops build next, and the autonomy policy for running them unattended.
 
 ---
 
