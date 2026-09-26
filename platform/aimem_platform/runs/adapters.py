@@ -317,8 +317,54 @@ class PhysicalAdapter(Adapter):
         return Outcome("pass", headline, metrics, limitations=limitations)
 
 
+# -- AIMEM-A1 compute die (docs/COMPUTE_DIE_PLAN.md, step C2) ------------------------------------
+# Separate adapters over rtl/a1, verification/a1, and formal/a1, so T0 run inputs (and their spec
+# hashes) are unchanged. Inputs keep their repository paths so the same scripts run in and out of
+# the sandbox.
+
+
+class A1LintAdapter(LintAdapter):
+    id = "a1.lint"
+    title = "A1 tensor tile RTL lint (Verilator)"
+    description = "Verilator -Wall lint of the A1 tensor tile and of its dot-product unit on its own."
+
+    def inputs(self, params, repo):
+        return {**self._glob(repo, "rtl/a1/*.sv", "rtl/a1"), "driver/lint.py": DRIVERS / "lint.py", "driver/lint_a1.py": DRIVERS / "lint_a1.py"}
+
+    def command(self, params):
+        return ["tabbypy3", "/work/in/driver/lint_a1.py", "--rtl", "/work/in/rtl/a1", "--out", "/work/out"]
+
+
+class A1SimAdapter(SimAdapter):
+    id = "a1.sim"
+    title = "A1 tensor tile simulation regression (cocotb + Icarus)"
+    description = "Bit-exact cosimulation of the A1 dot-product unit and tile against the golden model, plus the golden model's accuracy check against exact arithmetic."
+
+    def inputs(self, params, repo):
+        return {**self._glob(repo, "rtl/a1/*.sv", "rtl/a1"), **self._glob(repo, "verification/a1/*.py", "verification/a1")}
+
+    def command(self, params):
+        return ["tabbypy3", "/work/in/verification/a1/run_regression.py", "--rtl", "/work/in/rtl/a1", "--out", "/work/out", "--seed", str(params.seed)]
+
+
+class A1FormalAdapter(FormalAdapter):
+    id = "a1.formal"
+    title = "A1 tensor tile formal verification (SymbiYosys)"
+    description = "Dot-product invariants for every input, and the tile's control proof by k-induction with cover checks."
+
+    def inputs(self, params, repo):
+        formal = {}
+        for pattern in ("formal/a1/*.sby", "formal/a1/*_sby.sv", "formal/a1/run_formal.py"):
+            formal.update(self._glob(repo, pattern, "formal/a1"))
+        return {**self._glob(repo, "rtl/a1/*.sv", "rtl/a1"), **formal}
+
+    def command(self, params):
+        return ["tabbypy3", "/work/in/formal/a1/run_formal.py", "--out", "/work/out/formal"]
+
+
 ADAPTERS: dict[str, Adapter] = {
-    adapter.id: adapter for adapter in (SelfTestAdapter(), LintAdapter(), SimAdapter(), FormalAdapter(), PhysicalAdapter())
+    adapter.id: adapter
+    for adapter in (SelfTestAdapter(), LintAdapter(), SimAdapter(), FormalAdapter(), PhysicalAdapter(), A1LintAdapter(), A1SimAdapter(), A1FormalAdapter())
 }
 
 

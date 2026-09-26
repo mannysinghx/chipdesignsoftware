@@ -1,0 +1,26 @@
+[tasks]
+specials
+swap
+rotate
+cover
+
+[options]
+specials: mode prove
+swap: mode prove
+rotate: mode prove
+cover: mode cover
+depth 1
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+specials: read -formal -D CHECK_SPECIALS a1_fp_dot4.sv a1_fp_dot4_sby.sv
+swap: read -formal -D CHECK_SWAP a1_fp_dot4.sv a1_fp_dot4_sby.sv
+rotate: read -formal -D CHECK_ROTATE a1_fp_dot4.sv a1_fp_dot4_sby.sv
+cover: read -formal a1_fp_dot4.sv a1_fp_dot4_sby.sv
+prep -top a1_fp_dot4_sby
+
+[files]
+../../rtl/a1/a1_fp_dot4.sv
+a1_fp_dot4_sby.sv

@@ -92,7 +92,7 @@ jobs:
         run: |
           mkdir -p outputs/eda-runs
           cd platform
-          for adapter in platform.selftest rtl.lint rtl.sim formal.sby physical.orfs; do
+          for adapter in platform.selftest rtl.lint rtl.sim formal.sby physical.orfs a1.lint a1.sim a1.formal; do
             .venv/bin/aimem-platform run "$adapter" --runner docker > "../outputs/eda-runs/$adapter.run.json" || true
             run_id=$(python3 -c "import json,sys; print(json.load(open('../outputs/eda-runs/$adapter.run.json'))['run_id'])")
             .venv/bin/aimem-platform manifest "$run_id" > "../outputs/eda-runs/$adapter.manifest.json"

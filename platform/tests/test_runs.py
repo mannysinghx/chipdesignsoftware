@@ -197,7 +197,7 @@ def test_run_api_roles_and_log_tail(env, local_services, client, login):
     assert client.post("/api/runs", headers=viewer, json={"adapter": "platform.selftest"}).status_code == 403
     assert client.post("/api/runs", headers=login("engineer"), json={"adapter": "nope"}).status_code == 404
     catalog = client.get("/api/adapters", headers=viewer).json()["adapters"]
-    assert {"platform.selftest", "rtl.lint", "rtl.sim", "formal.sby", "physical.orfs"} <= {item["id"] for item in catalog}
+    assert {"platform.selftest", "rtl.lint", "rtl.sim", "formal.sby", "physical.orfs", "a1.lint", "a1.sim", "a1.formal"} <= {item["id"] for item in catalog}
     run = run_selftest(local_services)
     detail = client.get(f"/api/runs/{run.run_id}", headers=viewer).json()["run"]
     assert {file["role"] for file in detail["files"]} == {"input", "output", "log"}

@@ -1,7 +1,7 @@
 # AIMEM-A1: an AI Compute Die Built and Improved by Agents
 
 **Plan date:** 26 September 2026
-**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). **C1 complete** the same day, after three model versions: version 3 meets every exit criterion under owner-approved scoring (best MLPerf submission per chip, Offline qualifies). Its held-out GB200 predictions are +8.3% and +10.4%. Versions 1 and 2 failed their held-out checks, and those results stay on record (see [C1 status](#c1-status-2026-09-26-version-3)). C2 to C6 are proposed.
+**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). **C1 complete** the same day, after three model versions: version 3 meets every exit criterion under owner-approved scoring (best MLPerf submission per chip, Offline qualifies). Its held-out GB200 predictions are +8.3% and +10.4%. Versions 1 and 2 failed their held-out checks, and those results stay on record (see [C1 status](#c1-status-2026-09-26-version-3)). **C2 increment 1** (the tensor tile's arithmetic and control) was built and verified the same day: bit-exact against the golden model, formally proved, lint clean, and audited (see [C2 status](#c2-status-2026-09-26-increment-1)). C2 increment 2 (MX and FP4, tile DMA, pipelining) and C3 to C6 are proposed.
 **Extends:** [`RSI_PLATFORM_PLAN.md`](RSI_PLATFORM_PLAN.md). That plan builds the machinery that lets agents improve designs (L1), themselves (L2), and their models (L3). This plan adds what they build next: a compute die that pairs with the AIMEM memory stacks. It also sets the autonomy policy for running those loops unattended.
 
 ---
@@ -172,6 +172,27 @@ Power explains Blackwell's throughput; rack-scale Server behavior and AMD withou
 - Peak figures for H100, H200, and B200 are reproduced exactly from their microarchitecture parameters.
 - Measured GEMM efficiency and MLPerf per-GPU throughput for the calibration chips are reproduced within the tolerances fixed in the targets file.
 - **Held-out check:** with no retuning, the model predicts B300. The error is recorded whether it passes or not. A model that fails this check cannot be used to make claims about A1.
+
+### C2 status (2026-09-26, increment 1)
+
+**Built:**
+- `rtl/a1/a1_fp_dot4.sv`: a fused FP8/BF16 dot product with FP32 accumulate.
+- `rtl/a1/a1_mma_tile.sv`: a 4×4×4 MMA tile with an accumulator memory beside the array.
+- `verification/a1/golden.py`: the arithmetic specification, in exact integers.
+- The cocotb regression, SymbiYosys jobs, and the additive platform adapters `a1.lint`, `a1.sim`, and `a1.formal`.
+
+Full results: [`C2_TENSOR_TILE.md`](compute-die/C2_TENSOR_TILE.md).
+
+| Criterion | Result |
+|---|---|
+| Bit-exact against the golden model | Met: 13/13 tests, including exhaustive FP8 products (131,072 cases) and 400 random commands under backpressure |
+| Formal, with cover and vacuity checks | Met: tile control proved unbounded (k-induction); dot-unit invariants proved for every input |
+| Verilator lint clean | Met: 0 errors, 0 warnings |
+| Audited and reproducible | Met: runs reproduce identically and rebuild from the audit log |
+
+Ten planted bugs were each caught. The design was written from scratch, with Ten-Four as the reference, because Vortex's unit depends on its whole-GPU configuration. The golden model is exact Python, not NumPy, because NumPy cannot express the truncating window.
+
+**Not yet built:** MX/FP4, the tile DMA, and pipelining. These are increment 2, and C3 needs pipelining.
 
 ### C2: Tensor-tile RTL
 

@@ -37,10 +37,13 @@ function keyMetrics(run: PlatformRun): Array<[string, string]> {
   const metrics = (run.summary?.metrics ?? {}) as Record<string, unknown>;
   switch (run.adapter) {
     case 'rtl.lint':
+    case 'a1.lint':
       return [['Errors', String(metrics.errors ?? '—')], ['Warnings', String(metrics.warnings ?? '—')]];
     case 'rtl.sim':
+    case 'a1.sim':
       return [['Passed', `${metrics.passed ?? '—'}/${metrics.total ?? '—'}`], ['Seed', String(metrics.seed ?? '—')]];
-    case 'formal.sby': {
+    case 'formal.sby':
+    case 'a1.formal': {
       const tasks = (metrics.tasks ?? {}) as Record<string, string>;
       const passing = Object.values(tasks).filter((status) => status === 'PASS').length;
       return [['Tasks passing', `${passing}/${Object.keys(tasks).length}`], ['Failing', ((metrics.failing as string[]) ?? []).join(', ') || 'none']];

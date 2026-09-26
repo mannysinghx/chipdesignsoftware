@@ -1,0 +1,72 @@
+# C2 Result: Tensor Tile RTL, Increment 1
+
+**Date:** 26 September 2026
+**Step:** C2 of [`COMPUTE_DIE_PLAN.md`](../COMPUTE_DIE_PLAN.md)
+**Evidence class:** `executed` (simulation, formal, and lint, run in the pinned sandbox). This is not silicon and not a physical implementation.
+
+**Files:**
+- RTL: [`rtl/a1/a1_fp_dot4.sv`](../../rtl/a1/a1_fp_dot4.sv), [`rtl/a1/a1_mma_tile.sv`](../../rtl/a1/a1_mma_tile.sv)
+- Golden model and specification: [`verification/a1/golden.py`](../../verification/a1/golden.py)
+- Accuracy check: [`verification/a1/golden_accuracy.py`](../../verification/a1/golden_accuracy.py)
+- Tests: `verification/a1/test_a1_fp_dot4.py`, `verification/a1/test_a1_mma_tile.py`; runner `verification/a1/run_regression.py`
+- Formal: `formal/a1/` (harnesses, `a1_dot4.sby`, `a1_tile.sby`, `run_formal.py`)
+- Platform adapters `a1.lint`, `a1.sim`, `a1.formal` (`platform/aimem_platform/runs/adapters.py`), with `platform/tests/test_a1_adapters.py`
+
+## What increment 1 is
+
+| Block | What it does |
+|---|---|
+| `a1_fp_dot4` | Fused dot product with accumulate: d = round(c + a0·b0 + a1·b1 + a2·b2 + a3·b3) for FP8 E4M3, FP8 E5M2, or BF16 inputs, with FP32 addend and result. About 6,600 generic gates (Yosys). |
+| `a1_mma_tile` | A 4×4×4 matrix-multiply-accumulate per accepted command (D = C + A×B), using sixteen dot units, into an accumulator memory of four 4×4 FP32 tiles held beside the array. This is the Blackwell TMEM idea: accumulators never pass through a register file. Commands are ZERO, LOAD, MMA, and READ over valid/ready, with backpressure. About 106,000 generic cells, including 2,560 flip-flops. |
+
+**Deferred to increment 2** (all in the plan's C2 build list, not done here):
+- MX block scaling and FP4
+- the tile DMA (TMA-style)
+- pipelining: the MMA currently completes in the cycle it is accepted, which is correct but a long timing path; C3's physical flow needs registers
+
+## Design decisions
+
+1. **Written from scratch; Vortex's Ten-Four is the architectural reference.** Its code is Apache-2.0, but it depends on Vortex's whole-GPU configuration (`VX_define.vh`, `VX_gpu_pkg`) and nine library modules. A bit-exact golden model would also mean reverse-engineering its rounding algorithm. The plan's C0 condition was to confirm the code was usable at C2 start; it was not usable as a drop-in block.
+2. **The golden model is the specification,** in pure-Python integers rather than NumPy. The arithmetic is defined as:
+   - exact products;
+   - every term aligned into a 40-bit window below the largest term, truncating;
+   - an exact integer sum;
+   - one round-to-nearest-even to FP32;
+   - overflow to Inf, and flush-to-zero outputs;
+   - subnormal inputs honored, NaN and Inf handled per IEEE, E4M3 without Inf.
+
+   NumPy float arithmetic cannot express the truncating window, and the sandbox does not guarantee NumPy. This deviates from the plan's wording ("NumPy golden model"), not from its intent.
+3. **Truncation is the same trade-off GPU tensor cores make.** Against exact rational arithmetic, over 4,000 cases per format and distribution, with no bound violation in any of them:
+
+| Data | E4M3 | E5M2 | BF16 |
+|---|---|---|---|
+| Gaussian N(0,1), with cancelling addends: exactly rounded | 100% | 99.9% | 100% |
+| Gaussian: worst error | 0.5 ulp | 0.5 ulp | 0.5 ulp |
+| Uniform random bit patterns: exactly rounded | 99.6% | 99.4% | 57.6% |
+
+   On uniform bit patterns the large errors come only from engineered cancellation across exponent spreads of up to 2²⁵⁰, which real tensors do not have. The guaranteed bound (half an ulp plus one unit of the 40-bit window per term) holds everywhere.
+4. **A1 has its own adapters, so T0 is untouched.** The T0 adapters glob only the top of `rtl/` and their own test directories, so T0 run inputs and spec hashes are unchanged. A platform test proves it. The A1 lint driver reuses T0's `lint.py` unchanged by importing it.
+
+## Results
+
+| Exit criterion (plan C2) | Result |
+|---|---|
+| Bit-exact against the golden model, directed and random | **Met.** 13 of 13 tests pass. They cover every special-value rule, round-half-to-even ties, **exhaustive** single products for both FP8 formats (131,072 cases), random bit patterns and Gaussian data in every format (18,000 cases), the FP8 upper-byte rule, and tile tests: reset, LOAD/READ, single MMA, K = 32 accumulation chains, and 400 random commands under 60% backpressure with the handshake checked every cycle |
+| Formal proofs on control and handshake, with cover and vacuity checks | **Met.** Tile control is proved **unbounded, by k-induction** for any datapath result, with two cover checks reached. The dot unit's invariants are proved for **every input**: operand swap (47 s), lane order (324 s), and special values (377 s: FP8 upper byte, flush-to-zero, canonical NaN, NaN propagation), with two cover checks reached |
+| Verilator lint clean | **Met.** 0 errors, 0 warnings, `-Wall`, on both targets |
+| Runs through the sandboxed adapters, audited and reproducible | **Met** for all three: lint (run `b1362665`), simulation (run `3b4f3f65`), and formal (run `dfa9baf3`, 6/6 tasks in about 6 minutes). Each was re-executed from its audit record with identical outputs and rebuilt from the audit log with 7 of 7 checks consistent |
+
+**The tests were shown to catch bugs.** Ten bugs were planted, one at a time, in scratch copies of the RTL, and each was caught:
+- **In simulation:** no sticky bit, round-half-up, an off-by-one E5M2 subnormal exponent, `cmd_ready` stuck high, and swapped B lanes.
+- **By the tile proof:** a write to the wrong entry, a response dropped under backpressure, and `cmd_ready` stuck high, each failing on the assertion written for it.
+- **By the dot proofs:** a non-canonical NaN and an asymmetric exponent, each with a counterexample in seconds.
+
+**Bugs found while writing the RTL, before any tool ran:**
+- **A truncated product.** An 8×8 product written inside a concatenation, where Verilog evaluates at 8 bits and silently drops the top half.
+- **Task outputs to arrays.** Task outputs written into unpacked arrays, which Yosys does not reliably support.
+
+Both were fixed before the first simulation.
+
+## What C2 means for A1
+
+C2 proves the arithmetic and control of one tile. It does **not** yet produce the numbers C1's model needs: sustained TFLOPS per watt, memory efficiency, and serving efficiency. The generic gate counts above are not a process node. C3 turns this tile into area, frequency, and power on sky130 and on the ASAP7–GT2N bracket, after pipelining (increment 2). C3 also needs owner decision 3 (disk space or a separate worker).
