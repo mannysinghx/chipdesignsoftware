@@ -1,15 +1,81 @@
-# C1 Result: Calibrated Performance Model, Version 1
+# C1 Result: Calibrated Performance Model
 
 **Date:** 26 September 2026
 **Step:** C1 of [`COMPUTE_DIE_PLAN.md`](../COMPUTE_DIE_PLAN.md)
 **Evidence class:** `modeled`
 **Files:**
-- Model: [`lib/perf-model.ts`](../../lib/perf-model.ts), frozen at sha256 `9cf9786b…2de2`
-- Evidence: [`evidence/c1-perf-model.json`](../../evidence/c1-perf-model.json)
+- Model: [`lib/perf-model.ts`](../../lib/perf-model.ts), version 2, frozen at sha256 `c28c0e0a…18b4`
+- Evidence: [`evidence/c1-perf-model.json`](../../evidence/c1-perf-model.json) (version 2) and [`evidence/c1-perf-model-v1.json`](../../evidence/c1-perf-model-v1.json) (version 1, unchanged)
 - Tests: `tests/perf-model.test.ts`
 - Regenerate: `npm run evaluate:perf-model`
 
+# Version 2: power ceiling
+
 ## Outcome
+
+Version 2 adds one physical term, a power ceiling, and fits no new parameters. It still **fails its held-out check**, but narrowly:
+- **All three Offline rows pass,** at +0.3%, +8.2%, and +17.8%.
+- **Two Server rows fail** out of the three: GB300 Llama 2 70B at +30.2% and MI355X at +21.4%, against the ±20% tolerance.
+
+Under the plan's rule, the model is still not qualified for A1 claims. The owner approved the held-out set in chat on 2026-09-26, before the model was built. It was run once against the frozen model and is now consumed.
+
+| Exit criterion | Version 2 result |
+|---|---|
+| Peaks reproduced exactly | **Met** for every NVIDIA chip. For MI355X: within 0.7%, because AMD rounds its stated peaks to about two significant figures (derived with AMD's stated 2.4 GHz) |
+| Calibration within tolerance | **Partly met:** 9 of 10 rows within ±15%. The same row as in version 1 misses: H200 405B Server, now −18.9% |
+| Held-out predicted and recorded | **Recorded. Failed:** 4 of 6 rows within ±20%, and every Offline row passes |
+
+## The change
+
+Sustained tensor throughput is the lesser of two ceilings:
+- **Architectural:** 95% of peak. H800 reached 94–96% with low-toggle inputs, where power does not bind.
+- **Power:** (the family's measured BF16 TFLOPS per watt) × (the chip's power rating) × (16 ÷ operand bits). Energy per FLOP is taken as proportional to operand width: 16 bits for BF16, 8 for FP8, and 4.5 for NVFP4/MXFP4 including block scales.
+
+At the calibration chips this gives the same BF16 and FP8 rates as version 1, because it is anchored to the same measurements. What changes is FP4, and any chip at a different power rating. Fitted values:
+
+| Family | BF16 TFLOPS per watt | Memory efficiency | Source |
+|---|---|---|---|
+| Hopper | 1.117 | 0.913 | H100 (700 W, high confidence) |
+| Blackwell | 1.250 | 0.869 | B200 (1,000 W, now high confidence from Lenovo's part name) |
+| CDNA4 (AMD) | 1.184 | 0.891 | **No calibration data:** the mean of the two families above, a rule declared before building |
+
+The global serving efficiency is 0.668.
+
+## Held out (one run; approved set: GB300 NVL72 and MI355X)
+
+| Row | Workload | Measured /GPU | Modeled /GPU | Error | Within ±20% |
+|---|---|---|---|---|---|
+| 6.0-0078 GB300 | Llama 2 70B Offline | 15,651 | 15,697 | +0.3% | yes |
+| 6.0-0078 GB300 | Llama 2 70B Server | 12,059 | 15,705 | **+30.2%** | no |
+| 6.0-0078 GB300 | 405B Offline | 271.0 | 293.3 | +8.2% | yes |
+| 6.0-0078 GB300 | 405B Server | 258.7 | 225.7 | −12.8% | yes |
+| 6.0-0002 MI355X | Llama 2 70B Offline | 12,935 | 15,232 | +17.8% | yes |
+| 6.0-0002 MI355X | Llama 2 70B Server | 12,535 | 15,218 | **+21.4%** | no |
+
+**GB300 power: disputed rating, declared rule.** NVIDIA states "up to 1,400 W" for Blackwell Ultra; Lenovo's GB300 guide says 1,100 W but also mislabels sparse figures as dense. The rule, fixed before building, was to score at 1,400 W and report 1,100 W unscored. At 1,100 W the errors are −17.7%, +6.9%, −7.2%, and −34.4%, worse on three of four rows. That supports the higher bin, weakly.
+
+**Regression rows** (B300, consumed by version 1; diagnostic only): −8.7%, −4.0%, +1.2%, −7.4%, down from +27% to +41%. The power term was designed after B300's failure was known, so these rows show consistency, not validation.
+
+## What version 2 shows
+
+1. **Power, not peak FLOPS, sets Blackwell's throughput.** With one term and no new fits, the model moved from failing B300 by up to 41% to predicting GB300 Offline, a different power bin, within 0.3% and 8.2%. For A1 this confirms the plan's rule that parity is judged at a power budget.
+2. **The Server scenario at rack scale is not modeled.** On 8-GPU HGX systems, Llama 2 Server runs at 0.95–0.98× Offline; on the 72-GPU GB300 NVL72 it runs at 0.77×. Nothing in the model represents rack-scale load balancing, queueing, or a system that serves Server traffic differently.
+3. **Cross-vendor prediction without calibration costs about 20%.** MI355X, using the "mean of other families" rule and NVIDIA's software stack efficiency, is overpredicted by 18–21%. That is expected, not a surprise.
+
+## What would qualify a model for A1 claims (needs the owner's decision)
+
+The parity criteria in the targets file use **Offline** throughput only. Version 2 passes every Offline held-out row, and fails only on Server. Three options, each an evaluator decision for the owner:
+1. **Keep the strict rule** (every held-out row within 20%). Build version 3 with a rack-scale Server term and AMD calibration data, validated on a new held-out set. The candidates left are few: GB200 NVL72 (6.0-0075), and later MLPerf rounds as they publish.
+2. **Scope qualification to Offline**, matching the parity criteria. This is a post-hoc scope change, made after seeing results. It must be recorded as such, and version 2 would be qualified for Offline claims only.
+3. **Wait for new data.** MLPerf rounds after v6.1 give genuinely unseen held-out chips, including Rubin, which removes the "seen by the author" caveat.
+
+The recommendation is option 1 or 3. Option 2 is the kind of move the plan's safeguards exist to prevent, even though the Offline results support it.
+
+---
+
+# Version 1 (kept for the record)
+
+## Outcome (version 1)
 
 Version 1 reproduces peaks exactly and fits 9 of 10 calibration rows within ±15%. It **fails its held-out check**: it overpredicts B300 by 27% to 41%. Under the plan's rule, this model may not be used to make any claim about A1. The failure is recorded, not tuned away. It points to a missing physical term, power, which is exactly the term A1's parity case depends on.
 

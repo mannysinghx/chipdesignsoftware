@@ -41,6 +41,10 @@
     "hf-llama2-70b": { "url": "https://huggingface.co/meta-llama/Llama-2-70b-hf/blob/main/config.json", "kind": "model config" },
     "llama3-paper": { "url": "https://arxiv.org/abs/2407.21783", "kind": "paper", "note": "Llama 3 herd of models, Table 3" },
     "deepseek-v3-paper": { "url": "https://arxiv.org/abs/2412.19437", "kind": "paper" },
+    "lenovo-b200": { "url": "https://lenovopress.lenovo.com/lp2226.pdf", "kind": "OEM product guide", "note": "ThinkSystem NVIDIA HGX B200 180GB 1000W GPU: TGP 1000 W, 180 GB, dense and sparse figures matching NVIDIA's" },
+    "lenovo-gpu-summary": { "url": "https://lenovopress.lenovo.com/lp0768-thinksystem-thinkagile-gpu-summary", "kind": "OEM product guide", "note": "Part 'ThinkSystem NVIDIA HGX B300 NVL8 1100W 8-GPU Board'" },
+    "lenovo-gb300-nvl72": { "url": "https://lenovopress.lenovo.com/lp2357-lenovo-nvidia-gb300-nvl72-rack-scale-ai", "kind": "OEM product guide", "note": "States 1100 W TGP per GPU but also labels sparse FLOPS as dense, so treated as unreliable" },
+    "nvidia-gb300-nvl72": { "url": "https://www.nvidia.com/en-us/data-center/gb300-nvl72/", "kind": "vendor" },
     "mlperf-rules": { "url": "https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc", "kind": "benchmark" },
     "mlperf-llm-v5-blog": { "url": "https://mlcommons.org/2025/04/llm-inference-v5/", "kind": "benchmark", "note": "Llama 3.1 405B dataset: mean input 9,400 and output 680 tokens" },
     "mlperf-openorca-measured": { "url": "https://huggingface.co/datasets/ctuning/MLPerf-OpenOrca", "kind": "measured by this project", "note": "The 24,576-sample MLPerf OpenOrca set tokenized with the Llama 2 tokenizer (hf-internal-testing/llama-tokenizer) using MLPerf's prompt template from language/llama2-70b/processorca.py: mean 221.3, median 151, max 1,020 tokens. The max under MLPerf's 1,024 filter confirms the match" }
@@ -101,12 +105,13 @@
         }
       },
       "scale_up_tbps": { "value": 1.8, "note": "14.4 TB/s / 8", "source": "nvidia-dgx-b200", "confidence": "high" },
-      "power_w": { "value": 1000, "note": "Per-GPU HGX figure is from secondary sources; NVIDIA states 'up to 1,200 W' for B200 (GB200 bin)", "source": "nvidia-bw-ultra-blog", "confidence": "low" }
+      "power_w": { "value": 1000, "note": "TGP of the HGX B200 part (Lenovo product guide); NVIDIA's 'up to 1,200 W' is the architecture maximum (GB200 bin)", "source": "lenovo-b200", "confidence": "high" }
     },
     {
       "id": "b300-hgx",
       "name": "NVIDIA B300 / Blackwell Ultra (HGX/DGX bin, 270 GB)",
-      "role": "held-out",
+      "role": "regression",
+      "role_history": "Held out for C1 version 1 (failed, consumed 2026-09-26); regression-only since",
       "sku_bin": "HGX/DGX B300; DGX system ~14 kW for 8 GPUs",
       "architecture": { "process": "TSMC 4NP", "transistors_billion": 208, "dies": 2, "sms": 160, "tmem_kb_per_sm": 256, "sfu_exp_tera_per_s": 10.7, "source": "nvidia-bw-ultra-blog", "note": "Whether shipping parts enable all 160 SMs is not stated", "confidence": "med" },
       "peak_dense_tflops": {
@@ -120,7 +125,31 @@
         "bandwidth_tbps": { "value": 8, "source": "nvidia-bw-ultra-blog", "confidence": "high" }
       },
       "scale_up_tbps": { "value": 1.8, "source": "nvidia-dgx-b300", "confidence": "high" },
-      "power_w": { "value": 1100, "note": "Secondary sources only; GB300 is up to 1,400 W", "source": "nvidia-bw-ultra-blog", "confidence": "low" }
+      "power_w": { "value": 1100, "note": "HGX B300 part rated 1100 W (Lenovo); NVIDIA's 'up to 1,400 W' is the architecture maximum", "source": "lenovo-gpu-summary", "confidence": "high" }
+    },
+    {
+      "id": "gb300-nvl72",
+      "name": "NVIDIA GB300 (Blackwell Ultra in GB300 NVL72, 288 GB)",
+      "role": "held-out",
+      "sku_bin": "GB300 NVL72 rack, 72 GPUs in one NVLink domain; higher power bin than HGX B300",
+      "architecture": { "process": "TSMC 4NP", "transistors_billion": 208, "dies": 2, "sms": 160, "source": "nvidia-bw-ultra-blog", "confidence": "med" },
+      "peak_dense_tflops": {
+        "fp4": { "value": 15000, "note": "Blackwell Ultra table: 15 dense | 20 sparse PFLOPS", "source": "nvidia-bw-ultra-blog", "confidence": "high" },
+        "fp8": { "value": 5000, "quoted_sparse": 10000, "source": "nvidia-bw-ultra-blog", "confidence": "high" },
+        "bf16": { "value": 2500, "quoted_sparse": 5000, "note": "GB300 NVL72 page: 360 PFLOPS sparse for 72 GPUs", "source": "nvidia-gb300-nvl72", "confidence": "high" }
+      },
+      "memory": {
+        "capacity_gb": { "value": 288, "source": "nvidia-bw-ultra-blog", "confidence": "high" },
+        "bandwidth_tbps": {
+          "value": 8, "source": "nvidia-bw-ultra-blog", "confidence": "high",
+          "conflict": { "alternatives": [{ "value": 7.7, "source": "lenovo-gb300-nvl72" }], "resolution": "Use NVIDIA's 8 TB/s peak; sustained bandwidth comes from the Blackwell family calibration" }
+        }
+      },
+      "scale_up_tbps": { "value": 1.8, "source": "nvidia-gb300-nvl72", "confidence": "high" },
+      "power_w": {
+        "value": 1400, "note": "NVIDIA: Blackwell Ultra 'up to 1,400 W'. GB300's peaks are about 11% above HGX B300's (1100 W part), consistent with a higher bin", "source": "nvidia-bw-ultra-blog", "confidence": "med",
+        "conflict": { "alternatives": [{ "value": 1100, "source": "lenovo-gb300-nvl72" }], "resolution": "Declared before C1 version 2 was built: score GB300 at 1400 W; also report the 1100 W prediction as an unscored sensitivity" }
+      }
     },
     {
       "id": "rubin",
@@ -152,7 +181,7 @@
     {
       "id": "mi355x",
       "name": "AMD Instinct MI355X (288 GB)",
-      "role": "comparator",
+      "role": "held-out",
       "architecture": { "process": "TSMC N3P compute + N6 I/O", "transistors_billion": 185, "dies": 10, "compute_units": 256, "clock_ghz": 2.4, "source": "amd-mi355x", "confidence": "high" },
       "peak_dense_tflops": {
         "fp4": { "value": 10100, "note": "MXFP4; no sparse figure listed", "source": "amd-mi355x", "confidence": "high" },
@@ -163,6 +192,7 @@
         "capacity_gb": { "value": 288, "source": "amd-mi355x", "confidence": "high" },
         "bandwidth_tbps": { "value": 8, "source": "amd-mi355x", "confidence": "high" }
       },
+      "scale_up_tbps": { "value": 1.071, "note": "7 Infinity Fabric links x 153 GB/s; direction not stated, treated as bidirectional like NVLink", "source": "amd-mi355x", "confidence": "med" },
       "power_w": { "value": 1400, "source": "amd-mi355x", "confidence": "high" }
     },
     {
@@ -193,12 +223,16 @@
       { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 99123, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 274.4, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
       { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1624.11, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 651.5, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
       { "id": "5.1-0069", "chip": "b200-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1240.42, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 654.0, "source": "mlperf-inf-v5.1", "confidence": "high", "use": "calibrate" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 112954, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 273.1, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 107318, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 271.7, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1951.6, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 636.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1460.25, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 638.6, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
-      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 103480, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 284.2, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" },
-      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 100282, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 283.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "cross-check" }
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 112954, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 273.1, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "regression" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 107318, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 271.7, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "regression" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 1951.6, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 636.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "regression" },
+      { "id": "6.0-0073", "chip": "b300-hgx", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 1460.25, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 638.6, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "regression" },
+      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 103480, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 284.2, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0002", "chip": "mi355x", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 100282, "accelerators": 8, "weights": "fp4", "mean_output_tokens": 283.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0078", "chip": "gb300-nvl72", "model": "llama2-70b-99", "scenario": "Offline", "system_result_tokens_per_s": 1126850, "accelerators": 72, "weights": "fp4", "mean_output_tokens": 272.0, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0078", "chip": "gb300-nvl72", "model": "llama2-70b-99", "scenario": "Server", "system_result_tokens_per_s": 868278, "accelerators": 72, "weights": "fp4", "mean_output_tokens": 272.7, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0078", "chip": "gb300-nvl72", "model": "llama3.1-405b", "scenario": "Offline", "system_result_tokens_per_s": 19511.7, "accelerators": 72, "weights": "fp4", "mean_output_tokens": 638.8, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" },
+      { "id": "6.0-0078", "chip": "gb300-nvl72", "model": "llama3.1-405b", "scenario": "Server", "system_result_tokens_per_s": 18627.6, "accelerators": 72, "weights": "fp4", "mean_output_tokens": 642.7, "source": "mlperf-inf-v6.0", "confidence": "high", "use": "held-out" }
     ],
     "gemm": [
       { "chip": "h100-sxm", "precision": "bf16", "shape": [16384, 16384, 16384], "achieved_tflops": 797, "kernel": "ThunderKittens", "source": "arxiv-2410.20399", "confidence": "med", "use": "calibrate" },
@@ -256,7 +290,13 @@
   },
   "calibration": {
     "calibration_chips": ["h100-sxm", "h200-sxm", "b200-hgx"],
-    "held_out_chips": ["b300-hgx"],
+    "held_out_chips": ["gb300-nvl72", "mi355x"],
+    "regression_chips": ["b300-hgx"],
+    "held_out_history": [
+      { "version": "C1 v1", "chips": ["b300-hgx"], "result": "failed (+26.6% to +41.3%), consumed", "model_sha256": "9cf9786b8973045dd3d3526f98191ce50bde2fbc434c341a8f6abadecd942de2" },
+      { "version": "C1 v2", "chips": ["gb300-nvl72", "mi355x"], "approved": "Owner approved in chat on 2026-09-26, before C1 version 2 was built", "disclosure": "Their MLPerf results were visible during C0 and C1, so the check is blind to fitting, not to the author" }
+    ],
+    "uncalibrated_family_rule": "Declared before C1 version 2 was built: a chip whose family has no calibration data (AMD CDNA4) uses the mean of the calibrated families' parameters, and the same global serving efficiency",
     "tolerances_relative": {
       "peak_reproduction": 0.000001,
       "gemm_achieved": 0.10,

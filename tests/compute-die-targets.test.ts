@@ -81,6 +81,14 @@ test('calibration, held-out, and target roles are disjoint and consistent', () =
   assert.ok(calibration.has(targets.parity.primary_target), 'the primary target must be a calibration chip');
   assert.equal(chips.get(targets.parity.stretch_target)!.role, 'stretch-target');
   for (const id of heldOut) assert.equal(chips.get(id)!.role, 'held-out');
+  for (const id of targets.calibration.regression_chips ?? []) {
+    assert.equal(chips.get(id)!.role, 'regression', `${id} is a consumed held-out chip`);
+    assert.ok(!calibration.has(id) && !heldOut.has(id), `${id} cannot calibrate or validate again`);
+    for (const row of targets.measured.mlperf_inference.filter((entry: { chip: string }) => entry.chip === id)) assert.equal(row.use, 'regression');
+  }
+  const history = targets.calibration.held_out_history;
+  const consumed = history.flatMap((entry: { chips: string[] }) => entry.chips.filter((chip) => !heldOut.has(chip)));
+  for (const chip of consumed) assert.ok(!calibration.has(chip), `${chip} was consumed and must not calibrate`);
 });
 
 test('measured data: MLPerf rows are per system, and low-confidence data never calibrates', () => {

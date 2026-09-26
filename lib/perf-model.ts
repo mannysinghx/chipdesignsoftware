@@ -1,15 +1,20 @@
-// C1 performance model for the AIMEM-A1 compute-die plan (docs/COMPUTE_DIE_PLAN.md).
-// Roofline kernels with sustained efficiencies measured on real chips, composed into an
-// LLM serving model. Every output is evidence class `modeled`.
+// C1 performance model (version 2) for the AIMEM-A1 compute-die plan (docs/COMPUTE_DIE_PLAN.md).
+// Roofline kernels with sustained rates measured on real chips, composed into an LLM serving
+// model. Every output is evidence class `modeled`.
+//
+// Version 2 adds a power ceiling: sustained tensor throughput is the lesser of an architectural
+// ceiling and what the chip's power rating can feed, with energy per FLOP proportional to operand
+// bits. Version 1 (evidence/c1-perf-model-v1.json) scaled with peak FLOPS and overpredicted B300.
 //
 // Parameters come only from calibration data, in three groups:
-//   1. GEMM efficiency per GPU family, from measured large-GEMM throughput.
+//   1. Sustained BF16 tensor throughput per watt, per GPU family, from measured large GEMMs.
 //   2. Memory efficiency per GPU family, from measured sustained HBM bandwidth.
 //   3. One global serving efficiency, fitted across the calibration chips' MLPerf rows.
-// Held-out chips are never read by calibrate(); tests/perf-model.test.ts proves it.
+// A family with no calibration data uses the mean of the calibrated families (declared before
+// version 2 was built). Held-out chips are never read by calibrate(); tests/perf-model.test.ts proves it.
 
 export type Precision = 'bf16' | 'fp8' | 'fp4';
-export type Family = 'hopper' | 'blackwell';
+export type Family = 'hopper' | 'blackwell' | 'cdna4';
 
 type Figure = { value: number };
 type ReferenceChip = {
@@ -17,6 +22,7 @@ type ReferenceChip = {
   peak_dense_tflops: Partial<Record<Precision | 'tf32', Figure>>;
   memory: { capacity_gb: Figure; bandwidth_tbps: Figure };
   scale_up_tbps?: Figure;
+  power_w?: Figure & { conflict?: { alternatives: { value: number }[] } };
 };
 type MlperfRow = {
   id: string;
@@ -31,6 +37,7 @@ type MlperfRow = {
 };
 type GemmRow = { chip: string; precision: Precision; achieved_tflops?: number; achieved_tflops_range?: [number, number]; use: string };
 type BandwidthRow = { chip: string; family?: Family; achieved_tbps?: number; achieved_tbps_range?: [number, number]; peak_tbps?: number; use: string };
+export type { MlperfRow };
 type ModelConfig = { hidden: number; layers: number; heads: number; kv_heads: number; head_dim: number; ffn: number; vocab: number };
 type MlperfWorkload = { model: string; mean_input_tokens: number; server_ttft_ms: number; server_tpot_ms: number };
 
@@ -39,17 +46,25 @@ export type Targets = {
   measured: { mlperf_inference: MlperfRow[]; gemm: GemmRow[]; memory_bandwidth: BandwidthRow[] };
   models: Record<string, ModelConfig>;
   benchmarks: { mlperf_workloads: Record<string, MlperfWorkload | string> };
-  calibration: { calibration_chips: string[]; held_out_chips: string[]; tolerances_relative: Record<string, number> };
+  calibration: { calibration_chips: string[]; held_out_chips: string[]; regression_chips?: string[]; tolerances_relative: Record<string, number> };
 };
 
 // Tensor throughput per SM per clock (dense FLOP). Peaks are reproduced from these with
 // one implied tensor clock per chip; NVIDIA does not publish the tensor clock.
-export const MICROARCH: Record<string, { family: Family; sms: number; flopsPerClockPerSm: Partial<Record<Precision, number>>; basis: string }> = {
+export const MICROARCH: Record<string, { family: Family; sms: number; flopsPerClockPerSm: Partial<Record<Precision, number>>; statedClockGhz?: number; basis: string }> = {
   'h100-sxm': { family: 'hopper', sms: 132, flopsPerClockPerSm: { bf16: 4096, fp8: 8192 }, basis: '2x A100 per SM (1,024 dense FP16 FMA/clk/SM on A100); 132 SMs per the Hopper blog' },
   'h200-sxm': { family: 'hopper', sms: 132, flopsPerClockPerSm: { bf16: 4096, fp8: 8192 }, basis: 'Same GH100 die as H100' },
   'b200-hgx': { family: 'blackwell', sms: 148, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 32768 }, basis: 'Chips and Cheese: 1,024 16-bit MAC/clk per SM sub-partition, 4 per SM; FP8 2x, FP4 4x' },
   'b300-hgx': { family: 'blackwell', sms: 160, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 49152 }, basis: 'Blackwell Ultra blog: 160 SMs; NVFP4 at 3x the FP8 rate' },
+  'gb300-nvl72': { family: 'blackwell', sms: 160, flopsPerClockPerSm: { bf16: 8192, fp8: 16384, fp4: 49152 }, basis: 'Same Blackwell Ultra die as B300, higher power bin' },
+  mi355x: { family: 'cdna4', sms: 256, flopsPerClockPerSm: { bf16: 4096, fp8: 8192, fp4: 16384 }, statedClockGhz: 2.4, basis: 'AMD: 256 CUs at 2.4 GHz peak engine clock; AMD rounds its peaks to about two significant figures' },
 };
+
+// Energy per tensor FLOP is taken as proportional to operand bits (NVFP4/MXFP4 carry block
+// scales, about half a bit per value). The ceiling applies when power is not the limit: H800
+// reached 94-96% of peak with low-toggle inputs (arXiv 2501.12084).
+export const OPERAND_BITS: Record<Precision, number> = { bf16: 16, fp8: 8, fp4: 4.5 };
+export const ARCHITECTURAL_CEILING = 0.95;
 
 export const BYTES_PER_PARAM: Record<Precision, number> = {
   bf16: 2,
@@ -73,20 +88,28 @@ export type ChipModel = {
   bandwidthTbps: number;
   capacityGb: number;
   scaleUpPerDirectionTbps: number;
+  powerW: number;
 };
 
-export type FamilyEfficiency = { gemm: number; memory: number };
+export type FamilyEfficiency = { bf16TflopsPerWatt: number; memory: number };
 
 export type Calibration = {
-  families: Record<Family, FamilyEfficiency & { gemmRows: number; memoryRows: number }>;
+  families: Record<Family, FamilyEfficiency & { gemmRows: number; memoryRows: number; source: 'calibrated' | 'mean-of-calibrated-families' }>;
   servingEfficiency: number;
   servingRows: number;
 };
 
+// Sustained tensor throughput: the lesser of the architectural ceiling and the power ceiling.
+export function sustainedTflops(chip: ChipModel, efficiency: FamilyEfficiency, precision: Precision) {
+  const architectural = chip.peakTflops[precision]! * ARCHITECTURAL_CEILING;
+  const power = efficiency.bf16TflopsPerWatt * chip.powerW * (OPERAND_BITS.bf16 / OPERAND_BITS[precision]);
+  return Math.min(architectural, power);
+}
+
 const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
 const midpoint = (value: number | undefined, range: [number, number] | undefined) => value ?? (range![0] + range![1]) / 2;
 
-export function chipModel(targets: Targets, id: string): ChipModel {
+export function chipModel(targets: Targets, id: string, powerOverrideW?: number): ChipModel {
   const chip = targets.reference_chips.find((entry) => entry.id === id);
   const arch = MICROARCH[id];
   if (!chip || !arch) throw new Error(`No reference chip and microarchitecture for ${id}`);
@@ -102,6 +125,7 @@ export function chipModel(targets: Targets, id: string): ChipModel {
     bandwidthTbps: chip.memory.bandwidth_tbps.value,
     capacityGb: chip.memory.capacity_gb.value,
     scaleUpPerDirectionTbps: (chip.scale_up_tbps?.value ?? 0) / 2,
+    powerW: powerOverrideW ?? chip.power_w?.value ?? Number.NaN,
   };
 }
 
@@ -109,7 +133,7 @@ export function chipModel(targets: Targets, id: string): ChipModel {
 export function peakReproduction(targets: Targets, id: string) {
   const arch = MICROARCH[id];
   const chip = chipModel(targets, id);
-  const clockGhz = (chip.peakTflops.bf16! * 1e12) / (arch.sms * arch.flopsPerClockPerSm.bf16! * 1e9);
+  const clockGhz = arch.statedClockGhz ?? (chip.peakTflops.bf16! * 1e12) / (arch.sms * arch.flopsPerClockPerSm.bf16! * 1e9);
   const rows = (Object.keys(arch.flopsPerClockPerSm) as Precision[]).map((precision) => {
     const modeledTflops = (arch.sms * arch.flopsPerClockPerSm[precision]! * clockGhz * 1e9) / 1e12;
     const targetTflops = chip.peakTflops[precision]!;
@@ -134,7 +158,7 @@ export function modelParameters(config: ModelConfig) {
 export function gemmSeconds(chip: ChipModel, efficiency: FamilyEfficiency, m: number, n: number, k: number, precision: Precision) {
   const flops = 2 * m * n * k;
   const bytes = (m * k + k * n) * BYTES_PER_PARAM[precision] + m * n * ASSUMPTIONS.activationBytes;
-  const compute = flops / (chip.peakTflops[precision]! * 1e12 * efficiency.gemm);
+  const compute = flops / (sustainedTflops(chip, efficiency, precision) * 1e12);
   const memory = bytes / (chip.bandwidthTbps * 1e12 * efficiency.memory);
   return { seconds: Math.max(compute, memory), bound: compute >= memory ? 'compute' : 'memory', achievedTflops: flops / Math.max(compute, memory) / 1e12 };
 }
@@ -184,8 +208,8 @@ export function maxPrefillUtilization(prefillSeconds: number, ttftSeconds: numbe
 export function predictServing(chip: ChipModel, efficiency: FamilyEfficiency, servingEfficiency: number, workload: ServingWorkload): ServingPrediction | null {
   const params = modelParameters(workload.model);
   const { layers, heads, head_dim: headDim, hidden } = workload.model;
-  const weightPeak = chip.peakTflops[workload.weights]! * 1e12 * efficiency.gemm;
-  const attentionPeak = (chip.peakTflops.fp8 ?? chip.peakTflops.bf16!) * 1e12 * efficiency.gemm;
+  const weightPeak = sustainedTflops(chip, efficiency, workload.weights) * 1e12;
+  const attentionPeak = sustainedTflops(chip, efficiency, chip.peakTflops.fp8 ? 'fp8' : 'bf16') * 1e12;
   const bandwidth = chip.bandwidthTbps * 1e12 * efficiency.memory;
   const context = workload.inputTokens + workload.outputTokens / 2;
   let best: ServingPrediction | null = null;
@@ -275,13 +299,30 @@ export function calibrate(targets: Targets): Calibration {
   const heldOut = new Set(targets.calibration.held_out_chips);
   const allowed = (row: { chip: string; use: string }) => row.use === 'calibrate' && !heldOut.has(row.chip);
   const families = {} as Calibration['families'];
-  for (const family of ['hopper', 'blackwell'] as const) {
+  for (const family of ['hopper', 'blackwell', 'cdna4'] as const) {
+    // Sustained throughput per watt, normalized to BF16 by operand bits.
     const gemm = targets.measured.gemm.filter((row) => allowed(row) && calibrationChips.has(row.chip) && familyOf(row) === family)
-      .map((row) => midpoint(row.achieved_tflops, row.achieved_tflops_range) / chipModel(targets, row.chip).peakTflops[row.precision]!);
+      .map((row) => {
+        const chip = chipModel(targets, row.chip);
+        return midpoint(row.achieved_tflops, row.achieved_tflops_range) * (OPERAND_BITS[row.precision] / OPERAND_BITS.bf16) / chip.powerW;
+      });
     const memory = targets.measured.memory_bandwidth.filter((row) => allowed(row) && familyOf(row) === family && (calibrationChips.has(row.chip) || row.family))
       .map((row) => midpoint(row.achieved_tbps, row.achieved_tbps_range) / (row.peak_tbps ?? chipModel(targets, row.chip).bandwidthTbps));
-    if (!gemm.length || !memory.length) throw new Error(`No calibration data for the ${family} family`);
-    families[family] = { gemm: mean(gemm), memory: mean(memory), gemmRows: gemm.length, memoryRows: memory.length };
+    if (gemm.length && memory.length) {
+      families[family] = { bf16TflopsPerWatt: mean(gemm), memory: mean(memory), gemmRows: gemm.length, memoryRows: memory.length, source: 'calibrated' };
+    }
+  }
+  const calibrated = Object.values(families);
+  if (!calibrated.length) throw new Error('No calibrated family');
+  for (const family of ['hopper', 'blackwell', 'cdna4'] as const) {
+    if (families[family]) continue;
+    families[family] = {
+      bf16TflopsPerWatt: mean(calibrated.map((entry) => entry.bf16TflopsPerWatt)),
+      memory: mean(calibrated.map((entry) => entry.memory)),
+      gemmRows: 0,
+      memoryRows: 0,
+      source: 'mean-of-calibrated-families',
+    };
   }
 
   const rows = targets.measured.mlperf_inference.filter((row) => allowed(row) && calibrationChips.has(row.chip));
@@ -303,8 +344,8 @@ export function calibrate(targets: Targets): Calibration {
   return { families, servingEfficiency: (low + high) / 2, servingRows: rows.length };
 }
 
-export function evaluateMlperfRow(targets: Targets, calibration: Calibration, row: MlperfRow) {
-  const chip = chipModel(targets, row.chip);
+export function evaluateMlperfRow(targets: Targets, calibration: Calibration, row: MlperfRow, powerOverrideW?: number) {
+  const chip = chipModel(targets, row.chip, powerOverrideW);
   const prediction = predictServing(chip, calibration.families[chip.family], calibration.servingEfficiency, servingWorkload(targets, row));
   const measured = row.system_result_tokens_per_s / row.accelerators;
   return {

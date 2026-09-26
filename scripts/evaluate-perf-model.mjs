@@ -1,6 +1,7 @@
-// Evaluates the C1 performance model against the frozen targets.
-//   --calibration-only  prints calibration results and never computes a held-out prediction
-//   (default)           also predicts the held-out chip and writes evidence/c1-perf-model.json
+// Evaluates the C1 performance model (version 2) against the frozen targets.
+//   --calibration-only  prints calibration and regression results; never predicts a held-out chip
+//   (default)           also predicts the held-out chips and writes evidence/c1-perf-model.json
+// Version 1's evidence is kept, unchanged, in evidence/c1-perf-model-v1.json.
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { ASSUMPTIONS, calibrate, evaluateMlperfRow, peakReproduction } from '../lib/perf-model.ts';
@@ -13,7 +14,8 @@ export async function buildEvidence({ includeHeldOut }) {
   const calibration = calibrate(targets);
   const heldOut = new Set(targets.calibration.held_out_chips);
 
-  const peaks = [...targets.calibration.calibration_chips, ...targets.calibration.held_out_chips].map((id) => peakReproduction(targets, id));
+  const regressionChips = new Set(targets.calibration.regression_chips ?? []);
+  const peaks = [...targets.calibration.calibration_chips, ...regressionChips, ...targets.calibration.held_out_chips].map((id) => peakReproduction(targets, id));
   const calibrationRows = targets.measured.mlperf_inference
     .filter((row) => row.use === 'calibrate')
     .map((row) => evaluateMlperfRow(targets, calibration, row))
@@ -22,6 +24,7 @@ export async function buildEvidence({ includeHeldOut }) {
   const evidence = {
     evidence_class: 'modeled',
     step: 'C1',
+    model_version: 2,
     targets_sha256: createHash('sha256').update(targetsText).digest('hex'),
     model_sha256: createHash('sha256').update(modelText).digest('hex'),
     assumptions: ASSUMPTIONS,
@@ -33,6 +36,12 @@ export async function buildEvidence({ includeHeldOut }) {
       rows: calibrationRows,
       all_within_tolerance: calibrationRows.every((row) => row.withinTolerance),
       max_abs_relative_error: Math.max(...calibrationRows.map((row) => Math.abs(row.relativeError))),
+    },
+    regression: {
+      note: 'Consumed held-out chips, reported for diagnosis only; not validation',
+      rows: targets.measured.mlperf_inference
+        .filter((row) => regressionChips.has(row.chip))
+        .map((row) => evaluateMlperfRow(targets, calibration, row)),
     },
   };
 
@@ -48,9 +57,17 @@ export async function buildEvidence({ includeHeldOut }) {
       passed: rows.every((row) => row.withinTolerance),
       max_abs_relative_error: Math.max(...rows.map((row) => Math.abs(row.relativeError))),
     };
-    evidence.cross_checks = targets.measured.mlperf_inference
-      .filter((row) => row.use === 'cross-check')
-      .map((row) => ({ id: row.id, chip: row.chip, note: 'No microarchitecture model for this chip in C1; not evaluated' }));
+    // Unscored sensitivity for held-out chips whose power rating is disputed (declared in the targets).
+    evidence.held_out.power_sensitivity = targets.reference_chips
+      .filter((chip) => heldOut.has(chip.id) && chip.power_w?.conflict)
+      .flatMap((chip) => chip.power_w.conflict.alternatives.map((alternative) => ({
+        chip: chip.id,
+        power_w: alternative.value,
+        scored: false,
+        rows: targets.measured.mlperf_inference
+          .filter((row) => row.chip === chip.id)
+          .map((row) => evaluateMlperfRow(targets, calibration, row, alternative.value)),
+      })));
   }
   return evidence;
 }

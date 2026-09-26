@@ -1,7 +1,7 @@
 # AIMEM-A1: an AI Compute Die Built and Improved by Agents
 
 **Plan date:** 26 September 2026
-**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). C1 version 1 was built and evaluated the same day: peaks exact and 9 of 10 calibration rows within tolerance, but it **failed its held-out check** (B300 overpredicted by 27–41%), so it may not be used for A1 claims (see [C1 status](#c1-status-2026-09-26-version-1)). C1 version 2 and C2 to C6 are proposed.
+**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). C1 versions 1 and 2 were built and evaluated the same day. Version 2 adds a power ceiling. All three Offline held-out rows (GB300 NVL72, MI355X) are within 20%, but two Server rows are not, so the model **still fails its held-out check** and may not be used for A1 claims (see [C1 status](#c1-status-2026-09-26-version-2)). The next C1 step is the owner's choice; C2 to C6 are proposed.
 **Extends:** [`RSI_PLATFORM_PLAN.md`](RSI_PLATFORM_PLAN.md). That plan builds the machinery that lets agents improve designs (L1), themselves (L2), and their models (L3). This plan adds what they build next: a compute die that pairs with the AIMEM memory stacks. It also sets the autonomy policy for running those loops unattended.
 
 ---
@@ -127,6 +127,18 @@ What C0 changed in this plan:
 - The benchmark set is defined precisely enough for C1 to compute it: GEMM shapes, attention shapes, and decode and prefill scenarios with model, batch, sequence length, and precision.
 - Open blocks and tools are chosen, with licenses compatible with the project.
 - The architecture direction in section 5 is confirmed or revised from the dossier.
+
+### C1 status (2026-09-26, version 2)
+
+Owner-approved held-out set: GB300 NVL72 and MI355X, declared before building. The model adds a power ceiling (the family's measured BF16 TFLOPS per watt × power rating × 16 ÷ operand bits) and fits no new parameters.
+
+| Criterion | Result |
+|---|---|
+| Peaks | Met (MI355X within AMD's rounding) |
+| Calibration | 9 of 10 within ±15% (H200 405B Server −18.9%) |
+| Held out | **Failed:** 4 of 6 within ±20%. Offline +0.3%, +8.2%, +17.8%; Server −12.8%, +21.4%, +30.2% |
+
+Power explains Blackwell's throughput; rack-scale Server behavior and AMD without calibration data do not fit. The options for qualifying a model are in [`C1_PERF_MODEL.md`](compute-die/C1_PERF_MODEL.md#what-would-qualify-a-model-for-a1-claims-needs-the-owners-decision) and need the owner's decision.
 
 ### C1 status (2026-09-26, version 1)
 

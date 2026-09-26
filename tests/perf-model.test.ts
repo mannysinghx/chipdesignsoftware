@@ -3,12 +3,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  ARCHITECTURAL_CEILING,
   calibrate,
   chipModel,
   gemmSeconds,
   maxPrefillUtilization,
   modelParameters,
   peakReproduction,
+  sustainedTflops,
   type Targets,
 } from '../lib/perf-model.ts';
 import { buildEvidence } from '../scripts/evaluate-perf-model.mjs';
@@ -16,11 +18,13 @@ import { buildEvidence } from '../scripts/evaluate-perf-model.mjs';
 const targetsText = readFileSync(new URL('../design/spec/compute-die-targets.json', import.meta.url), 'utf8');
 const targets: Targets = JSON.parse(targetsText);
 const evidence = JSON.parse(readFileSync(new URL('../evidence/c1-perf-model.json', import.meta.url), 'utf8'));
+const evidenceV1 = JSON.parse(readFileSync(new URL('../evidence/c1-perf-model-v1.json', import.meta.url), 'utf8'));
 const tolerances = targets.calibration.tolerances_relative;
 
-// The first and only held-out run used this model. Any later model version has seen B300's
-// result and must be validated against a newly declared held-out set (docs/COMPUTE_DIE_PLAN.md, C1).
-const HELD_OUT_CONSUMED_BY_MODEL_SHA256 = '9cf9786b8973045dd3d3526f98191ce50bde2fbc434c341a8f6abadecd942de2';
+// Each held-out set is run once, against one frozen model, and is then consumed. A later model
+// version must be validated against a newly declared, owner-approved held-out set.
+const V1_MODEL_SHA256 = '9cf9786b8973045dd3d3526f98191ce50bde2fbc434c341a8f6abadecd942de2'; // consumed b300-hgx
+const V2_MODEL_SHA256 = 'c28c0e0a0fa280f5a027a98b2ae1d621b71e9abff0ff78774dadd60dc24d18b4'; // consumed gb300-nvl72, mi355x
 
 // Calibration rows outside tolerance when the model was frozen, recorded instead of tuned away.
 const KNOWN_CALIBRATION_MISSES = new Set(['5.0-0060 llama3.1-405b Server']);
@@ -39,12 +43,28 @@ function closeTo(actual: unknown, expected: unknown, path = '$'): void {
   }
 }
 
-test('C1 peaks: one implied tensor clock per chip reproduces every benchmark precision exactly', () => {
-  for (const id of [...targets.calibration.calibration_chips, ...targets.calibration.held_out_chips]) {
+test('C1 peaks: one tensor clock per chip reproduces every benchmark precision', () => {
+  const nvidia = [...targets.calibration.calibration_chips, ...targets.calibration.regression_chips!, 'gb300-nvl72'];
+  for (const id of nvidia) {
     const result = peakReproduction(targets, id);
     assert.ok(result.impliedTensorClockGhz > 1.5 && result.impliedTensorClockGhz < 2.1, `${id} clock ${result.impliedTensorClockGhz}`);
     for (const row of result.rows) assert.ok(Math.abs(row.relativeError) <= tolerances.peak_reproduction, `${id} ${row.precision}`);
   }
+  // AMD states its clock (2.4 GHz) and rounds its peaks to about two significant figures.
+  for (const row of peakReproduction(targets, 'mi355x').rows) assert.ok(Math.abs(row.relativeError) < 0.01, `mi355x ${row.precision}`);
+});
+
+test('the power ceiling keeps calibration chips on their measured rate and scales FP4 by operand bits', () => {
+  const calibration = calibrate(targets);
+  const h100 = chipModel(targets, 'h100-sxm');
+  const b200 = chipModel(targets, 'b200-hgx');
+  assert.ok(Math.abs(sustainedTflops(h100, calibration.families.hopper, 'bf16') - (797 + 767) / 2) < 1e-6);
+  assert.ok(Math.abs(sustainedTflops(b200, calibration.families.blackwell, 'bf16') - 1250) < 1e-6);
+  assert.ok(Math.abs(sustainedTflops(b200, calibration.families.blackwell, 'fp8') - 2500) < 1e-6);
+  assert.ok(Math.abs(sustainedTflops(b200, calibration.families.blackwell, 'fp4') - 1250 * 16 / 4.5) < 1e-6);
+  const unpowered = { ...b200, powerW: 1e9 };
+  assert.equal(sustainedTflops(unpowered, calibration.families.blackwell, 'fp4'), 9000 * ARCHITECTURAL_CEILING);
+  assert.equal(calibration.families.cdna4.source, 'mean-of-calibrated-families');
 });
 
 test('parameter counts derived from the model configs match the published sizes within 2%', () => {
@@ -59,9 +79,12 @@ test('parameter counts derived from the model configs match the published sizes 
 test('calibration never reads the held-out chip: changing its measurements changes nothing', () => {
   const tampered: Targets = JSON.parse(targetsText);
   const heldOut = new Set(tampered.calibration.held_out_chips);
+  assert.deepEqual([...heldOut].sort(), ['gb300-nvl72', 'mi355x']);
   for (const row of tampered.measured.mlperf_inference) if (heldOut.has(row.chip)) row.system_result_tokens_per_s *= 7;
-  tampered.measured.gemm.push({ chip: 'b300-hgx', precision: 'bf16', achieved_tflops: 1, use: 'calibrate' });
-  tampered.measured.memory_bandwidth.push({ chip: 'b300-hgx', achieved_tbps: 0.1, use: 'calibrate' });
+  for (const chip of heldOut) {
+    tampered.measured.gemm.push({ chip, precision: 'bf16', achieved_tflops: 1, use: 'calibrate' });
+    tampered.measured.memory_bandwidth.push({ chip, achieved_tbps: 0.1, use: 'calibrate' });
+  }
   assert.deepEqual(calibrate(tampered), calibrate(targets));
 });
 
@@ -100,10 +123,23 @@ test('calibration: every MLPerf row is within tolerance except the recorded miss
   assert.equal(evidence.calibration.serving_rows, 10);
 });
 
-test('the held-out result is recorded against the model that consumed it', () => {
-  assert.equal(evidence.model_sha256, HELD_OUT_CONSUMED_BY_MODEL_SHA256);
-  assert.deepEqual(evidence.held_out.chips, ['b300-hgx']);
-  assert.equal(evidence.held_out.rows.length, 4);
-  assert.equal(evidence.held_out.passed, false, 'recorded outcome: the frozen model overpredicts B300');
+test('version 1 keeps its recorded held-out result: B300, failed', () => {
+  assert.equal(evidenceV1.model_sha256, V1_MODEL_SHA256);
+  assert.deepEqual(evidenceV1.held_out.chips, ['b300-hgx']);
+  assert.equal(evidenceV1.held_out.passed, false);
+  const history = (targets.calibration as unknown as { held_out_history: { model_sha256?: string }[] }).held_out_history;
+  assert.equal(history[0].model_sha256, V1_MODEL_SHA256);
+});
+
+test('version 2 records its held-out result against the model that consumed it', () => {
+  assert.equal(evidence.model_version, 2);
+  assert.equal(evidence.model_sha256, V2_MODEL_SHA256);
+  assert.deepEqual(evidence.held_out.chips, ['gb300-nvl72', 'mi355x']);
+  assert.equal(evidence.held_out.rows.length, 6);
+  assert.equal(evidence.held_out.passed, false, 'recorded outcome: two Server rows outside 20%');
+  const failed = evidence.held_out.rows.filter((row: { withinTolerance: boolean }) => !row.withinTolerance)
+    .map((row: { id: string; model: string; scenario: string }) => `${row.id} ${row.model} ${row.scenario}`);
+  assert.deepEqual(new Set(failed), new Set(['6.0-0002 llama2-70b-99 Server', '6.0-0078 llama2-70b-99 Server']));
+  assert.ok(evidence.held_out.power_sensitivity.every((entry: { scored: boolean }) => entry.scored === false));
   assert.equal(evidence.evidence_class, 'modeled');
 });
