@@ -14,7 +14,7 @@ Everything ran on the Mac with open-source tools only; build and run history is 
 |---|---|
 | sky130: DRC 0 | **Met.** KLayout DRC with the ORFS sky130hd deck: 0 items (43 min) |
 | sky130: LVS match | **Met, with one qualification.** Netgen: "Circuits match uniquely", with 257,481 devices and 296,087 nets on each side. Six library cell types (`a2111oi_2`, `a211oi_4`, `a21boi_2`, `a21oi_2`, `ha_4`, `o211a_4`) use their layout-extracted definitions (see LVS below). For those six, LVS checks instance connectivity, not cell internals. Every other cell and all of the tile's wiring are checked at transistor level |
-| sky130: timing from OpenSTA | **Met.** 19.5 MHz; the slowest path is stage 2 |
+| sky130: timing from OpenSTA | **Met.** 19.5 MHz; the slowest path is in stage 1 (`s1_fmt[0]` → `s2_terms[3218]`, slack −11.26 ns at the 40 ns clock) |
 | ASAP7: routes cleanly | **Met.** Detailed routing 0 violations; equivalence proved after repair and at the end |
 | Projection labelled `modeled`, with method and band | **Met.** [`c3-projection-3nm.json`](../../design/physical/projection/c3-projection-3nm.json), made by [`project_3nm.py`](../../tools/physical/projection/project_3nm.py), checked by `tests/c3-projection.test.ts` (6 tests; one planted error caught) |
 
@@ -28,9 +28,11 @@ Everything ran on the Mac with open-source tools only; build and run history is 
 | Cells | 352,816 | 334,972 (757,230 with fill) | 393,905 |
 | Power, default activity | 1.17 W at 25 MHz | 0.566 W at 250 MHz (typical) | 0.19 W at 400 MHz |
 | Equivalence (kepler-formal) | Identical, after repair and at the end | Identical, after repair and at the end | Identical, after repair |
-| Slowest path | Stage 2: 17-term align and sum | Stage 2 | Stage 2 |
+| Slowest path (worst setup) | Stage 1: `s1_fmt[0]` → `s2_terms[3218]`, slack −11.26 ns at 40 ns | Stage 1: `s1_fmt[0]` → `s2_terms[2896]`, slack −1,083.54 ps at 4 ns (best-case corner) | Stage 1: `s1_fmt[0]` → `s2_terms[1736]`, slack −213.91 ps at 2.5 ns |
 
-On every kit the slowest path is stage 2, the exact 17-term align-and-sum. Re-balancing the pipeline is the clearest speed lever (C4).
+On every kit the slowest path is in stage 1. It starts at the format register (`s1_fmt`) and fans out through placement buffers to every term's decode and anchor adders. It then runs through the search for the largest of the 17 anchors, which `rtl/a1/a1_dot_terms.sv` writes as a serial running maximum, and ends at one term's `use` flag (its gap to the largest anchor is under 40). Each endpoint above decodes to such a flag. The path is 272 cells deep on sky130hd and ASAP7 and 189 on GT2N, mostly OR-AND carry and compare cells (105 `o21a` on sky130hd). Buffers and inverters, the `s1_fmt` fan-out among them, are only 8–14 % of its delay. The speed lever for C4 is therefore stage 1's depth: a balanced comparison tree finds the largest anchor in 5 levels instead of 17 steps, or a register can split the anchors from the search. Registering or duplicating `s1_fmt` per dot unit would trim only the fan-out.
+
+Correction (28 September 2026): earlier versions of this page said the slowest path was stage 2, the 17-term align-and-sum. That was the min-delay (hold) path, `s2_terms[4276]` → `s3_partial[862]` with slack +0.09 ns (met), read from the `report_checks -path_delay min` section of `6_finish.rpt`. The setup-critical path is in the `-path_delay max` section that follows it. Details are in `OPS_LOG.md`.
 
 ## The 3 nm-class projection (`modeled`: predictive, not foundry)
 

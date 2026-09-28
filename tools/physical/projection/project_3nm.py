@@ -64,7 +64,7 @@ def main(inputs_path, out_path):
             'GT2N numbers are post-global-route estimates (detailed routing did not fit in 39 GB); its clock end is optimistic.',
             'ASAP7 was optimised at its BC corner and re-timed at TT; its clock end is pessimistic.',
             'Tile only: no operand memory, DMA, interconnect or clock tree beyond the tile.',
-            "The tile's slowest path is stage 2 (17-term align and sum) on every kit; rebalancing the pipeline is a C4 lever.",
+            "The tile's slowest (setup) path is in stage 1 on every kit: from the format register through each term's decode and the serial 17-step largest-anchor search, into a term's use flag; shortening that search is a C4 lever.",
         ],
         'inputs': inputs_path,
     }

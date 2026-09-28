@@ -214,7 +214,7 @@ The A1 tile (RTL `317c297`, unchanged) was placed and routed with a native arm64
 | ASAP7: routes cleanly | Met. 0 routing violations; equivalence proved; 141 MHz at the typical corner, 0.0345 mm² |
 | Projection labelled `modeled`, with method and band | Met. The C0 method, with IRDS 2023 G48M24 as the target. Central values: 303 MHz, 0.016 mm², 653 pJ per cycle, 0.20 BF16 TFLOPS per W. The band is 221–369 MHz and 0.12–0.27 TFLOPS per W. Checked by `tests/c3-projection.test.ts` |
 
-GT2N stopped after global routing (368 MHz estimate, 0.011 mm²), because its detailed routing needs more than 39 GB. On every kit the slowest path is stage 2, the 17-term align-and-sum. The energy figure uses default switching activity and leaves the tile about 6× short of Blackwell's chip-level BF16 efficiency. Measuring real activity and lowering it are C4's first targets.
+GT2N stopped after global routing (368 MHz estimate, 0.011 mm²), because its detailed routing needs more than 39 GB. On every kit the slowest path is in stage 1: from the format register through each term's decode and the serial 17-step search for the largest anchor, into a term's `use` flag (an earlier version said stage 2; that was the hold path). The energy figure uses default switching activity and leaves the tile about 6× short of Blackwell's chip-level BF16 efficiency. Measuring real activity and lowering it are C4's first targets.
 
 ### C3: Physical tile on open PDKs, and the scaling projection
 
