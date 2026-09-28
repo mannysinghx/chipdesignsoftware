@@ -15,10 +15,11 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import {
-  INST_CHUNK, LAYER, LAYER_IDS, LAYOUT_FORMAT, NET_CHUNK, NO_NET, PURPOSE, ROUTING_LAYERS,
+  INST_CHUNK, LAYER, LAYER_IDS, LAYOUT_FORMAT, NET_CHUNK, NO_NET, PURPOSE, ROUTING_LAYERS, type ClockTreeFile, type LayoutPathStep,
   decodeBlock, encodeBlock, kindLayer, kindPurpose, packKind, pinNet, placedPinRects, rebuildFill, rebuildPowerStacks, tileKey,
   type BlockInput, type CellClass, type InstChunk, type LayerId, type LayerInfo, type LayoutManifest, type MacroInfo, type NetChunk, type NetShape, type RegionGroup, type SupplyLine, type TileEntry, type ViaDef,
 } from '../../../lib/a1-layout-format.ts';
+import { assignRoles, clockTreeOf, extractChannels, ioBusesOf, parseCdl, readCriticalPath, readFacts, ROLE_KINDS, type Channel } from './analyze.ts';
 import { parseDef } from './parse-def.ts';
 import { parseLef } from './parse-lef.ts';
 import { encodePng } from './png.ts';
@@ -133,7 +134,6 @@ const overlap = (a: R, b: R): R | null => {
   const r: R = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
   return r[0] < r[2] && r[1] < r[3] ? r : null;
 };
-const touches = (a: R, b: R) => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
 const GDS_LAYER: Record<string, string> = { '64/20': 'nwell', '65/20': 'diff', '65/44': 'tap', '66/20': 'poly', '66/44': 'licon', '67/20': 'li1', '67/44': 'mcon', '68/20': 'met1', '93/44': 'nsdm', '94/20': 'psdm' };
 let libTransistors = 0;
 const library = macros.map((macro, index) => {
@@ -164,18 +164,42 @@ const library = macros.map((macro, index) => {
   const lefMacro = lef.macros.get(macro.name)!;
   const rails = lefMacro.pins.filter((pin) => pin.use === 'POWER' || pin.use === 'GROUND').flatMap((pin) => pin.rects.filter((r) => r.layer === 'met1').map((r) => [r.x0, r.y0, r.x1, r.y1] as R));
   for (const r of get('met1')) if (!rails.some((rail) => r[0] >= rail[0] && r[1] >= rail[1] && r[2] <= rail[2] && r[3] <= rail[3])) add('met1', r);
-  // Transistors: connected patches of poly over diffusion.
-  const channels: R[] = [];
-  for (const d of get('diff')) for (const p of get('poly')) { const o = overlap(d, p); if (o) channels.push(o); }
-  const parent = channels.map((_, k) => k);
-  const find = (k: number): number => (parent[k] === k ? k : (parent[k] = find(parent[k])));
-  for (let a = 0; a < channels.length; a += 1) for (let b = a + 1; b < channels.length; b += 1) if (touches(channels[a], channels[b])) parent[find(a)] = find(b);
-  const transistors = new Set(channels.map((_, k) => find(k))).size;
-  libTransistors += transistors * macros[index].count;
+  // Transistors, as an extractor finds them: connected patches of poly over N+ or P+ diffusion,
+  // each with the pin its gate is wired to (poly contact → li1 → LEF pin shape).
+  const pick = (list: R[], implantLayer: string) => list.flatMap((r) => get(implantLayer).map((i) => overlap(r, i)).filter((o): o is R => o !== null));
+  const pinBoxes = lefMacro.pins.flatMap((pin, pinIndex) => (macro.signalPins.includes(pinIndex) ? pin.rects.filter((r) => r.layer === 'li1').map((r) => ({ pin: pinIndex, box: [r.x0, r.y0, r.x1, r.y1] as R })) : []));
+  const channels: Channel[] = extractChannels({ poly: get('poly'), ndiff: pick(get('diff'), 'nsdm'), pdiff: pick(get('diff'), 'psdm'), pcon: get('licon').filter((r) => get('poly').some((p) => overlap(r, p))), li1: get('li1') }, pinBoxes, lef.dbu);
+  libTransistors += channels.length * macros[index].count;
   const pinRects = lefMacro.pins.flatMap((pin, pinIndex) => (macro.signalPins.includes(pinIndex) ? pin.rects.filter((r) => LAYER[r.layer as LayerId] !== undefined).map((r) => [pinIndex, LAYER[r.layer as LayerId], r.x0, r.y0, r.x1, r.y1]) : []));
-  return { geom, pins: pinRects, transistors };
+  return { geom, pins: pinRects, transistors: channels.length, channels, devices: [] as Array<[number, number, number, string, string, string]> };
 });
 log(`library: ${library.reduce((sum, cell) => sum + cell.geom.length, 0)} shapes over ${macros.length} cells; ${libTransistors} transistors placed; ${gds.nonManhattan} non-Manhattan shapes`);
+
+// The library's own transistor netlist (what LVS compared against): check the layout's transistors against it.
+const cdl = parseCdl(path.join(PLATFORM, 'cdl', 'sky130hd.cdl'));
+let cdlTransistors = 0;
+let cellsMatching = 0;
+const mismatched: string[] = [];
+macros.forEach((macro, index) => {
+  const cell = cdl.get(macro.name);
+  const lib = library[index];
+  if (!cell) {
+    mismatched.push(`${macro.name}: not in the CDL`);
+    return;
+  }
+  // Per device: type (0 n, 1 p), W and L in nm, and its gate, drain, and source nets.
+  for (const d of cell.devices) for (let k = 0; k < d.m; k += 1) lib.devices.push([d.type === 'p' ? 1 : 0, Math.round(d.w * 1000), Math.round(d.l * 1000), d.g, d.d, d.s]);
+  cdlTransistors += lib.devices.length * macro.count;
+  // Same transistors: equal counts of (type, W, L, gate) — a gate on a pin by name, else "internal".
+  const key = (type: number, w: number, l: number, gate: string) => `${type}:${w}:${l}:${gate}`;
+  const pinNames = new Set(macro.pins.map((pin) => pin.name));
+  const fromCdl = lib.devices.map(([type, w, l, g]) => key(type, w, l, pinNames.has(g) ? g : 'internal')).sort();
+  const fromGds = lib.channels.map((c) => key(c.type === 'p' ? 1 : 0, Math.round(c.w * 1000), Math.round(c.l * 1000), c.gate >= 0 ? macro.pins[c.gate].name : 'internal')).sort();
+  if (fromCdl.length === fromGds.length && fromCdl.every((value, k) => value === fromGds[k])) cellsMatching += 1;
+  else if (macro.cls !== 'fill' && macro.cls !== 'tap') mismatched.push(`${macro.name}: CDL ${fromCdl.length}, layout ${fromGds.length}`);
+});
+log(`transistors: ${cellsMatching} of ${macros.length} cell types match the library netlist device for device (type, W, L, gate pin); ${libTransistors.toLocaleString()} placed in the layout, ${cdlTransistors.toLocaleString()} in the netlist`);
+for (const line of mismatched.slice(0, 12)) console.warn(`  ${line}`);
 
 // ------------------------------------------------------------------- nets
 const N = def.nets.names.length;
@@ -561,7 +585,10 @@ for (let c = 0; c < instChunks; c += 1) {
 }
 log(`instances: ${instChunks} chunks, ${named} named, ${(instBytes / 1e6).toFixed(2)} MB`);
 
-const libBytes = write('lib.json.gz', gz(JSON.stringify({ macros: library })));
+// Channels as compact rows: [type (0 n, 1 p), x0, y0, x1, y1, W nm, L nm, gate pin (-1: internal)].
+const libBytes = write('lib.json.gz', gz(JSON.stringify({
+  macros: library.map((cell) => ({ geom: cell.geom, pins: cell.pins, transistors: cell.transistors, devices: cell.devices, channels: cell.channels.map((c) => [c.type === 'p' ? 1 : 0, ...c.box, Math.round(c.w * 1000), Math.round(c.l * 1000), c.gate]) })),
+})));
 log(`library geometry: ${(libBytes / 1e3).toFixed(0)} kB`);
 
 // ------------------------------------------------------ overview images
@@ -672,6 +699,174 @@ const heroes: LayoutManifest['heroes'] = {
   devices: { x: heroFa.x, y: heroFa.y, note: `Transistors of ${unescape(def.components.names[heroCell])}` },
 };
 
+// ---------------------------------------------------- connectivity analyses
+// Per net, the driving component; per component, the nets on its data inputs (clock pins left out).
+const driver = new Int32Array(N).fill(-1);
+const inputStart = new Uint32Array(compMacro.length + 1);
+{
+  for (let n = 0; n < N; n += 1) for (let k = def.nets.pinStart[n]; k < def.nets.pinStart[n + 1]; k += 1) {
+    const inst = def.nets.pinInst.get(k);
+    if (inst < 0) continue;
+    const pin = macros[compMacro[inst]].pins[pinIndex[compMacro[inst]].get(def.nets.pinName[k])!];
+    if (pin.dir === 'output') driver[n] = inst;
+    else if (pin.use === 'signal') inputStart[inst + 1] += 1;
+  }
+  for (let k = 0; k < compMacro.length; k += 1) inputStart[k + 1] += inputStart[k];
+}
+const inputNets = new Int32Array(inputStart[compMacro.length]);
+{
+  const fill = inputStart.slice(0, compMacro.length);
+  for (let n = 0; n < N; n += 1) for (let k = def.nets.pinStart[n]; k < def.nets.pinStart[n + 1]; k += 1) {
+    const inst = def.nets.pinInst.get(k);
+    if (inst < 0) continue;
+    const pin = macros[compMacro[inst]].pins[pinIndex[compMacro[inst]].get(def.nets.pinName[k])!];
+    if (pin.dir !== 'output' && pin.use === 'signal') inputNets[fill[inst]++] = n;
+  }
+}
+const inputsOf = (inst: number) => Array.from(inputNets.subarray(inputStart[inst], inputStart[inst + 1]));
+
+// Which dot unit and pipeline stage each cell serves.
+const unescapedNames = def.components.names.map(unescape);
+const roles = assignRoles({ names: unescapedNames, cellClass: (inst) => macros[compMacro[inst]].cls, inputs: inputsOf, driver });
+log(`roles: ${roles.counts.registers} registers; of ${roles.counts.logic} logic cells, ${roles.counts.assigned} serve one dot unit, ${roles.counts.shared} are shared between units, ${roles.counts.none} serve none (control)`);
+const perUnit = Array.from({ length: 16 }, () => 0);
+for (const inst of defOf) if (roles.unit[inst] < 16) perUnit[roles.unit[inst]] += 1;
+// Where each unit's logic sits (stage 0: all of it) and each of its three stages: the median of their cells, and how many.
+const stageCentroids: Array<{ unit: number; stage: number; count: number; x: number; y: number }> = [];
+const unitCentroids: Array<{ unit: number; count: number; x: number; y: number }> = [];
+{
+  const xs = new Map<number, number[]>();
+  const ys = new Map<number, number[]>();
+  for (let inst = 0; inst < compMacro.length; inst += 1) {
+    const u = roles.unit[inst];
+    const k = roles.kind[inst];
+    if (u >= 16 || k < 1 || k > 3) continue;
+    const key = u * 4 + k;
+    const m = macros[compMacro[inst]];
+    for (const at of [key, u * 4]) {
+      if (!xs.has(at)) {
+        xs.set(at, []);
+        ys.set(at, []);
+      }
+      xs.get(at)!.push(def.components.x[inst] + m.w / 2);
+      ys.get(at)!.push(def.components.y[inst] + m.h / 2);
+    }
+  }
+  const median = (values: number[]) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  for (const [key, list] of xs) {
+    const item = { unit: Math.floor(key / 4), count: list.length, x: median(list), y: median(ys.get(key)!) };
+    if (key % 4 === 0) unitCentroids.push(item);
+    else stageCentroids.push({ ...item, stage: key % 4 });
+  }
+  stageCentroids.sort((a, b) => a.unit - b.unit || a.stage - b.stage);
+  unitCentroids.sort((a, b) => a.unit - b.unit);
+}
+{
+  const meta = new Uint8Array(defOf.length * 2);
+  defOf.forEach((inst, k) => {
+    meta[k] = roles.unit[inst];
+    meta[defOf.length + k] = roles.kind[inst];
+  });
+  const metaBytes = write('cells-meta.bin.gz', gz(meta));
+  log(`cell roles: ${(metaBytes / 1e3).toFixed(0)} kB for ${defOf.length} stored cells`);
+}
+// Dot-unit map for the whole-tile view: each pixel takes the colour of the unit whose cells cover most of it.
+const UNIT_PALETTE = Array.from({ length: 16 }, (_, k) => {
+  const hue = (k * 137.508) % 360;
+  const sat = 0.6;
+  const light = k % 2 === 0 ? 0.56 : 0.46;
+  const c = (1 - Math.abs(2 * light - 1)) * sat;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = light - c / 2;
+  const [r, g, b] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x] : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)] as [number, number, number];
+});
+{
+  const unitArea = new Float32Array(px * px * 17);
+  const scale = px / W;
+  for (let inst = 0; inst < compMacro.length; inst += 1) {
+    const u = roles.unit[inst];
+    if (u > 16) continue;
+    const m = macros[compMacro[inst]];
+    const x0 = (def.components.x[inst] - dieX0) * scale;
+    const x1 = (def.components.x[inst] + m.w - dieX0) * scale;
+    const v0 = (dieY1 - def.components.y[inst] - m.h) * (px / H);
+    const v1 = (dieY1 - def.components.y[inst]) * (px / H);
+    for (let j = Math.max(0, Math.floor(v0)); j < Math.min(px, Math.ceil(v1)); j += 1) {
+      const dv = Math.min(v1, j + 1) - Math.max(v0, j);
+      for (let i = Math.max(0, Math.floor(x0)); i < Math.min(px, Math.ceil(x1)); i += 1) unitArea[(j * px + i) * 17 + u] += (Math.min(x1, i + 1) - Math.max(x0, i)) * dv;
+    }
+  }
+  // One grey level per pixel: 0 where no unit's cells are, else 16 × (unit + 1) (read back with nearest sampling).
+  const pixels = new Uint8Array(px * px);
+  for (let k = 0; k < px * px; k += 1) {
+    let best = -1;
+    let bestArea = 0;
+    for (let u = 0; u < 16; u += 1) {
+      const a = unitArea[k * 17 + u];
+      if (a > bestArea) {
+        bestArea = a;
+        best = u;
+      }
+    }
+    // A pixel needs a tenth of its area in unit cells to be coloured.
+    if (best >= 0 && bestArea > 0.1) pixels[k] = 16 * (best + 1);
+  }
+  const unitsBytes = write('overview-units.png', encodePng(pixels, px, px, 1));
+  log(`dot-unit map: ${(unitsBytes / 1e3).toFixed(0)} kB`);
+}
+
+// The clock tree.
+const clockNets = def.nets.use.flatMap((use, n) => (use === 'CLOCK' ? [n] : []));
+const clockSinks = new Map<number, number[]>();
+for (const n of clockNets) {
+  const list: number[] = [];
+  for (let k = def.nets.pinStart[n]; k < def.nets.pinStart[n + 1]; k += 1) {
+    const inst = def.nets.pinInst.get(k);
+    if (inst >= 0 && inst !== driver[n]) list.push(inst);
+  }
+  clockSinks.set(n, list);
+}
+const clkPin = def.ioPins.find((pin) => pin.name === 'clk')?.rects[0];
+const clockNodes = clockTreeOf({ clockNets, driver, sinks: (net) => clockSinks.get(net) ?? [], isFlop: (inst) => macros[compMacro[inst]].cls === 'sequential', inputNet: (inst) => inputsOf(inst)[0] ?? -1 });
+{
+  const file: ClockTreeFile = {
+    nodes: clockNodes.map((node) => [def.components.x[node.inst] + macros[compMacro[node.inst]].w / 2, def.components.y[node.inst] + macros[compMacro[node.inst]].h / 2, node.parent, node.flops, node.level]),
+    root: clkPin ? [(clkPin.x0 + clkPin.x1) / 2, (clkPin.y0 + clkPin.y1) / 2] : [dieX0, (dieY0 + dieY1) / 2],
+  };
+  const clockBytes = write('clock-tree.json.gz', gz(JSON.stringify(file)));
+  log(`clock tree: ${clockNodes.length} drivers, ${clockNodes.reduce((sum, node) => sum + node.flops, 0)} flip-flops clocked, depth ${Math.max(...clockNodes.map((node) => node.level)) + 1}; ${(clockBytes / 1e3).toFixed(0)} kB`);
+}
+
+// The critical path, placed.
+const RUN_DIR = path.resolve(path.dirname(DEF), '../../../..');
+const REPORTS = path.join(RUN_DIR, 'reports', 'sky130hd', def.design, 'base');
+const instByName = new Map(unescapedNames.map((name, index) => [name, index]));
+const netByPlainName = new Map(def.nets.names.map((name, index) => [unescape(name), index]));
+const critical = readCriticalPath(path.join(REPORTS, '6_finish.rpt'));
+const placeStep = (step: ReturnType<typeof readCriticalPath>['data'][number]): LayoutPathStep => {
+  const inst = instByName.get(step.inst);
+  const io = inst === undefined ? def.ioPins.find((pin) => pin.name === step.inst)?.rects[0] : undefined;
+  const x = inst !== undefined ? def.components.x[inst] + macros[compMacro[inst]].w / 2 : io ? (io.x0 + io.x1) / 2 : NaN;
+  const y = inst !== undefined ? def.components.y[inst] + macros[compMacro[inst]].h / 2 : io ? (io.y0 + io.y1) / 2 : NaN;
+  if (Number.isNaN(x)) throw new Error(`critical path step ${step.inst} is not in the DEF`);
+  return { ...step, x, y, netId: step.net ? netByPlainName.get(step.net) ?? -1 : -1 };
+};
+const endBase = critical.endpoint.replace(/\$.*/, '').replace(/\[.*/, '');
+const STAGE_TEXT: Record<string, string> = { s2_terms: 'Stage 1: decode and multiply, into the product-term registers', s3_partial: 'Stage 2: align and sum, into the partial-sum registers', acc: 'Stage 3: normalize, round, and accumulate', rsp_data: 'Stage 3: the READ response' };
+const criticalPath = { startpoint: critical.startpoint, endpoint: critical.endpoint, arrival: critical.arrival, required: critical.required, slack: critical.slack, period: 0, stage: STAGE_TEXT[endBase] ?? 'Between registers', clock: critical.clock.map(placeStep), data: critical.data.map(placeStep) };
+log(`critical path: ${critical.startpoint} → ${critical.endpoint}, ${critical.data.length} data pins, arrival ${critical.arrival} ns, slack ${critical.slack} ns (${criticalPath.stage})`);
+const pathBytes = write('critical-path.json.gz', gz(JSON.stringify(criticalPath)));
+log(`critical path file: ${(pathBytes / 1e3).toFixed(0)} kB`);
+
+// Facts from the run's own reports.
+const facts = { ...readFacts(RUN_DIR, 'sky130hd', def.design), transistors: { gds: libTransistors, cdl: cdlTransistors, cellsMatching, cellTypes: macros.length } };
+criticalPath.period = facts.period;
+// Rewrite the path file now that its clock period is known.
+write('critical-path.json.gz', gz(JSON.stringify(criticalPath)));
+log(`facts: ${facts.area.utilization.toFixed(3)} utilization, ${(facts.timing.fmax / 1e6).toFixed(2)} MHz, ${facts.power.total.toFixed(3)} W, DRC ${facts.drc?.count}, LVS ${facts.lvs?.result}, LEC ${facts.lec?.result}`);
+const ioBuses = ioBusesOf(def.ioPins, def.die);
+
 // ------------------------------------------------------------- manifest
 const cellsByClass = Object.fromEntries((['logic', 'sequential', 'clock', 'buffer', 'fill', 'tap', 'diode', 'decap'] as CellClass[]).map((cls) => [cls, macros.filter((m) => m.cls === cls).reduce((sum, m) => sum + m.count, 0)])) as Record<CellClass, number>;
 // Source paths are recorded from the EDA volume's runs/ directory, not the local home directory.
@@ -723,6 +918,12 @@ const manifest: LayoutManifest = {
   },
   heroes,
   groups,
+  facts,
+  criticalPath: { file: 'critical-path.json.gz', startpoint: criticalPath.startpoint, endpoint: criticalPath.endpoint, arrival: criticalPath.arrival, required: criticalPath.required, slack: criticalPath.slack, period: criticalPath.period, stage: criticalPath.stage, cells: new Set(criticalPath.data.map((step) => step.inst)).size - 1, clockBuffers: new Set(criticalPath.clock.map((step) => step.inst)).size - 1 },
+  ioBuses,
+  roles: { file: 'cells-meta.bin.gz', kinds: [...ROLE_KINDS], counts: roles.counts, perUnit, units: unitCentroids, stages: stageCentroids },
+  unitsOverview: { file: 'overview-units.png', palette: UNIT_PALETTE.map(([r, g, b]) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`) },
+  clockTree: { file: 'clock-tree.json.gz', nodes: clockNodes.length, flops: clockNodes.reduce((sum, node) => sum + node.flops, 0), levels: Math.max(...clockNodes.map((node) => node.level)) + 1 },
 };
 const manifestText = JSON.stringify(manifest);
 write('manifest.json', manifestText);

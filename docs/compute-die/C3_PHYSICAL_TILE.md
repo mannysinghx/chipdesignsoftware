@@ -108,16 +108,27 @@ The Silicon macro view has a second mode, **A1 layout**, next to the illustrativ
 
 The exporter also checks that every tile decodes back to exactly the shapes it was given.
 
-The view shows:
+The exporter also derives what the view explains the tile with, from the same inputs and the run's own reports:
 
-- **Tile:** the met5/met4 power grid over real per-layer coverage. It also shows where each of the 16 dot-product units' registers landed; the RTL's own bus layout assigns every flip-flop to a unit (for example `s2_terms[306k +: 306]`).
-- **Region and Routing:** the routed met1–met4 signal nets, with the cells colored by kind.
-- **Cells:** li1 and met1 inside the standard cells, labelled with their real instance names.
-- **Transistors:** diffusion, poly gates, contacts, and the n-well.
+| Derived | How | Result |
+|---|---|---|
+| Dot unit and pipeline stage of each cell | Registers take their unit from the RTL's bus layout (for example `s2_terms[306k +: 306]`) and their stage from the register; each combinational cell takes the units and stages of the registers it feeds, traced backward through the netlist and stopping at flip-flops | Of 227,486 logic cells, 211,229 serve one unit, 15,800 are shared, 457 serve none (control); 13,069–13,356 per unit in its three stages, plus its 622–623 flip-flops |
+| Transistors of every cell | Each channel is poly crossing diffusion in the library GDS; its gate pin is found through the poly contact and li1 | Checked device for device (type, W, L, gate pin) against the library's CDL netlist: 203 of 203 cell types agree; 2,745,514 transistors placed, the same count as the netlist |
+| Clock tree | Every clock buffer and inverter with the one driving it, from the routed DEF | 1,506 drivers, 9 levels, 10,550 flip-flops |
+| Slowest path | The worst setup path of the final timing report, each pin placed at its cell | `s1_fmt[0]` → `s2_terms[3218]`: arrives 53.22 ns, needed by 41.96 ns, slack −11.26 ns (stage 1) |
+| Run facts | The run's metrics and reports: areas, cell counts, timing, power, IR drop, DRC, LVS, equivalence | Shown in the view's Details panel |
 
-Clicking a wire gives its real net name, length, vias, and layers, plus the pins it joins (driver first), all read off the metal. Clicking a cell gives its instance, its function, and each pin's net. Pulses on a signal net start at the pin that drives it and run outward. Where the driver is not loaded, the wire stays dark rather than pulse the wrong way. The pulse timing is not simulated.
+The view has five zoom stops. Each spans a similar range of zoom, each stop's detail has finished loading when the stop begins, and the deepest view is about 1.2 µm tall:
 
-Size: the data totals 25.7 MB across 1,900 files. The largest share is the tiles (20.5 MB, in 5 nm units, stored as deltas along each net's route). A view downloads only what it shows: 1.2 MB for the whole tile, about 3–4 MB after zooming into a region. `tests/a1-layout.test.ts` checks the format round trip, the three rules above, the cell-name decoding, and that the shipped data is complete and uses the PDK's layer stack. It caught a planted decoder bug.
+- **Tile:** the 16 dot-product units, coloured where their cells were placed; the I/O pins along the edges; the met5/met4 power grid over real per-layer coverage.
+- **Region:** the met3–met5 signal routing and the outline of every cell over a wide area, with each nearby unit's three pipeline stages labelled where their cells' median lies.
+- **Routing:** every wire and via on met1–met3, the power straps delayered.
+- **Cells:** li1 and met1 inside the standard cells, labelled with their real instance names, dot unit, and role.
+- **Transistors:** diffusion, poly gates, contacts, and the n-well; each transistor labelled NMOS or PMOS with its gate pin and W × L.
+
+A Details panel gives the run's facts at the tile stop and counts of what is in view below it, down to the transistors of the cell at the centre. Clicking a wire gives its real net name, length, vias, and layers, plus the pins it joins (driver first), all read off the metal. Clicking a cell gives its instance, its function, its dot unit and role, and each pin's net; clicking a transistor gives its type, size, and gate pin. The Slowest path overlay draws the worst setup path pin by pin. Pulses on a signal net start at the pin that drives it and run outward. Where the driver is not loaded, the wire stays dark rather than pulse the wrong way. The pulse timing is not simulated.
+
+Size: the data totals 26.1 MB across 1,905 files. The largest share is the tiles (20.5 MB, in 5 nm units, stored as deltas along each net's route). A view downloads only what it shows: about 2 MB for the whole tile and 8–10 MB after zooming into the cells. `tests/a1-layout.test.ts` checks the format round trip, the three rules above, the cell-name decoding, and that the shipped data is complete and uses the PDK's layer stack. It also checks the zoom stops, the cell roles against their summary, the facts against the layout, the slowest path and clock tree, every transistor against its cell's geometry and the library netlist, and the region view against the full tile. It caught a planted decoder bug, and planted zoom and counting bugs.
 
 To regenerate after a new run:
 

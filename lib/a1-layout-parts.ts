@@ -148,3 +148,21 @@ export const CELL_EXPLAIN: Explanation = {
   connects: 'Its pins are li1 shapes; the router lands on them with an mcon contact from met1. It draws power from the met1 rails along the top and bottom of its row.',
   made: ['Built in the same process steps as every other structure: the transistors first, then contacts, li1, and the metal layers above.', 'The placer put it in a row of fixed-height sites; the filler cells were added last to close the gaps.'],
 };
+
+// ------------------------------------------------------ units and stages
+
+/** The three pipeline stages of a dot unit: the logic kinds 1–3 of the cell roles. */
+export const STAGE_TEXT: Record<1 | 2 | 3, { title: string; does: string; into: string }> = {
+  1: { title: 'Stage 1', does: 'decode and multiply', into: 'the product-term registers' },
+  2: { title: 'Stage 2', does: 'align and sum', into: 'the partial-sum registers' },
+  3: { title: 'Stage 3', does: 'normalize, round, and accumulate', into: 'the accumulators and the response' },
+};
+
+export const TRANSISTOR_EXPLAIN: Explanation = {
+  does: 'A MOSFET: the voltage on its polysilicon gate opens or closes a channel in the silicon beneath it, joining its source and drain. NMOS transistors pull a node toward VSS; PMOS transistors, which sit in the n-well, pull it toward VDD.',
+  connects: 'The gate is the poly strip where it crosses the diffusion; the source and drain are the diffusion on either side, reached through licon contacts to li1. A gate driven by a pin is an input of the cell.',
+  made: [
+    ...FRONT_END,
+    'Its width is how far the gate runs across the diffusion (more width, more current); its length is the width of the poly strip, 0.15 µm at this process\'s minimum.',
+  ],
+};

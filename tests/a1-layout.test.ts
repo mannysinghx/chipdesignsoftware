@@ -4,10 +4,14 @@ import test from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import {
   LAYER, NO_NET, PURPOSE, decodeBlock, encodeBlock, packKind, pinNet, placeRect, placedPinRects, rebuildFill, rebuildPowerStacks, tileKey,
-  type BlockInput, type LayoutManifest,
+  type BlockInput, type ClockTreeFile, type LayoutManifest, type LayoutPath,
 } from '../lib/a1-layout-format.ts';
 import { describeCell } from '../lib/a1-layout-parts.ts';
-import { buildCellChunk, buildRoutingChunk, frameOf, pathArcs, strapsOf, whatCategory, whatLayer, type LayoutLibrary } from '../lib/a1-layout-scene.ts';
+import {
+  buildCellChunk, buildCoarseChunk, buildRoutingChunk, decodeRoles, frameOf, pathArcs, strapsOf, viewStats, whatCategory, whatLayer,
+  type LayoutBatch, type LayoutLibrary,
+} from '../lib/a1-layout-scene.ts';
+import { LAYOUT_ZOOM, lodFade, lodWindow, stopAt } from '../lib/a1-layout-view.ts';
 
 // The Silicon macro view's "A1 layout" mode draws the real routed A1 tile
 // from data exported by tools/physical/layout-export. These tests check the
@@ -163,4 +167,196 @@ test('a real tile decodes, rebuilds its fillers, and builds drawable chunks', ()
     assert.equal(batch.ref.length, batch.count);
     assert.ok(batch.data.every(Number.isFinite));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Zoom, and the details from tile to transistor
+// ---------------------------------------------------------------------------
+
+test('zoom stops are balanced, and each opens on detail that has already loaded', () => {
+  const { stops, presets, lod, min } = LAYOUT_ZOOM;
+  const below = Object.fromEntries(stops.map((stop) => [stop.id, stop.below])) as Record<string, number>;
+  for (let k = 1; k < stops.length; k += 1) assert.ok(stops[k].below < stops[k - 1].below, stops[k].id);
+  // Below the whole-tile view, each stop spans a similar range of distance (3.5× to 8×).
+  const bounds = [...stops.slice(1).map((stop) => stop.below), min];
+  for (let k = 1; k < stops.length; k += 1) {
+    const span = bounds[k - 1] / bounds[k];
+    assert.ok(span >= 3.5 && span <= 8, `${stops[k].id} spans ${span.toFixed(1)}×`);
+  }
+  // Each ladder distance lies inside its stop, clear of the hysteresis band around the boundaries.
+  for (const [id, distance] of Object.entries(presets)) {
+    assert.equal(stopAt(distance, null), id);
+    const index = stops.findIndex((stop) => stop.id === id);
+    const upper = stops[index].below;
+    const lower = index + 1 < stops.length ? stops[index + 1].below : min;
+    assert.ok(distance < upper / 1.08 && distance > lower * 1.08, `${id} preset near a boundary`);
+  }
+  // A stop's own detail is fully faded in where the stop begins, so no stop opens on a blur or on nothing.
+  for (const [spec, id] of [[lod.coarse, 'region'], [lod.tile, 'routing'], [lod.cells, 'cells']] as const) {
+    assert.ok(spec.fullAt >= below[id], `${id}: detail completes at ${spec.fullAt}, stop begins at ${below[id]}`);
+    assert.equal(lodFade(spec, below[id]), 1);
+    assert.equal(lodFade(spec, spec.activateAt), 0);
+    // and streams a window wider than a 16:9 view at the stop's ladder distance.
+    const halfWidth = presets[id] * Math.tan((17 * Math.PI) / 180) * (16 / 9);
+    assert.ok(lodWindow(spec, presets[id]) >= halfWidth, `${id} window`);
+  }
+  // The deepest view is about a micrometre tall: whole transistors, not one magnified surface.
+  const deepest = 2 * min * Math.tan((17 * Math.PI) / 180) * 1000;
+  assert.ok(deepest >= 1 && deepest <= 3, `${deepest.toFixed(2)} µm`);
+  // Within 8 % of a boundary the current stop holds; beyond it the stop changes.
+  assert.equal(stopAt(below.routing * 0.95, 'region'), 'region');
+  assert.equal(stopAt(below.routing * 0.9, 'region'), 'routing');
+  assert.equal(stopAt(below.routing * 1.05, 'routing'), 'routing');
+  assert.equal(stopAt(below.routing * 1.1, 'routing'), 'region');
+});
+
+test('cell roles: every stored cell has a unit and a kind, and they add up to the summary', () => {
+  const r = manifest.roles!;
+  const roles = decodeRoles(gunzipSync(read(r.file)));
+  assert.equal(roles.unit.length, manifest.insts.count);
+  const perUnit = Array.from({ length: 16 }, () => 0);
+  const logic = Array.from({ length: 16 }, () => 0);
+  const unitRegisters = Array.from({ length: 16 }, () => 0);
+  let shared = 0;
+  let registers = 0;
+  for (let i = 0; i < roles.unit.length; i += 1) {
+    const unit = roles.unit[i];
+    const kind = roles.kind[i];
+    assert.ok(unit <= 16 || unit === 255, `unit ${unit}`);
+    assert.ok(kind < r.kinds.length, `kind ${kind}`);
+    if (unit < 16) {
+      perUnit[unit] += 1;
+      if (kind >= 1 && kind <= 3) logic[unit] += 1;
+      if (kind >= 4) unitRegisters[unit] += 1;
+    }
+    if (unit === 16) shared += 1;
+    if (kind >= 4) registers += 1;
+  }
+  assert.deepEqual(perUnit, r.perUnit);
+  assert.equal(shared, r.counts.shared);
+  assert.equal(registers, r.counts.registers);
+  assert.equal(registers, manifest.facts!.counts.byClass['Flip-flops']);
+  const [x0, y0, x1, y1] = manifest.die;
+  for (let unit = 0; unit < 16; unit += 1) {
+    // A unit's registers are exactly those of its bus slice; its other cells are its three stages of logic,
+    // bar a few that feed only its C/D data registers (which no stage ends in).
+    assert.equal(unitRegisters[unit], manifest.groups[unit].count, `D${unit} registers`);
+    const unstaged = perUnit[unit] - logic[unit] - unitRegisters[unit];
+    assert.ok(unstaged >= 0 && unstaged < 10, `D${unit}: ${unstaged} cells without a stage`);
+    // Its logic splits into its three stages, and its label sits where that logic is.
+    const stages = r.stages.filter((stage) => stage.unit === unit);
+    assert.deepEqual(stages.map((stage) => stage.stage), [1, 2, 3]);
+    assert.equal(stages.reduce((sum, stage) => sum + stage.count, 0), logic[unit]);
+    const centre = r.units.find((item) => item.unit === unit)!;
+    assert.equal(centre.count, logic[unit]);
+    for (const at of [centre, ...stages]) assert.ok(at.x > x0 && at.x < x1 && at.y > y0 && at.y < y1);
+  }
+});
+
+test('the run facts agree with the layout they describe', () => {
+  const facts = manifest.facts!;
+  assert.equal(facts.counts.all, manifest.insts.count + manifest.insts.fill);
+  assert.equal(facts.counts.cells, manifest.insts.count);
+  assert.equal(Object.values(facts.counts.byClass).reduce((a, b) => a + b, 0), facts.counts.all);
+  assert.equal(facts.transistors.gds, manifest.stats.transistors);
+  assert.equal(facts.transistors.gds, facts.transistors.cdl);
+  assert.equal(facts.transistors.cellsMatching, facts.transistors.cellTypes);
+  // The fastest clock is the one the worst path would just meet.
+  assert.ok(Math.abs(facts.timing.fmax / 1e6 - 1000 / (facts.period - facts.timing.setupWs)) < 0.05);
+  assert.ok(Math.abs(manifest.criticalPath!.slack - facts.timing.setupWs) < 0.01);
+  assert.equal(manifest.ioBuses!.reduce((sum, bus) => sum + bus.count, 0), manifest.stats.ioPins);
+});
+
+test('the slowest path and the clock tree are whole', () => {
+  const cp = manifest.criticalPath!;
+  const path = JSON.parse(gunzipSync(read(cp.file)).toString()) as LayoutPath;
+  assert.equal(path.data[0].inst, cp.startpoint);
+  assert.equal(path.data.at(-1)!.inst, cp.endpoint);
+  assert.equal(path.clock.at(-1)!.inst, cp.startpoint);
+  for (let k = 1; k < path.data.length; k += 1) assert.ok(path.data[k].time >= path.data[k - 1].time - 1e-9, `step ${k}`);
+  assert.ok(Math.abs(path.data.at(-1)!.time - cp.arrival) < 0.01);
+  assert.ok(Math.abs(cp.required - cp.arrival - cp.slack) < 0.01);
+  const [x0, y0, x1, y1] = manifest.die;
+  for (const step of [...path.clock, ...path.data]) assert.ok(step.x >= x0 && step.x <= x1 && step.y >= y0 && step.y <= y1, step.inst);
+  const tree = JSON.parse(gunzipSync(read(manifest.clockTree!.file)).toString()) as ClockTreeFile;
+  assert.equal(tree.nodes.length, manifest.clockTree!.nodes);
+  assert.equal(tree.nodes.reduce((sum, node) => sum + node[3], 0), manifest.clockTree!.flops);
+  // Every driver hangs one level below its parent, down from the clk pin.
+  for (const [, , parent, , level] of tree.nodes) assert.equal(level, parent < 0 ? 0 : tree.nodes[parent][4] + 1);
+  assert.equal(Math.max(...tree.nodes.map((node) => node[4])) + 1, manifest.clockTree!.levels);
+});
+
+test('every transistor is a poly gate over diffusion, and matches the library netlist', () => {
+  let checked = 0;
+  library.macros.forEach((cell, index) => {
+    const macro = manifest.macros[index];
+    const channels = cell.channels ?? [];
+    assert.equal(channels.length, cell.transistors, macro.name);
+    const pins = new Set(macro.pins.map((pin) => pin.name));
+    const key = (type: number, w: number, l: number, gate: string) => `${type}:${w}:${l}:${gate}`;
+    assert.deepEqual(
+      channels.map((c) => key(c[0], c[5], c[6], c[7] >= 0 ? macro.pins[c[7]].name : 'internal')).sort(),
+      (cell.devices ?? []).map((d) => key(d[0], d[1], d[2], pins.has(d[3]) ? d[3] : 'internal')).sort(),
+      macro.name,
+    );
+    const poly = cell.geom.filter((g) => g[0] === LAYER.poly);
+    for (const c of channels) {
+      const diff = cell.geom.filter((g) => g[0] === (c[0] ? LAYER.pdiff : LAYER.ndiff));
+      // The centre and the corners of the channel lie on poly and on diffusion of its type.
+      const inset = 5;
+      for (const [x, y] of [[(c[1] + c[3]) / 2, (c[2] + c[4]) / 2], [c[1] + inset, c[2] + inset], [c[3] - inset, c[4] - inset], [c[1] + inset, c[4] - inset], [c[3] - inset, c[2] + inset]]) {
+        const on = (list: typeof poly) => list.some(([, a, b, cc, d]) => x >= a && x <= cc && y >= b && y <= d);
+        assert.ok(on(poly) && on(diff), `${macro.name}: channel at ${x}, ${y}`);
+      }
+      checked += 1;
+    }
+  });
+  assert.ok(checked > 1000, `${checked} channels`);
+});
+
+test('the region view draws a tile\'s upper routing and cells, shape for shape as the full tile', () => {
+  const block = decodeBlock(gunzipSync(read(`tiles/${tileKey(20, 20)}.bin.gz`)));
+  const global = decodeBlock(gunzipSync(read('global.bin.gz')));
+  const ctx = { manifest, frame: frameOf(manifest), library, clockNets: new Set(manifest.nets.clockIds), straps: strapsOf(global) };
+  const coarse = buildCoarseChunk(ctx, block, 'coarse:20_20');
+  const full = buildRoutingChunk(ctx, block, 'tile:20_20', 'tile');
+  const box = (batch: LayoutBatch, k: number, origin: number[]) => {
+    const d = batch.data.subarray(k * 10, k * 10 + 6);
+    return [whatCategory(batch.what[k]), whatLayer(batch.what[k]), batch.ref[k], (d[0] + origin[0]).toFixed(6), (d[2] + origin[2]).toFixed(6), d[3].toFixed(6), d[5].toFixed(6)].join('|');
+  };
+  const fullShapes = new Set(full.batches.flatMap((batch) => Array.from({ length: batch.count }, (_, k) => box(batch, k, full.origin))));
+  let wires = 0;
+  for (const batch of coarse.batches) {
+    for (let k = 0; k < batch.count; k += 1) {
+      const category = whatCategory(batch.what[k]);
+      if (category === 'footprint') continue;
+      assert.ok(['met3', 'met4', 'met5'].includes(whatLayer(batch.what[k])) && (category === 'wire' || category === 'patch'));
+      assert.ok(batch.ref[k] < manifest.nets.vdd, 'signal only');
+      assert.ok(fullShapes.has(box(batch, k, coarse.origin)), `${box(batch, k, coarse.origin)} is not in the full tile`);
+      wires += 1;
+    }
+  }
+  assert.ok(wires > 50, `${wires} upper wires`);
+  assert.equal(coarse.cells.length, Array.from(block.cells.macro).filter((macro) => manifest.macros[macro].cls !== 'tap').length);
+});
+
+test('view statistics count each cell once, by class, unit, and stage', () => {
+  const block = decodeBlock(gunzipSync(read(`tiles/${tileKey(20, 20)}.bin.gz`)));
+  const global = decodeBlock(gunzipSync(read('global.bin.gz')));
+  const ctx = { manifest, frame: frameOf(manifest), library, clockNets: new Set(manifest.nets.clockIds), straps: strapsOf(global) };
+  const roles = decodeRoles(gunzipSync(read(manifest.roles!.file)));
+  const full = buildRoutingChunk(ctx, block, 'tile:20_20', 'tile');
+  const b = full.bounds;
+  const all = viewStats([full], { x0: b.x0 - 1, z0: b.z0 - 1, x1: b.x1 + 1, z1: b.z1 + 1 }, manifest, library, roles, manifest.roles!.kinds);
+  assert.equal(Object.values(all.cells).reduce((a, c) => a + c, 0), full.cells.length);
+  assert.equal(all.transistors, full.cells.reduce((sum, cell) => sum + library.macros[cell.macro].transistors, 0));
+  const serving = full.cells.filter((cell) => cell.inst >= 0 && !['fill', 'tap', 'diode', 'decap'].includes(manifest.macros[cell.macro].cls));
+  assert.equal(all.units.reduce((a, c) => a + c, 0), serving.length);
+  const kinds = serving.map((cell) => roles.kind[cell.inst]);
+  assert.deepEqual(all.stages, [1, 2, 3].map((stage) => kinds.filter((kind) => kind === stage).length));
+  assert.equal(Object.values(all.registers).reduce((a, c) => a + c, 0), kinds.filter((kind) => kind >= 4).length);
+  assert.ok((all.wire.met1 ?? 0) > 0 && (all.vias.via ?? 0) > 0 && all.nets > 0);
+  // Half the tile counts no more than the whole of it.
+  const half = viewStats([full], { x0: b.x0, z0: b.z0, x1: (b.x0 + b.x1) / 2, z1: b.z1 }, manifest, library, roles, manifest.roles!.kinds);
+  assert.ok(half.transistors < all.transistors && (half.cells.logic ?? 0) <= (all.cells.logic ?? 0));
 });

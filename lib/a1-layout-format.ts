@@ -179,7 +179,39 @@ export type LayoutManifest = {
   };
   heroes: Record<'region' | 'routing' | 'cells' | 'devices', { x: number; y: number; note: string }>;
   groups: RegionGroup[];
+  /** The run's own reports: areas, counts, power, timing, IR drop, DRC, LVS, LEC. */
+  facts?: LayoutFacts;
+  /** The worst setup path: its summary here, the cell-by-cell steps in `file` (a LayoutPath). */
+  criticalPath?: Omit<LayoutPath, 'clock' | 'data'> & { file: string; cells: number; clockBuffers: number };
+  /** The tile's I/O pins, grouped by bus, with the edge and span (DBU along it) each occupies. */
+  ioBuses?: Array<{ name: string; dir: string; count: number; side: 'north' | 'south' | 'east' | 'west'; from: number; to: number; layers: string[] }>;
+  /** How the stored cells divide among the 16 dot units and the three pipeline stages (cells-meta file). */
+  roles?: { file: string; kinds: string[]; counts: { logic: number; assigned: number; shared: number; none: number; registers: number }; perUnit: number[]; units: Array<{ unit: number; count: number; x: number; y: number }>; stages: Array<{ unit: number; stage: number; count: number; x: number; y: number }> };
+  /** Dot-unit map for the whole-tile view: grey level 16 × (unit + 1) where that unit's cells cover most of the pixel, 0 elsewhere. */
+  unitsOverview?: { file: string; palette: string[] };
+  /** The clock tree: every clock driver with its parent and the flip-flops it clocks (clock file). */
+  clockTree?: { file: string; nodes: number; flops: number; levels: number };
 };
+
+export type LayoutFacts = {
+  source: string;
+  period: number;
+  area: { die: number; core: number; cells: number; utilization: number };
+  counts: { cells: number; all: number; byClass: Record<string, number> };
+  power: { total: number; internal: number; switching: number; leakage: number };
+  timing: { fmax: number; setupWs: number; setupTns: number; setupViolations: number; holdWs: number; holdViolations: number; skewSetup: number; skewHold: number; maxSlewViolations: number; maxCapViolations: number };
+  ir: { vddWorst: number; vssWorst: number; vddAverage: number; vssAverage: number };
+  drc: { count: number; source: string } | null;
+  lvs: { result: string; devices: number; nets: number; source: string } | null;
+  lec: { result: string; source: string } | null;
+  transistors: { gds: number; cdl: number; cellsMatching: number; cellTypes: number };
+};
+
+export type LayoutPathStep = { inst: string; pin: string; cell: string; edge: 'rise' | 'fall'; time: number; delay: number; net: string | null; x: number; y: number; netId: number };
+export type LayoutPath = { startpoint: string; endpoint: string; arrival: number; required: number; slack: number; period: number; stage: string; clock: LayoutPathStep[]; data: LayoutPathStep[] };
+
+/** One clock-tree driver: position (cell centre, DBU), parent index (-1: the clk pin), flip-flops it clocks, depth. */
+export type ClockTreeFile = { nodes: Array<[number, number, number, number, number]>; root: [number, number] };
 
 // ---------------------------------------------------------------------------
 // Blocks: the global block and every tile share one layout

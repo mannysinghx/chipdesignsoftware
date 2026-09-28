@@ -6,14 +6,15 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import {
-  LAYER, NO_NET, ROUTING_LAYERS, decodeBlock, instChunkOf, netChunkOf, placedPinRects, tileKey,
-  type CellClass, type InstChunk, type LayerId, type LayoutBlock, type LayoutManifest, type NetChunk,
+  LAYER, NO_NET, ROUTING_LAYERS, decodeBlock, instChunkOf, netChunkOf, placeRect, placedPinRects, tileKey,
+  type CellClass, type ClockTreeFile, type InstChunk, type LayerId, type LayoutBlock, type LayoutManifest, type LayoutPath, type NetChunk, type RegionGroup,
 } from '@/lib/a1-layout-format';
-import { CELL_CLASS_TEXT, CELL_EXPLAIN, LAYER_TEXT, describeCell, type Explanation } from '@/lib/a1-layout-parts';
+import { CELL_CLASS_TEXT, CELL_EXPLAIN, LAYER_TEXT, STAGE_TEXT, TRANSISTOR_EXPLAIN, describeCell, type Explanation } from '@/lib/a1-layout-parts';
 import {
-  LAYOUT_MATERIALS, MM_PER_NM, PULSE, buildCellChunk, buildRoutingChunk, defX, defY, frameOf, sceneX, sceneZ, strapsOf, whatCategory, whatLayer,
-  type ChunkCell, type Frame, type LayoutChunk, type LayoutLibrary, type LayoutMaterial, type SceneContext,
+  LAYOUT_MATERIALS, MM_PER_NM, PULSE, buildCellChunk, buildCoarseChunk, buildRoutingChunk, decodeRoles, defX, defY, frameOf, sceneX, sceneZ, strapsOf, unitLabel, viewStats, whatCategory, whatLayer,
+  type CellRoles, type ChunkCell, type Frame, type LayoutChunk, type LayoutLibrary, type LayoutMaterial, type SceneContext,
 } from '@/lib/a1-layout-scene';
+import { LAYOUT_ZOOM, lodFade, lodWindow, stopAt, type LayoutStopId } from '@/lib/a1-layout-view';
 import { FLOATS_PER_INSTANCE, clipPlanesFor, formatLength, scaleBar, zoomPanPath } from '@/lib/silicon-macro';
 import { pickChunk } from '@/lib/silicon-parts';
 import { createAnnotations, type Anchor, type LabelBox, type LabelMode, type RulerMark } from './annotations';
@@ -29,7 +30,7 @@ export type { LabelMode } from './annotations';
 export type DragMode = 'rotate' | 'pan';
 export type Flows = { data: boolean; power: boolean; clock: boolean };
 
-export type LayoutStopId = 'tile' | 'region' | 'routing' | 'cells' | 'devices';
+export type { LayoutStopId } from '@/lib/a1-layout-view';
 export type LayoutStop = { id: LayoutStopId; label: string; layer: string; below: number; targetY: number; floor: number | null };
 
 export type LayoutHud = {
@@ -66,7 +67,14 @@ export type LayoutNet = {
   note: string | null;
   pieces: number;
 };
-export type LayoutCell = { inst: number; name: string | null; macro: string; what: string; drive: string | null; cls: CellClass; size: string; place: string; pins: LayoutPin[] | null; transistors: number };
+export type LayoutCell = {
+  inst: number; name: string | null; macro: string; what: string; drive: string | null; cls: CellClass; size: string; place: string; pins: LayoutPin[] | null; transistors: number;
+  /** Its dot unit (0–15), 16 when shared by several, null for none; and what it does in the pipeline. */
+  unit: number | null;
+  role: string | null;
+};
+/** One transistor of a cell, from the cell's layout (checked device for device against the library netlist). */
+export type LayoutDevice = { type: 'NMOS' | 'PMOS'; w: number; l: number; gate: string | null; count: { n: number; p: number } };
 export type LayoutSelection = {
   key: string;
   kind: 'net' | 'cell' | 'region' | 'surface';
@@ -80,7 +88,20 @@ export type LayoutSelection = {
   explain: Explanation | null;
   net: LayoutNet | null;
   cell: LayoutCell | null;
+  device: LayoutDevice | null;
+  /** For a dot unit: its colour on the map and its cells. */
+  unit: { index: number; color: string; cells: number; registers: number } | null;
 };
+
+/** The Details panel: facts for the whole tile at the tile stop, counts of what is in view below it. */
+export type LayoutDetails = {
+  stop: LayoutStopId;
+  title: string;
+  subtitle: string;
+  sections: Array<{ title: string; rows: Array<{ label: string; value: string; hint?: string; swatch?: string }> }>;
+};
+
+export type LayoutOverlays = { units: boolean; path: boolean };
 
 export type LayoutEngineCallbacks = {
   onManifest: (manifest: LayoutManifest) => void;
@@ -89,6 +110,7 @@ export type LayoutEngineCallbacks = {
   onError: (message: string) => void;
   onCameraGesture: (details: Record<string, unknown>) => void;
   onSelect: (selection: LayoutSelection | null) => void;
+  onDetails: (details: LayoutDetails) => void;
 };
 
 export type LayoutEngine = {
@@ -100,6 +122,7 @@ export type LayoutEngine = {
   setAutoRotate: (on: boolean) => void;
   setLabelMode: (mode: LabelMode) => void;
   setDragMode: (mode: DragMode) => void;
+  setOverlays: (overlays: LayoutOverlays) => void;
   clearSelection: () => void;
   zoomToSelection: () => void;
   dispose: () => void;
@@ -108,27 +131,28 @@ export type LayoutEngine = {
 export const LAYOUT_BASE = '/layouts/a1-sky130hd/';
 
 const FOV = 34;
-const MIN_DISTANCE = 0.0008;
-const MAX_DISTANCE = 24;
+const MIN_DISTANCE = LAYOUT_ZOOM.min;
+const MAX_DISTANCE = LAYOUT_ZOOM.max;
 const POLAR_MARGIN = 0.02;
 const CULL_FRACTION = 0.12;
 const LABEL_BUDGET_MS = 1.2;
 const BUILD_BUDGET_MS = 6;
 const EVICT_AFTER_MS = 1500;
 const FETCHES = 6;
-/** Tiles hold the routing (and the cell outlines) below this camera distance (mm)... */
-const TILES = { activateAt: 0.5, fullAt: 0.36 };
-/** ...and the inside of every cell below this one. */
-const CELLS = { activateAt: 0.055, fullAt: 0.04 };
 /** Nets spanning more tiles than this are outlined and resolved only where loaded. */
 const NET_TILE_LIMIT = 36;
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 const wrapAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-const fade = (spec: { activateAt: number; fullAt: number }, distance: number) => (distance >= spec.activateAt ? 0 : distance <= spec.fullAt ? 1 : (spec.activateAt - distance) / (spec.activateAt - spec.fullAt));
 const um = (nm: number) => nm / 1000;
 const fmtUm = (value: number) => (value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2));
+const num = (value: number) => Math.round(value).toLocaleString('en-US');
+const signedNs = (value: number) => `${value < 0 ? '−' : '+'}${Math.abs(value).toFixed(2)} ns`;
+const watts = (value: number) => (value >= 1 ? `${value.toFixed(2)} W` : value >= 1e-3 ? `${(value * 1e3).toFixed(0)} mW` : `${(value * 1e6).toFixed(1)} µW`);
+const millivolts = (value: number) => `${(value * 1e3).toFixed(value * 1e3 < 0.1 ? 3 : 2)} mV`;
+const capital = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+type Row = LayoutDetails['sections'][number]['rows'][number];
 
 /** Fetch a layout file; gzip is undone here (unless a server already did). */
 async function fetchBytes(url: string): Promise<Uint8Array> {
@@ -149,12 +173,15 @@ function detectGpu(renderer: THREE.WebGLRenderer) {
   return { name, software: /swiftshader|llvmpipe|software|basic render/i.test(name) };
 }
 
-type Level = 'global' | 'tile' | 'footprint' | 'cells';
-type Resident = { id: string; level: Exclude<Level, 'footprint'>; chunk: LayoutChunk; group: THREE.Group; caps: THREE.Group | null; capStamp: string; lastWanted: number; block: LayoutBlock };
+type Level = 'global' | 'coarse' | 'tile' | 'footprint' | 'cells';
+type Resident = { id: string; level: Exclude<Level, 'footprint'>; key: string; chunk: LayoutChunk; group: THREE.Group; caps: THREE.Group | null; capStamp: string; lastWanted: number; block: LayoutBlock };
 type Hit = { t: number; record: Resident; batch: number; index: number } | { t: number; record: null; object: THREE.Object3D; point: THREE.Vector3 };
+type Box = [number, number, number, number, number, number];
 type Target =
-  | { kind: 'shape'; key: string; record: Resident; batch: number; index: number }
-  | { kind: 'region'; key: string; group: LayoutManifest['groups'][number] }
+  | { kind: 'shape'; key: string; record: Resident; batch: number; index: number; point?: THREE.Vector3 }
+  | { kind: 'region'; key: string; group: RegionGroup; unit: number }
+  /** Something a label names rather than a drawn shape: an I/O bank, a stage, the slowest path, a transistor. */
+  | { kind: 'info'; key: string; selection: Omit<LayoutSelection, 'key'>; point: THREE.Vector3; box: Box | null; zoom: number }
   | { kind: 'surface'; key: string; point: THREE.Vector3 };
 
 export function createLayoutEngine(host: HTMLElement, callbacks: LayoutEngineCallbacks, base = LAYOUT_BASE): LayoutEngine {
@@ -179,9 +206,8 @@ export function createLayoutEngine(host: HTMLElement, callbacks: LayoutEngineCal
   host.appendChild(canvas);
   const sectionPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e9);
   renderer.clippingPlanes = [sectionPlane];
-  // Software GL gets a much smaller streaming window.
-  const TILE_BUDGET = gpu.software ? 4 : 49;
-  const CELL_BUDGET = gpu.software ? 1 : 9;
+  // Software GL gets much smaller streaming windows.
+  const budgetOf = (spec: { budget: { gpu: number; software: number } }) => (gpu.software ? spec.budget.software : spec.budget.gpu);
 
   const scene = new THREE.Scene();
   const disposables: Array<{ dispose: () => void }> = [];
@@ -198,25 +224,24 @@ export function createLayoutEngine(host: HTMLElement, callbacks: LayoutEngineCal
   const shared = createSharedUniforms();
   const levelUniforms: Record<Level, LevelUniforms> = {
     global: { uFade: { value: 1 }, uPulsePeriod: { value: 400 }, uPulseRate: { value: 1 }, uViaStretch: { value: 40 } },
+    coarse: { uFade: { value: 0 }, uPulsePeriod: { value: PULSE.period }, uPulseRate: { value: 1 }, uViaStretch: { value: 1 } },
     tile: { uFade: { value: 0 }, uPulsePeriod: { value: PULSE.period }, uPulseRate: { value: PULSE.speed / PULSE.period }, uViaStretch: { value: PULSE.viaStretch } },
     footprint: { uFade: { value: 0 }, uPulsePeriod: { value: PULSE.period }, uPulseRate: { value: 1 }, uViaStretch: { value: 1 } },
     cells: { uFade: { value: 0 }, uPulsePeriod: { value: PULSE.period }, uPulseRate: { value: 1 }, uViaStretch: { value: 1 } },
   };
-  const materials = Object.fromEntries((['global', 'tile', 'footprint', 'cells'] as Level[]).map((level) => [level, Object.fromEntries(LAYOUT_MATERIALS.map((material) => [material, createSurfaceMaterial(LAYOUT_SURFACES[material], shared, levelUniforms[level])]))])) as Record<Level, Record<LayoutMaterial, THREE.MeshStandardMaterial>>;
+  const materials = Object.fromEntries((['global', 'coarse', 'tile', 'footprint', 'cells'] as Level[]).map((level) => [level, Object.fromEntries(LAYOUT_MATERIALS.map((material) => [material, createSurfaceMaterial(LAYOUT_SURFACES[material], shared, levelUniforms[level])]))])) as Record<Level, Record<LayoutMaterial, THREE.MeshStandardMaterial>>;
   for (const set of Object.values(materials)) disposables.push(...Object.values(set));
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   disposables.push(unitBox);
-  const levelGroups = { global: new THREE.Group(), tile: new THREE.Group(), cells: new THREE.Group() };
-  scene.add(levelGroups.global, levelGroups.tile, levelGroups.cells);
-  // The via4 arrays under the met5 straps are sub-pixel from afar (and most of the always-drawn
-  // shapes): they are drawn only once the view is close enough to see them.
-  const GLOBAL_VIAS_WITHIN = 1.5;
+  const levelGroups = { global: new THREE.Group(), coarse: new THREE.Group(), tile: new THREE.Group(), cells: new THREE.Group() };
+  scene.add(levelGroups.global, levelGroups.coarse, levelGroups.tile, levelGroups.cells);
 
   // ------------------------------------------------------------ data state
   let manifest: LayoutManifest | null = null;
   let frame: Frame | null = null;
   let ctx: SceneContext | null = null;
   let library: LayoutLibrary | null = null;
+  let roles: CellRoles | null = null;
   let bytesLoaded = 0;
   const tileBytes = new Map<string, number>();
   // Decoded tiles, least recently used first; chunks on screen keep their own reference.
@@ -354,12 +379,25 @@ export function createLayoutEngine(host: HTMLElement, callbacks: LayoutEngineCal
   const addResident = (id: string, level: Resident['level'], chunk: LayoutChunk, block: LayoutBlock, now: number) => {
     const group = meshesFor(chunk, chunk.batches, level);
     levelGroups[level].add(group);
-    resident.set(id, { id, level, chunk, group, caps: null, capStamp: '', lastWanted: now, block });
+    resident.set(id, { id, level, key: id.slice(id.indexOf(':') + 1), chunk, group, caps: null, capStamp: '', lastWanted: now, block });
   };
 
   // ------------------------------------------------------ static geometry
   let substrate: THREE.Mesh | null = null;
-  let overviewUniforms: { uMetal: { value: THREE.Texture | null }; uCells: { value: THREE.Texture | null }; uDetail: { value: number } } | null = null;
+  type OverviewUniforms = {
+    uMetal: { value: THREE.Texture | null };
+    uCells: { value: THREE.Texture | null };
+    uUnits: { value: THREE.Texture | null };
+    uPalette: { value: THREE.Color[] };
+    /** How strongly the dot-unit colours tint the map (0 hides them). */
+    uUnitsOn: { value: number };
+    /** Inside uWindow (x0, z0, x1, z1: where every shape is loaded) the map gives way to bare silicon by this much. */
+    uDetail: { value: number };
+    uWindow: { value: THREE.Vector4 };
+    /** The selected dot unit, whose tint stays while the others fade back (-1: none). */
+    uFocus: { value: number };
+  };
+  let overviewUniforms: OverviewUniforms | null = null;
   const statics: THREE.Object3D[] = [];
   // The substrate's cut face in a cross-section: a thin solid box on the section plane.
   let substrateCap: THREE.Mesh | null = null;
@@ -374,7 +412,7 @@ export function createLayoutEngine(host: HTMLElement, callbacks: LayoutEngineCal
     substrateCap.scale.set(section.axis === 0 ? thin : width, SUBSTRATE_THICKNESS, section.axis === 2 ? thin : depth);
     substrateCap.position.set(section.axis === 0 ? section.value + section.keep * thin * 8 : 0, -SUBSTRATE_THICKNESS / 2, section.axis === 2 ? section.value + section.keep * thin * 8 : 0);
   }
-  function buildSubstrate(metal: THREE.Texture, cells: THREE.Texture) {
+  function buildSubstrate(metal: THREE.Texture, cells: THREE.Texture, units: THREE.Texture | null) {
     if (!manifest || !frame) return;
     const width = (manifest.die[2] - manifest.die[0]) * MM_PER_NM;
     const depth = (manifest.die[3] - manifest.die[1]) * MM_PER_NM;
@@ -389,35 +427,55 @@ export function createLayoutEngine(host: HTMLElement, callbacks: LayoutEngineCal
       uv.setXY(vertex, (position.getX(vertex) + width / 2) / width, 1 - (position.getZ(vertex) + depth / 2) / depth);
     }
     uv.needsUpdate = true;
-    const uniforms = { uMetal: { value: metal as THREE.Texture | null }, uCells: { value: cells as THREE.Texture | null }, uDetail: { value: 0 } };
+    const palette = (manifest.unitsOverview?.palette ?? []).map((hex) => new THREE.Color(hex));
+    while (palette.length < 16) palette.push(new THREE.Color('#888888'));
+    const uniforms: OverviewUniforms = {
+      uMetal: { value: metal }, uCells: { value: cells }, uUnits: { value: units }, uPalette: { value: palette },
+      uUnitsOn: { value: 0 }, uDetail: { value: 0 }, uWindow: { value: new THREE.Vector4(1, 1, -1, -1) }, uFocus: { value: -1 },
+    };
     overviewUniforms = uniforms;
     const surface = new THREE.MeshStandardMaterial({ map: metal, roughness: 0.62, metalness: 0.25 });
     surface.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader = 'varying vec3 vLayoutWorld;\n' + shader.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvLayoutWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       shader.fragmentShader = /* glsl */ `
 uniform sampler2D uMetal;
 uniform sampler2D uCells;
+uniform sampler2D uUnits;
+uniform vec3 uPalette[16];
+uniform float uUnitsOn;
 uniform float uDetail;
+uniform vec4 uWindow;
+uniform float uFocus;
+varying vec3 vLayoutWorld;
 ` + shader.fragmentShader.replace('#include <map_fragment>', /* glsl */ `
 {
   // Coverage of the real layout per 2.5 µm pixel: cells by kind, then the routing layers over them.
   vec4 m = texture2D(uMetal, vMapUv);
   vec4 c = texture2D(uCells, vMapUv);
   vec3 col = vec3(0.028, 0.031, 0.038);
-  col = mix(col, vec3(0.20, 0.19, 0.19), c.r * 0.6);
-  col = mix(col, vec3(0.10, 0.19, 0.38), c.g * 0.85);
-  col = mix(col, vec3(0.30, 0.14, 0.38), c.b * 0.85);
-  col = mix(col, vec3(0.30, 0.30, 0.33), m.r * 0.5);
-  col = mix(col, vec3(0.38, 0.37, 0.39), m.g * 0.6);
-  col = mix(col, vec3(0.45, 0.44, 0.45), m.b * 0.7);
-  col = mix(col, vec3(0.52, 0.52, 0.54), m.a * 0.8);
-  // Up close the streamed geometry takes over and the surface is bare silicon.
-  diffuseColor.rgb = mix(col, vec3(0.028, 0.031, 0.038), uDetail);
+  col = mix(col, vec3(0.22, 0.21, 0.21), c.r * 0.65);
+  col = mix(col, vec3(0.10, 0.21, 0.44), c.g * 0.9);
+  col = mix(col, vec3(0.34, 0.15, 0.42), c.b * 0.9);
+  // Where each dot unit's cells are (the map from the netlist), tinted in the unit's colour.
+  float unit = floor(texture2D(uUnits, vMapUv).r * 255.0 / 16.0 + 0.5) - 1.0;
+  if (unit >= 0.0 && uUnitsOn > 0.0) {
+    float focus = uFocus < 0.0 || abs(unit - uFocus) < 0.5 ? 1.0 : 0.3;
+    col = mix(col, uPalette[int(unit)] * (0.35 + 0.65 * clamp(c.r + c.g, 0.0, 1.0)), uUnitsOn * 0.62 * focus);
+  }
+  col = mix(col, vec3(0.30, 0.30, 0.33), m.r * 0.45);
+  col = mix(col, vec3(0.38, 0.37, 0.39), m.g * 0.5);
+  col = mix(col, vec3(0.46, 0.45, 0.46), m.b * 0.6);
+  col = mix(col, vec3(0.54, 0.54, 0.56), m.a * 0.75);
+  // Where every shape is loaded, the streamed geometry takes over and the surface is bare silicon.
+  float inside = step(uWindow.x, vLayoutWorld.x) * step(vLayoutWorld.x, uWindow.z) * step(uWindow.y, vLayoutWorld.z) * step(vLayoutWorld.z, uWindow.w);
+  diffuseColor.rgb = mix(col, vec3(0.028, 0.031, 0.038), uDetail * inside);
 }`);
     };
-    surface.customProgramCacheKey = () => 'a1-layout-overview-v1';
+    surface.customProgramCacheKey = () => 'a1-layout-overview-v3';
     const side = new THREE.MeshStandardMaterial({ color: '#16181d', metalness: 0.35, roughness: 0.38 });
     disposables.push(geometry, surface, side, metal, cells);
+    if (units) disposables.push(units);
     const mesh = new THREE.Mesh(geometry, [side, side, surface, side, side, side]);
     mesh.position.y = -thickness / 2;
     mesh.userData.part = 'substrate';
@@ -431,6 +489,134 @@ uniform float uDetail;
     substrateCap.userData.part = 'substrate';
     scene.add(substrateCap);
     statics.push(substrateCap);
+  }
+
+  // -------------------------------------------------------------- overlays
+  // Real data drawn over the chip: the I/O pin banks, the clock tree, and the slowest path.
+  let overlays: LayoutOverlays = { units: true, path: false };
+  let clockShown = false;
+  const overlayY = () => (frame ? frame.z.met5[1] : 0.0066);
+  let ioBars: THREE.Group | null = null;
+  function buildIoBars() {
+    if (!manifest || !frame || !manifest.ioBuses) return;
+    const f = frame;
+    const group = new THREE.Group();
+    const materialFor = (dir: string) => new THREE.MeshBasicMaterial({ color: dir === 'output' ? '#ffb066' : '#5fdcff', transparent: true, opacity: 0.6, depthWrite: false, toneMapped: false });
+    const depth = 14000; // nm: a band this deep just inside the edge
+    for (const bus of manifest.ioBuses) {
+      const [x0, y0, x1, y1] = manifest.die;
+      const pad = 3000;
+      const [a0, a1] = [bus.from - pad, bus.to + pad];
+      const rect = bus.side === 'west' ? [x0, a0, x0 + depth, a1] : bus.side === 'east' ? [x1 - depth, a0, x1, a1] : bus.side === 'south' ? [a0, y0, a1, y0 + depth] : [a0, y1 - depth, a1, y1];
+      const material = materialFor(bus.dir);
+      const mesh = new THREE.Mesh(unitBox, material);
+      mesh.scale.set((rect[2] - rect[0]) * MM_PER_NM, 0.0004, (rect[3] - rect[1]) * MM_PER_NM);
+      mesh.position.set(sceneX(f, (rect[0] + rect[2]) / 2), overlayY() + 0.0006, sceneZ(f, (rect[1] + rect[3]) / 2));
+      mesh.renderOrder = 5;
+      group.add(mesh);
+      disposables.push(material);
+    }
+    scene.add(group);
+    ioBars = group;
+  }
+  let clockTree: THREE.Group | null = null;
+  let clockTreeLoading = false;
+  let clockTreeData: ClockTreeFile | null = null;
+  async function ensureClockTree() {
+    if (clockTree || clockTreeLoading || !manifest?.clockTree || !frame) return;
+    clockTreeLoading = true;
+    try {
+      const data = JSON.parse(new TextDecoder().decode(await loadBytes(manifest.clockTree.file))) as ClockTreeFile;
+      if (disposed || !frame) return;
+      clockTreeData = data;
+      const f = frame;
+      const y = overlayY() + 0.0009;
+      const positions: number[] = [];
+      const colors: number[] = [];
+      const deepest = Math.max(...data.nodes.map((node) => node[4]));
+      const tint = (level: number) => new THREE.Color().setHSL(0.8 - 0.1 * (level / Math.max(1, deepest)), 0.75, 0.62);
+      for (const [x, yy, parent, , level] of data.nodes) {
+        const [px, py] = parent >= 0 ? [data.nodes[parent][0], data.nodes[parent][1]] : data.root;
+        positions.push(sceneX(f, px), y, sceneZ(f, py), sceneX(f, x), y, sceneZ(f, yy));
+        const c = tint(level);
+        colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false });
+      const lines = new THREE.LineSegments(geometry, material);
+      lines.renderOrder = 6;
+      const dots = new THREE.BufferGeometry();
+      dots.setAttribute('position', new THREE.Float32BufferAttribute(data.nodes.flatMap(([x, yy]) => [sceneX(f, x), y, sceneZ(f, yy)]), 3));
+      const dotMaterial = new THREE.PointsMaterial({ color: '#e7a6ff', size: 3, sizeAttenuation: false, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
+      const points = new THREE.Points(dots, dotMaterial);
+      points.renderOrder = 6;
+      disposables.push(geometry, material, dots, dotMaterial);
+      const group = new THREE.Group();
+      group.add(lines, points);
+      group.visible = false;
+      scene.add(group);
+      clockTree = group;
+      planAt = 0;
+    } catch {
+      // The clock tree is optional: the flows still show the clock nets in the tiles.
+    } finally {
+      clockTreeLoading = false;
+    }
+  }
+  let pathGroup: THREE.Group | null = null;
+  let pathData: LayoutPath | null = null;
+  let pathLoading = false;
+  async function ensurePath() {
+    if (pathGroup || pathLoading || !manifest?.criticalPath || !frame) return;
+    pathLoading = true;
+    try {
+      const data = JSON.parse(new TextDecoder().decode(await loadBytes(manifest.criticalPath.file))) as LayoutPath;
+      if (disposed || !frame) return;
+      pathData = data;
+      const f = frame;
+      const y = overlayY() + 0.0012;
+      const line = (steps: LayoutPath['data'], color: string, order: number) => {
+        const points: THREE.Vector3[] = [];
+        for (const step of steps) {
+          const point = new THREE.Vector3(sceneX(f, step.x), y, sceneZ(f, step.y));
+          if (!points.length || points[points.length - 1].distanceTo(point) > 1e-9) points.push(point);
+        }
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false, toneMapped: false });
+        const object = new THREE.Line(geometry, material);
+        object.renderOrder = order;
+        disposables.push(geometry, material);
+        const dots = new THREE.BufferGeometry().setFromPoints(points);
+        const dotMaterial = new THREE.PointsMaterial({ color, size: 4, sizeAttenuation: false, depthWrite: false, depthTest: false, toneMapped: false });
+        const cells = new THREE.Points(dots, dotMaterial);
+        cells.renderOrder = order;
+        disposables.push(dots, dotMaterial);
+        return [object, cells];
+      };
+      const group = new THREE.Group();
+      group.add(...line(data.clock, '#d58cff', 7), ...line(data.data, '#ff6a4d', 8));
+      group.visible = overlays.path;
+      scene.add(group);
+      pathGroup = group;
+      planAt = 0;
+    } catch (reason) {
+      callbacks.onError(`The slowest path could not be loaded: ${reason instanceof Error ? reason.message : String(reason)}`);
+    } finally {
+      pathLoading = false;
+    }
+  }
+  /** Which overlays show at this distance. */
+  function updateOverlays(distance: number) {
+    const far = distance > LAYOUT_ZOOM.stops[2].below;
+    if (ioBars) ioBars.visible = far && !sectionOn;
+    const clockWanted = clockShown && far && !sectionOn;
+    if (clockWanted) void ensureClockTree();
+    if (clockTree) clockTree.visible = clockWanted;
+    if (overlays.path) void ensurePath();
+    if (pathGroup) pathGroup.visible = overlays.path;
+    if (overviewUniforms) overviewUniforms.uUnitsOn.value = overlays.units ? THREE.MathUtils.smoothstep(distance, 0.25, 1.1) : 0;
   }
 
   // ------------------------------------------------------------ post stack
@@ -479,14 +665,8 @@ uniform float uDetail;
   let stop: LayoutStop = { id: 'tile', label: 'A1 tile', layer: 'Loading the layout', below: Infinity, targetY: 0.006, floor: null };
   const stopFor = (distance: number, current: LayoutStopId) => {
     if (stops.length === 0) return stop;
-    let chosen = 0;
-    for (let k = 0; k < stops.length; k += 1) if (distance < stops[k].below) chosen = k;
-    const index = stops.findIndex((item) => item.id === current);
-    if (index >= 0 && Math.abs(chosen - index) === 1) {
-      const boundary = chosen > index ? stops[chosen].below : stops[index].below;
-      if (Math.abs(Math.log(distance / boundary)) < Math.log(1.08)) return stops[index];
-    }
-    return stops[chosen];
+    const id = stopAt(distance, current);
+    return stops.find((item) => item.id === id) ?? stops[0];
   };
   const presets = new Map<LayoutStopId, { x: number; z: number; distance: number; polar: number; azimuth: number }>();
 
@@ -715,7 +895,7 @@ uniform float uDetail;
     raycaster.set(origin, dir);
     return hit;
   }
-  const targetOf = (hit: Hit): Target => (hit.record ? { kind: 'shape', key: `${hit.record.id}/${hit.batch}/${hit.index}`, record: hit.record, batch: hit.batch, index: hit.index } : { kind: 'surface', key: 'surface', point: hit.point });
+  const targetOf = (hit: Hit): Target => (hit.record ? { kind: 'shape', key: `${hit.record.id}/${hit.batch}/${hit.index}`, record: hit.record, batch: hit.batch, index: hit.index, point: hitPoint(hit) } : { kind: 'surface', key: 'surface', point: hit.point });
   const pick = (ndc: THREE.Vector2) => {
     const hit = pickRay(ndc);
     return hit ? targetOf(hit) : null;
@@ -736,22 +916,84 @@ uniform float uDetail;
     };
   };
   const netKind = (net: number): LayoutNet['kind'] => (!manifest ? 'signal' : net === manifest.nets.vdd ? 'vdd' : net === manifest.nets.vss ? 'vss' : ctx?.clockNets.has(net) ? 'clock' : 'signal');
+  const unitColor = (unit: number) => manifest?.unitsOverview?.palette[unit] ?? '#ffc978';
+  /** Where a dot unit's logic sits (DBU), or its registers for exports without cell roles. */
+  const unitCentre = (unit: number): [number, number] | null => {
+    const found = manifest?.roles?.units?.find((item) => item.unit === unit);
+    if (found) return [found.x, found.y];
+    const group = manifest?.groups[unit];
+    return group ? group.centroid : null;
+  };
+  /** A dot unit's own logic cells: the roles summary counts its registers with them (perUnit), the centroid without. */
+  const unitLogic = (unit: number) => {
+    const r = manifest?.roles;
+    if (!r) return 0;
+    return r.units?.find((item) => item.unit === unit)?.count ?? Math.max(0, (r.perUnit[unit] ?? 0) - (manifest?.groups[unit]?.count ?? 0));
+  };
+  /** A stored cell's dot unit (16: shared by several) and what it does in the pipeline, from the cell roles. */
+  const roleOf = (inst: number): { unit: number | null; role: string | null } => {
+    if (!roles || !manifest?.roles || inst < 0 || inst >= roles.unit.length) return { unit: null, role: null };
+    const unit = roles.unit[inst];
+    const kind = roles.kind[inst];
+    const stage = kind >= 1 && kind <= 3 ? STAGE_TEXT[kind as 1 | 2 | 3] : null;
+    const name = kind > 0 ? manifest.roles.kinds[kind] ?? null : null;
+    return { unit: unit <= 16 ? unit : null, role: stage ? `${stage.title} logic: ${stage.does}, into ${stage.into}` : name ? capital(name) : null };
+  };
+  /** The loaded tile's chunk under a DBU point: the full one if resident, else the region one. */
+  const chunkAt = (dx: number, dy: number, full = false) => {
+    if (!manifest) return null;
+    const size = manifest.tile.size;
+    const key = tileKey(Math.floor((dx - manifest.die[0]) / size), Math.floor((dy - manifest.die[1]) / size));
+    return resident.get(`tile:${key}`) ?? (full ? null : resident.get(`coarse:${key}`)) ?? null;
+  };
+  /** The logic cell under a DBU point, or nearest it within 3 µm, in the loaded tiles around it. */
+  const cellNear = (dx: number, dy: number, full = false): { record: Resident; cell: ChunkCell } | null => {
+    if (!manifest) return null;
+    // A tile keeps the cells whose origin it holds, so a cell can reach into the tiles above and to its right.
+    const size = manifest.tile.size;
+    let found: { record: Resident; cell: ChunkCell } | null = null;
+    let bestD = 3000;
+    for (const [ox, oy] of [[0, 0], [-1, 0], [0, -1], [-1, -1], [1, 0], [0, 1]]) {
+      const record = chunkAt(dx + ox * size, dy + oy * size, full);
+      if (!record) continue;
+      for (const cell of record.chunk.cells) {
+        const m = manifest.macros[cell.macro];
+        if (cell.inst < 0 || m.cls === 'fill' || m.cls === 'tap') continue;
+        const d = Math.hypot(Math.max(cell.x - dx, 0, dx - cell.x - m.w), Math.max(cell.y - dy, 0, dy - cell.y - m.h));
+        if (d < bestD) {
+          bestD = d;
+          found = { record, cell };
+        }
+      }
+    }
+    return found;
+  };
+  /** Which dot unit a point belongs to: its nearest cell's where tiles are loaded, else the nearest unit's logic. */
+  const unitPhrase = (dx: number, dy: number) => {
+    const near = roles ? cellNear(dx, dy) : null;
+    if (near) {
+      const { unit } = roleOf(near.cell.inst);
+      if (unit !== null) return unit < 16 ? `In dot unit ${unitLabel(unit)}` : 'Logic shared by several dot units';
+    }
+    let best = -1;
+    let bestD = Infinity;
+    for (let unit = 0; unit < (manifest?.groups.length ?? 0); unit += 1) {
+      const centre = unitCentre(unit);
+      const d = centre ? Math.hypot(centre[0] - dx, centre[1] - dy) : Infinity;
+      if (d < bestD) {
+        bestD = d;
+        best = unit;
+      }
+    }
+    return best >= 0 && bestD < 450000 ? `Near dot unit ${unitLabel(best)}` : null;
+  };
   const locationAt = (x: number, z: number) => {
     if (!manifest || !frame) return [] as string[];
     const dx = defX(frame, x);
     const dy = defY(frame, z);
     const out = ['AIMEM-A1 tensor tile'];
-    // The dot unit whose registers sit nearest (their boxes overlap, so containment would be ambiguous).
-    let group: LayoutManifest['groups'][number] | null = null;
-    let best = Infinity;
-    for (const g of manifest.groups) {
-      const d = Math.hypot(g.centroid[0] - dx, g.centroid[1] - dy);
-      if (d < best) {
-        best = d;
-        group = g;
-      }
-    }
-    if (group && best < (group.box[2] - group.box[0] + group.box[3] - group.box[1]) / 2) out.push(`Near ${group.label}`);
+    const unit = unitPhrase(dx, dy);
+    if (unit) out.push(unit);
     out.push(`x ${fmtUm(um(dx - manifest.die[0]))} µm · y ${fmtUm(um(dy - manifest.die[1]))} µm`);
     return out;
   };
@@ -940,7 +1182,9 @@ uniform float uDetail;
   let selected: Target | null = null;
   let selectionToken = 0;
   const place = (line: THREE.LineSegments, target: Target | null) => {
-    if (!target || target.kind === 'surface') {
+    // A dot unit shows by its tint on the map (selected, the others fade back); labelled things by their box.
+    const box = target?.kind === 'shape' ? null : target?.kind === 'info' ? target.box : null;
+    if (!target || (target.kind !== 'shape' && !box)) {
       line.visible = false;
       return;
     }
@@ -948,52 +1192,154 @@ uniform float uDetail;
       const s = shapeOf(target);
       line.position.set(s.x, s.y, s.z);
       line.scale.set(s.sx, s.sy, s.sz);
-    } else if (frame) {
-      const [x0, y0, x1, y1] = target.group.box;
-      line.position.set((sceneX(frame, x0) + sceneX(frame, x1)) / 2, frame.z.met5[1], (sceneZ(frame, y0) + sceneZ(frame, y1)) / 2);
-      line.scale.set(Math.abs(sceneX(frame, x1) - sceneX(frame, x0)), 1e-6, Math.abs(sceneZ(frame, y1) - sceneZ(frame, y0)));
+    } else if (box) {
+      line.position.set(box[0], box[1], box[2]);
+      line.scale.set(box[3], box[4], box[5]);
     }
     line.scale.multiplyScalar(1.004);
     line.visible = true;
   };
 
+  const selectionOf = (fields: Partial<Omit<LayoutSelection, 'key'>> & Pick<LayoutSelection, 'kind' | 'title'>): Omit<LayoutSelection, 'key'> => ({
+    layer: '', role: '', material: '', size: '', location: ['AIMEM-A1 tensor tile'], notes: [], explain: null, net: null, cell: null, device: null, unit: null, ...fields,
+  });
+  const cellInfo = (cell: ChunkCell): LayoutCell => {
+    const mf = manifest!;
+    const m = mf.macros[cell.macro];
+    const d = describeCell(m.name);
+    const orient = ['N', 'S', 'E', 'W', 'FN', 'FS', 'FE', 'FW'][cell.orient];
+    const row = Math.round((cell.y - mf.rows.y0) / mf.rows.height);
+    const { unit, role } = roleOf(cell.inst);
+    return { inst: cell.inst, name: instNameNow(cell.inst), macro: m.name, what: d.what, drive: d.drive, cls: m.cls, size: `${fmtUm(um(m.w))} × ${fmtUm(um(m.h))} µm`, place: `Row ${row.toLocaleString()} (${orient === 'N' ? 'upright' : orient === 'FS' ? 'flipped' : orient}), x ${fmtUm(um(cell.x - mf.die[0]))} µm`, pins: null, transistors: library?.macros[cell.macro].transistors ?? 0, unit, role };
+  };
+  /** A transistor of a cell: its type, size, and gate pin, from the library's channels (poly over diffusion). */
+  const deviceOf = (cell: ChunkCell, index: number): LayoutDevice | null => {
+    if (!manifest || !library) return null;
+    const channels = library.macros[cell.macro].channels ?? [];
+    const c = channels[index];
+    if (!c) return null;
+    const n = channels.filter((item) => item[0] === 0).length;
+    return { type: c[0] ? 'PMOS' : 'NMOS', w: c[5] / 1000, l: c[6] / 1000, gate: c[7] >= 0 ? manifest.macros[cell.macro].pins[c[7]]?.name ?? null : null, count: { n, p: channels.length - n } };
+  };
+  /** The channel of a cell nearest a scene point (within 0.4 µm), placed as the DEF places the cell. */
+  const channelAt = (cell: ChunkCell, point: THREE.Vector3): number => {
+    if (!manifest || !library || !frame) return -1;
+    const m = manifest.macros[cell.macro];
+    const px = defX(frame, point.x) - cell.x;
+    const py = defY(frame, point.z) - cell.y;
+    let best = -1;
+    let bestD = 400;
+    (library.macros[cell.macro].channels ?? []).forEach((c, index) => {
+      const [x0, y0, x1, y1] = placeRect(cell.orient, m.w, m.h, c[1], c[2], c[3], c[4]);
+      const d = Math.hypot(Math.max(x0 - px, 0, px - x1), Math.max(y0 - py, 0, py - y1));
+      if (d < bestD) {
+        bestD = d;
+        best = index;
+      }
+    });
+    return best;
+  };
+  /** A channel's box in the scene: over the diffusion, up to the top of the gate. */
+  const channelBox = (cell: ChunkCell, index: number): Box | null => {
+    const c = library?.macros[cell.macro].channels?.[index];
+    if (!c || !manifest || !frame) return null;
+    const m = manifest.macros[cell.macro];
+    const [x0, y0, x1, y1] = placeRect(cell.orient, m.w, m.h, c[1], c[2], c[3], c[4]);
+    const f = frame;
+    const ax = sceneX(f, cell.x + x0);
+    const bx = sceneX(f, cell.x + x1);
+    const az = sceneZ(f, cell.y + y1);
+    const bz = sceneZ(f, cell.y + y0);
+    const lo = f.z.ndiff[0];
+    const hi = f.z.poly[1];
+    return [(ax + bx) / 2, (lo + hi) / 2, (az + bz) / 2, bx - ax, hi - lo, bz - az];
+  };
+  function deviceSelection(cell: ChunkCell, device: LayoutDevice, size: string, location: string[]): Omit<LayoutSelection, 'key'> {
+    const m = manifest!.macros[cell.macro];
+    const d = describeCell(m.name);
+    const name = instNameNow(cell.inst);
+    return selectionOf({
+      kind: 'cell',
+      title: `${device.type} transistor`,
+      layer: `Inside ${name ?? d.title} (${d.title}: ${d.what})`,
+      role: `${device.gate ? `Its gate is the cell's input pin ${device.gate}` : 'Its gate is a node inside the cell'}; W ${device.w.toFixed(2)} µm × L ${device.l.toFixed(2)} µm`,
+      material: device.type === 'PMOS' ? 'P+ diffusion in the n-well under a polysilicon gate' : 'N+ diffusion in the p-type substrate under a polysilicon gate',
+      size,
+      location,
+      notes: [`${d.title} has ${device.count.n} NMOS and ${device.count.p} PMOS transistors: the same types, sizes, and gate pins as the library netlist`],
+      explain: TRANSISTOR_EXPLAIN,
+      cell: cellInfo(cell),
+      device,
+    });
+  }
+  function unitSelection(unit: number, group: RegionGroup): Omit<LayoutSelection, 'key'> {
+    const r = manifest?.roles;
+    const logic = unitLogic(unit);
+    const notes = [`${num(group.count)} flip-flops hold its product terms, partial sum, accumulators, and C/D element (bits assigned by the RTL's bus layout)`];
+    if (r) {
+      notes.push(`${num(logic)} logic cells in its three stages serve this unit alone, traced back from its registers through the netlist; ${num(r.counts.shared)} more are shared between units`);
+      for (const item of r.stages.filter((stage) => stage.unit === unit)) {
+        const text = STAGE_TEXT[item.stage as 1 | 2 | 3];
+        if (text) notes.push(`${text.title}, ${text.does}: ${num(item.count)} cells`);
+      }
+    }
+    return selectionOf({ kind: 'region', title: group.label, layer: 'Dot-product unit: one of the 4 × 4 tile\'s 16 outputs', role: group.detail, size: `${num(r?.perUnit[unit] ?? logic + group.count)} cells`, notes, unit: { index: unit, color: unitColor(unit), cells: logic, registers: group.count } });
+  }
+  function pathSelection(): Omit<LayoutSelection, 'key'> {
+    const cp = manifest!.criticalPath!;
+    const notes: string[] = [];
+    if (pathData) {
+      const slowest = [...pathData.data].sort((a, b) => b.delay - a.delay).slice(0, 5);
+      for (const step of slowest) notes.push(`${step.inst}/${step.pin} (${step.cell.replace('sky130_fd_sc_hd__', '')}): +${step.delay.toFixed(2)} ns`);
+    }
+    notes.push('From the run\'s final static timing report; the line joins the pins in the order the signal passes them');
+    const verdict = cp.slack < 0 ? `misses the ${cp.period} ns clock by ${(-cp.slack).toFixed(2)} ns` : `meets the ${cp.period} ns clock with ${cp.slack.toFixed(2)} ns to spare`;
+    return selectionOf({ kind: 'region', title: 'Slowest path', layer: cp.stage, role: `From ${cp.startpoint} to ${cp.endpoint}: the data arrives at ${cp.arrival.toFixed(2)} ns and is needed by ${cp.required.toFixed(2)} ns, so it ${verdict}`, size: `${num(cp.cells)} cells, after ${cp.clockBuffers} clock buffers`, notes });
+  }
+  function clockSelection(): Omit<LayoutSelection, 'key'> {
+    const tree = manifest!.clockTree!;
+    const skew = manifest?.facts ? `; skew ${manifest.facts.timing.skewSetup.toFixed(2)} ns` : '';
+    return selectionOf({ kind: 'region', title: 'Clock tree', layer: 'From the clk pin to every flip-flop', role: `${num(tree.nodes)} clock buffers and inverters, ${tree.levels} levels deep, deliver the clock to ${num(tree.flops)} flip-flops at nearly the same moment${skew}`, notes: ['Lines join each clock driver to the one driving it, coloured by depth; dots are the drivers', 'Built by the flow\'s clock-tree synthesis and read back from the routed DEF'] });
+  }
+
   function describe(target: Target): LayoutSelection {
+    if (target.kind === 'info') return { key: target.key, ...target.selection };
     if (target.kind === 'surface' || !manifest) {
-      return { key: target.key, kind: 'surface', title: 'Silicon substrate', layer: 'Substrate', role: 'The tile\'s silicon. From afar its surface shows the real layout\'s coverage: cells by kind and each routing layer\'s density, per 2.5 µm pixel. Zoom in and the drawn geometry takes over.', material: 'Silicon', size: `${fmtUm(um(manifest ? manifest.die[2] - manifest.die[0] : 0))} µm square`, location: target.kind === 'surface' ? locationAt(target.point.x, target.point.z) : [], notes: [], explain: null, net: null, cell: null };
+      return { key: target.key, ...selectionOf({ kind: 'surface', title: 'Silicon substrate', layer: 'Substrate', role: 'The tile\'s silicon. From afar its surface shows the real layout\'s coverage: cells by kind, each routing layer\'s density, and the dot units by colour, per 2.5 µm pixel. Zoom in and the drawn geometry takes over.', material: 'Silicon', size: `${fmtUm(um(manifest ? manifest.die[2] - manifest.die[0] : 0))} µm square`, location: target.kind === 'surface' ? locationAt(target.point.x, target.point.z) : [] }) };
     }
-    if (target.kind === 'region') {
-      const g = target.group;
-      return { key: target.key, kind: 'region', title: g.label, layer: 'Where the RTL registers were placed', role: g.detail, material: '', size: `${fmtUm(um(g.box[2] - g.box[0]))} × ${fmtUm(um(g.box[3] - g.box[1]))} µm (the central 80 % of its ${g.count.toLocaleString()} flip-flops)`, location: ['AIMEM-A1 tensor tile'], notes: [`${g.count.toLocaleString()} flip-flops, named after the RTL register they hold`], explain: null, net: null, cell: null };
-    }
+    if (target.kind === 'region') return { key: target.key, ...unitSelection(target.unit, target.group) };
     const s = shapeOf(target);
     const layer = whatLayer(s.what);
     const category = whatCategory(s.what);
     const text = LAYER_TEXT[layer];
     const location = locationAt(s.x, s.z);
+    const size = sizeOf(s.sx, s.sy, s.sz);
     if (category === 'footprint' || category === 'device') {
       const cell = cellOf(target.record, s.ref);
-      if (!cell) return { key: target.key, kind: 'surface', title: text.title, layer: text.title, role: text.role, material: text.material, size: sizeOf(s.sx, s.sy, s.sz), location, notes: [], explain: text.explain, net: null, cell: null };
+      if (!cell) return { key: target.key, ...selectionOf({ kind: 'surface', title: text.title, layer: text.title, role: text.role, material: text.material, size, location, explain: text.explain }) };
       const m = manifest.macros[cell.macro];
       const d = describeCell(m.name);
-      const orient = ['N', 'S', 'E', 'W', 'FN', 'FS', 'FE', 'FW'][cell.orient];
-      const row = Math.round((cell.y - manifest.rows.y0) / manifest.rows.height);
-      const info: LayoutCell = { inst: cell.inst, name: instNameNow(cell.inst), macro: m.name, what: d.what, drive: d.drive, cls: m.cls, size: `${fmtUm(um(m.w))} × ${fmtUm(um(m.h))} µm`, place: `Row ${row.toLocaleString()} (${orient === 'N' ? 'upright' : orient === 'FS' ? 'flipped' : orient}), x ${fmtUm(um(cell.x - manifest.die[0]))} µm`, pins: null, transistors: library?.macros[cell.macro].transistors ?? 0 };
+      const info = cellInfo(cell);
       if (category === 'device') {
+        const channel = layer === 'poly' || layer === 'ndiff' || layer === 'pdiff' ? channelAt(cell, target.point ?? new THREE.Vector3(s.x, s.y, s.z)) : -1;
+        const device = channel >= 0 ? deviceOf(cell, channel) : null;
+        if (device) return { key: target.key, ...deviceSelection(cell, device, size, location) };
         const gate = layer === 'poly';
-        return { key: target.key, kind: 'cell', title: gate ? 'Polysilicon gate' : text.title, layer: `Inside ${d.title} (${d.what})`, role: text.role, material: text.material, size: sizeOf(s.sx, s.sy, s.sz), location, notes: gate ? ['Where the poly crosses diffusion it is a transistor gate; elsewhere it links gates'] : [], explain: text.explain, net: null, cell: info };
+        return { key: target.key, ...selectionOf({ kind: 'cell', title: gate ? 'Polysilicon gate' : text.title, layer: `Inside ${d.title} (${d.what})`, role: text.role, material: text.material, size, location, notes: gate ? ['Where the poly crosses diffusion it is a transistor gate; elsewhere it links gates'] : [], explain: text.explain, cell: info }) };
       }
-      return { key: target.key, kind: 'cell', title: d.title, layer: CELL_CLASS_TEXT[m.cls].title, role: `${d.what.charAt(0).toUpperCase()}${d.what.slice(1)}${d.drive ? `, ${d.drive}` : ''}`, material: 'SkyWater sky130_fd_sc_hd standard cell', size: info.size, location, notes: cell.inst < 0 ? ['Filler: rebuilt from the row gap it fills (checked against the DEF)'] : [], explain: CELL_EXPLAIN, net: null, cell: info };
+      return { key: target.key, ...selectionOf({ kind: 'cell', title: d.title, layer: CELL_CLASS_TEXT[m.cls].title, role: `${capital(d.what)}${d.drive ? `, ${d.drive}` : ''}`, material: 'SkyWater sky130_fd_sc_hd standard cell', size: info.size, location, notes: cell.inst < 0 ? ['Filler: rebuilt from the row gap it fills (checked against the DEF)'] : [], explain: CELL_EXPLAIN, cell: info }) };
     }
     // A conductor: its net.
     const net = s.ref;
     const kind = netKind(net);
     const info: LayoutNet = { id: net, name: netNameNow(net), kind, length: null, vias: null, layers: [], tiles: 0, pins: kind === 'vdd' || kind === 'vss' ? [] : null, note: kind === 'vdd' || kind === 'vss' ? 'The supply reaches every cell: met5 and met4 straps, a via stack at every strap-rail crossing, and a met1 rail along every row.' : null, pieces: 0 };
-    return { key: target.key, kind: 'net', title: titleOf(s.what, net), layer: text.title, role: category === 'rail' ? 'Carries the supply along the row boundary to every cell in the two rows it borders' : category === 'strap' ? 'Part of the tile\'s power grid' : category === 'pin' ? 'A port of the tile: where a signal enters or leaves the macro' : text.role, material: text.material, size: sizeOf(s.sx, s.sy, s.sz), location, notes: [], explain: text.explain, net: info, cell: null };
+    return { key: target.key, ...selectionOf({ kind: 'net', title: titleOf(s.what, net), layer: text.title, role: category === 'rail' ? 'Carries the supply along the row boundary to every cell in the two rows it borders' : category === 'strap' ? 'Part of the tile\'s power grid' : category === 'pin' ? 'A port of the tile: where a signal enters or leaves the macro' : text.role, material: text.material, size, location, explain: text.explain, net: info }) };
   }
 
   /** Select a target; the net or cell details fill in as their data arrives. */
   function selectTarget(target: Target | null) {
     selected = target;
+    if (overviewUniforms) overviewUniforms.uFocus.value = target?.kind === 'region' ? target.unit : -1;
     place(selectLine, target);
     if (target && hoverLine.visible) hoverLine.visible = false;
     annotations.setSelected(target?.key ?? null);
@@ -1046,7 +1392,7 @@ uniform float uDetail;
   // --------------------------------------------------------------- labels
   const annotations = createAnnotations(host);
   let labelMode: LabelMode = 'all';
-  type Entry = { priority: number; title: string; detail: string; key: boolean; tone: Anchor['tone']; candidates: Array<{ point: THREE.Vector3; target: Target; check: (() => boolean) | null }> };
+  type Entry = { priority: number; title: string; detail: string; key: boolean; tone: Anchor['tone']; accent?: string; candidates: Array<{ point: THREE.Vector3; target: Target; check: (() => boolean) | null }> };
   const LABEL_PARTS: Record<LayoutStopId, Array<[string, LayerId | null]>> = {
     tile: [['strap', 'met5'], ['strap', 'met4']],
     region: [['wire', 'met4'], ['wire', 'met3'], ['wire', 'met2'], ['cut', 'via3'], ['strap', 'met4'], ['rail', 'met1'], ['footprint', null]],
@@ -1071,12 +1417,85 @@ uniform float uDetail;
     if (!manifest || !frame) return [];
     const f = frame;
     const mf = manifest;
-    // RTL register regions from above, at the tile and region stops.
-    if ((stop.id === 'tile' || stop.id === 'region') && !sectionOn && camera.position.y > f.z.met5[1]) {
-      for (const g of mf.groups) {
-        const point = new THREE.Vector3(sceneX(f, g.centroid[0]), f.z.met5[1], sceneZ(f, g.centroid[1]));
-        entries.push({ priority: stop.id === 'tile' ? 3 : 2.4, title: g.label, detail: g.detail, key: true, tone: 'region', candidates: [{ point, target: { kind: 'region', key: `region/${g.id}`, group: g }, check: null }] });
+    const above = !sectionOn && camera.position.y > f.z.met5[1];
+    const far = stop.id === 'tile' || stop.id === 'region';
+    // The 16 dot units from above, labelled where their logic sits, in their colour on the map.
+    if (far && above) {
+      mf.groups.forEach((g, unit) => {
+        const centre = unitCentre(unit);
+        if (!centre) return;
+        const point = new THREE.Vector3(sceneX(f, centre[0]), f.z.met5[1], sceneZ(f, centre[1]));
+        const logic = unitLogic(unit);
+        entries.push({ priority: stop.id === 'tile' ? 3 : 2.4, title: g.label, detail: logic ? `${num(logic)} logic cells and ${num(g.count)} flip-flops` : g.detail, key: true, tone: 'region', accent: overlays.units ? unitColor(unit) : undefined, candidates: [{ point, target: { kind: 'region', key: `region/${g.id}`, group: g, unit }, check: null }] });
+      });
+    }
+    // The I/O pins along each edge, at the tile stop.
+    if (stop.id === 'tile' && above && mf.ioBuses) {
+      for (const side of ['north', 'south', 'east', 'west'] as const) {
+        const buses = mf.ioBuses.filter((bus) => bus.side === side);
+        if (buses.length === 0) continue;
+        const pins = buses.reduce((sum, bus) => sum + bus.count, 0);
+        const from = Math.min(...buses.map((bus) => bus.from));
+        const to = Math.max(...buses.map((bus) => bus.to));
+        const mid = (from + to) / 2;
+        const [x0, y0, x1, y1] = mf.die;
+        const inset = 26000;
+        const [px, py] = side === 'west' ? [x0 + inset, mid] : side === 'east' ? [x1 - inset, mid] : side === 'south' ? [mid, y0 + inset] : [mid, y1 - inset];
+        const point = new THREE.Vector3(sceneX(f, px), overlayY(), sceneZ(f, py));
+        const edge = capital(side);
+        const selection = selectionOf({
+          kind: 'region',
+          title: `${edge} edge I/O pins`,
+          layer: `The tile's ports on its ${side} edge`,
+          role: 'Where the command buses enter the tile and the response leaves it: each pin a small rectangle of metal on the die edge, where the wiring of the chip around the tile connects',
+          material: [...new Set(buses.flatMap((bus) => bus.layers))].join(' and '),
+          size: `${num(pins)} pins over ${fmtUm(um(to - from))} µm`,
+          location: ['AIMEM-A1 tensor tile', `${edge} edge`],
+          notes: buses.map((bus) => `${bus.name}: ${num(bus.count)} ${bus.dir === 'output' ? 'outputs' : 'inputs'} on ${bus.layers.join(', ')}, ${fmtUm(um(bus.from))}–${fmtUm(um(bus.to))} µm along the edge`),
+        });
+        entries.push({ priority: 2.8, title: `${edge} I/O · ${num(pins)} pins`, detail: buses.map((bus) => `${bus.name} ${bus.count} ${bus.dir === 'output' ? 'out' : 'in'}`).join(' · '), key: true, tone: 'package', candidates: [{ point, target: { kind: 'info', key: `io/${side}`, selection, point, box: null, zoom: 0.5 }, check: null }] });
       }
+    }
+    // Each nearby unit's three stages at the region stop, where their cells' median sits.
+    if (stop.id === 'region' && above && mf.roles) {
+      for (const item of mf.roles.stages) {
+        const text = STAGE_TEXT[item.stage as 1 | 2 | 3];
+        if (!text) continue;
+        const point = new THREE.Vector3(sceneX(f, item.x), f.z.met5[1], sceneZ(f, item.y));
+        if (Math.hypot(point.x - orbit.x, point.z - orbit.z) > distance * 1.3) continue;
+        const group = mf.groups[item.unit];
+        const selection = selectionOf({
+          kind: 'region',
+          title: `${text.title} of dot unit ${unitLabel(item.unit)}`,
+          layer: `Logic feeding ${text.into} (${text.does})`,
+          role: `${num(item.count)} cells. The label marks their median position; the stage spreads around it among the unit's other logic, and the tile's wiring runs between them`,
+          material: 'SkyWater sky130_fd_sc_hd standard cells',
+          size: `${num(item.count)} cells`,
+          location: ['AIMEM-A1 tensor tile', `Dot unit ${unitLabel(item.unit)}`],
+          unit: group ? { index: item.unit, color: unitColor(item.unit), cells: unitLogic(item.unit), registers: group.count } : null,
+        });
+        entries.push({ priority: 2.3, title: `${unitLabel(item.unit)} · ${text.title}`, detail: `${text.does} · ${num(item.count)} cells`, key: false, tone: 'region', accent: overlays.units ? unitColor(item.unit) : undefined, candidates: [{ point, target: { kind: 'info', key: `stage/${item.unit}/${item.stage}`, selection, point, box: null, zoom: 0.2 }, check: null }] });
+      }
+    }
+    // The clock tree's root while it is drawn.
+    const clockData = clockTreeData;
+    if (clockTree?.visible && clockData && mf.clockTree) {
+      const point = new THREE.Vector3(sceneX(f, clockData.root[0]), overlayY(), sceneZ(f, clockData.root[1]));
+      entries.push({ priority: 2.9, title: 'Clock input · clk', detail: `${num(mf.clockTree.nodes)} drivers in ${mf.clockTree.levels} levels to ${num(mf.clockTree.flops)} flip-flops`, key: true, tone: 'part', candidates: [{ point, target: { kind: 'info', key: 'clock/root', selection: clockSelection(), point, box: null, zoom: 0.5 }, check: null }] });
+    }
+    // Both ends of the slowest path while it is drawn.
+    const path = pathData;
+    if (overlays.path && pathGroup?.visible && path && mf.criticalPath && path.data.length > 1) {
+      const cp = mf.criticalPath;
+      const ends: Array<[string, string, LayoutPath['data'][number]]> = [
+        [`Slowest path starts · ${cp.startpoint}`, `launched by the clock at ${path.data[0].time.toFixed(2)} ns`, path.data[0]],
+        [`Slowest path ends · slack ${signedNs(cp.slack)}`, `${cp.endpoint}: arrives ${cp.arrival.toFixed(2)} ns, needed by ${cp.required.toFixed(2)} ns`, path.data[path.data.length - 1]],
+      ];
+      const selection = pathSelection();
+      ends.forEach(([title, detail, step], index) => {
+        const point = new THREE.Vector3(sceneX(f, step.x), overlayY() + 0.0012, sceneZ(f, step.y));
+        entries.push({ priority: 3.2, title, detail, key: true, tone: 'part', candidates: [{ point, target: { kind: 'info', key: `path/${index}`, selection, point, box: null, zoom: 0.3 }, check: null }] });
+      });
     }
     yield;
     // One visible example of each kind of structure this stop shows.
@@ -1098,7 +1517,7 @@ uniform float uDetail;
           const layer = whatLayer(what);
           const order = wanted.findIndex(([c, l]) => c === category && (l === null || l === layer));
           if (order < 0) continue;
-          if (category === 'footprint' && !outlineVisible()) continue;
+          if (category === 'footprint' && record.level === 'tile' && !outlineVisible()) continue;
           const o = k * FLOATS_PER_INSTANCE;
           const cx = d[o] + ox;
           const cz = d[o + 2] + oz;
@@ -1150,6 +1569,7 @@ uniform float uDetail;
         const name = instNameNow(cell.inst);
         if (name === null) void instChunk(cell.inst);
         const d = describeCell(m.name);
+        const { unit, role } = roleOf(cell.inst);
         const point = new THREE.Vector3(sceneX(f, cell.x + m.w / 2), stop.id === 'cells' ? f.z.li1[1] : f.z.poly[1], sceneZ(f, cell.y + m.h / 2));
         // Only cells the view still shows: not cut away by the section or the delayering crater.
         if (sectionPlane.distanceToPoint(point) < 0 || craterCleared(point.x, point.y, point.z)) continue;
@@ -1159,7 +1579,39 @@ uniform float uDetail;
         const index = batch ? batch.ref.indexOf(slot) : -1;
         if (index < 0) continue;
         const key = `${record.id}/${batchIndex}/${index}`;
-        entries.push({ priority: 2.6, title: name ? `${name} · ${d.title}` : d.title, detail: d.what, key: true, tone: 'region', candidates: [{ point, target: { kind: 'shape', key, record, batch: batchIndex, index }, check: () => seen(point, key, distance * 0.05) }] });
+        const detail = [d.what, unit !== null ? (unit < 16 ? `dot unit ${unitLabel(unit)}` : 'shared by several units') : null, role].filter(Boolean).join(' · ');
+        entries.push({ priority: 2.6, title: name ? `${name} · ${d.title}` : d.title, detail, key: true, tone: 'region', accent: unit !== null && unit < 16 && overlays.units ? unitColor(unit) : undefined, candidates: [{ point, target: { kind: 'shape', key, record, batch: batchIndex, index }, check: () => seen(point, key, distance * 0.05) }] });
+      }
+    }
+    // The transistors nearest the target: type, gate pin, and size, from each cell's channels.
+    const lib = library;
+    if (stop.id === 'devices' && lib) {
+      const near: Array<{ d: number; record: Resident; slot: number; channel: number }> = [];
+      for (const record of resident.values()) {
+        if (record.level !== 'cells' || !levelVisible(record)) continue;
+        record.chunk.cells.forEach((cell, slot) => {
+          const m = mf.macros[cell.macro];
+          (lib.macros[cell.macro].channels ?? []).forEach((c, channel) => {
+            const [x0, y0, x1, y1] = placeRect(cell.orient, m.w, m.h, c[1], c[2], c[3], c[4]);
+            const dd = Math.hypot(sceneX(f, cell.x + (x0 + x1) / 2) - tx, sceneZ(f, cell.y + (y0 + y1) / 2) - tz);
+            if (dd < distance * 0.9) near.push({ d: dd, record, slot, channel });
+          });
+        });
+        yield;
+      }
+      near.sort((a, b) => a.d - b.d);
+      for (const { record, slot, channel } of near.slice(0, 10)) {
+        const cell = record.chunk.cells[slot];
+        const device = deviceOf(cell, channel);
+        const box = channelBox(cell, channel);
+        if (!device || !box) continue;
+        const point = new THREE.Vector3(box[0], f.z.poly[1], box[2]);
+        if (sectionPlane.distanceToPoint(point) < 0) continue;
+        const d = describeCell(mf.macros[cell.macro].name);
+        const name = instNameNow(cell.inst);
+        const key = `device/${record.id}/${slot}/${channel}`;
+        const selection = deviceSelection(cell, device, `Channel ${device.w.toFixed(2)} µm wide × ${device.l.toFixed(2)} µm long`, locationAt(box[0], box[2]));
+        entries.push({ priority: 2.7, title: `${device.type} · ${device.gate ?? 'internal'}`, detail: `W ${device.w.toFixed(2)} × L ${device.l.toFixed(2)} µm in ${name ?? d.title} (${d.title})`, key: false, tone: 'part', candidates: [{ point, target: { kind: 'info', key, selection, point, box, zoom: 0.004 }, check: () => seen(point, key, distance * 0.05) }] });
       }
     }
     entries.sort((a, b) => b.priority - a.priority);
@@ -1180,7 +1632,7 @@ uniform float uDetail;
         }
         accepted.push(box);
         const target = candidate.target;
-        anchors.push({ id: target.key, title: entry.title, detail: entry.detail, world: candidate.point, priority: entry.priority, key: entry.key, tone: entry.tone, targetKey: target.key, select: () => selectTarget(target) });
+        anchors.push({ id: target.key, title: entry.title, detail: entry.detail, world: candidate.point, priority: entry.priority, key: entry.key, tone: entry.tone, accent: entry.accent, targetKey: target.key, select: () => selectTarget(target) });
         break;
       }
     }
@@ -1340,7 +1792,8 @@ uniform float uDetail;
   const hoverTitle = (target: Target | null): [string, string] | null => {
     if (!target || !manifest) return null;
     if (target.kind === 'surface') return ['Silicon substrate', 'Coverage of the real layout per 2.5 µm'];
-    if (target.kind === 'region') return [target.group.label, target.group.detail];
+    if (target.kind === 'region') return [target.group.label, `${num(unitLogic(target.unit))} logic cells · ${num(target.group.count)} flip-flops`];
+    if (target.kind === 'info') return [target.selection.title, target.selection.layer];
     const s = shapeOf(target);
     const category = whatCategory(s.what);
     if (category === 'footprint' || category === 'device') {
@@ -1349,7 +1802,15 @@ uniform float uDetail;
       const d = describeCell(manifest.macros[cell.macro].name);
       const name = instNameNow(cell.inst);
       if (name === null && cell.inst >= 0) void instChunk(cell.inst);
-      return category === 'device' ? [LAYER_TEXT[whatLayer(s.what)].title, `in ${name ?? d.title} (${d.what})`] : [name ? `${name}` : d.title, `${d.title} · ${d.what}`];
+      if (category === 'device') {
+        const layer = whatLayer(s.what);
+        const channel = (layer === 'poly' || layer === 'ndiff' || layer === 'pdiff') && target.point ? channelAt(cell, target.point) : -1;
+        const device = channel >= 0 ? deviceOf(cell, channel) : null;
+        if (device) return [`${device.type} transistor · gate ${device.gate ?? 'internal'}`, `W ${device.w.toFixed(2)} × L ${device.l.toFixed(2)} µm in ${name ?? d.title} (${d.title})`];
+        return [LAYER_TEXT[layer].title, `in ${name ?? d.title} (${d.what})`];
+      }
+      const { unit, role } = roleOf(cell.inst);
+      return [name ?? d.title, [d.title, role ?? d.what, unit !== null && unit < 16 ? unitLabel(unit) : null].filter(Boolean).join(' · ')];
     }
     const name = netNameNow(s.ref);
     if (name === null) void netChunk(s.ref);
@@ -1485,46 +1946,54 @@ uniform float uDetail;
   let pending = 0;
   let buildQueue: Array<{ id: string; level: Resident['level']; key: string; rank: number }> = [];
   function stream(now: number, distance: number) {
-    if (!manifest || !ctx) return;
-    const tileFade = fade(TILES, distance);
-    const cellFade = library ? fade(CELLS, distance) : 0;
+    if (!manifest || !ctx || !frame) return;
+    const f = frame;
+    const m = manifest;
+    const { coarse, tile, cells: inside } = LAYOUT_ZOOM.lod;
+    const coarseFade = lodFade(coarse, distance);
+    const tileFade = lodFade(tile, distance);
+    const cellFade = library ? lodFade(inside, distance) : 0;
+    levelUniforms.coarse.uFade.value = coarseFade;
     levelUniforms.tile.uFade.value = tileFade;
     levelUniforms.cells.uFade.value = cellFade;
     levelUniforms.footprint.uFade.value = tileFade * (1 - cellFade);
+    levelGroups.coarse.visible = coarseFade > 0;
     levelGroups.tile.visible = tileFade > 0;
     levelGroups.cells.visible = cellFade > 0;
     const globalVias = resident.get('global-vias');
-    if (globalVias) globalVias.group.visible = distance < GLOBAL_VIAS_WITHIN;
-    if (overviewUniforms) overviewUniforms.uDetail.value = THREE.MathUtils.smoothstep(tileFade, 0.2, 1);
-    const size = manifest.tile.size * MM_PER_NM;
-    const x0 = manifest.die[0];
-    const y0 = manifest.die[1];
-    const wanted: Array<{ id: string; level: Resident['level']; key: string; rank: number }> = [];
-    const addWindow = (half: number, budget: number, level: Resident['level']) => {
-      const tx = defX(frame!, orbit.x);
-      const ty = defY(frame!, orbit.z);
+    if (globalVias) globalVias.group.visible = distance < LAYOUT_ZOOM.lod.globalVias;
+    const size = m.tile.size;
+    const tx = defX(f, orbit.x);
+    const ty = defY(f, orbit.z);
+    const ti = Math.floor((tx - m.die[0]) / size);
+    const tj = Math.floor((ty - m.die[1]) / size);
+    type Want = { id: string; level: Resident['level']; key: string; rank: number };
+    /** Tiles within `half` (mm) of the target, nearest first, at most `budget`. */
+    const windowOf = (half: number, budget: number, level: Resident['level']): Want[] => {
       const r = half / MM_PER_NM;
-      const i0 = Math.max(0, Math.floor((tx - r - x0) / manifest!.tile.size));
-      const i1 = Math.min(manifest!.tile.nx - 1, Math.floor((tx + r - x0) / manifest!.tile.size));
-      const j0 = Math.max(0, Math.floor((ty - r - y0) / manifest!.tile.size));
-      const j1 = Math.min(manifest!.tile.ny - 1, Math.floor((ty + r - y0) / manifest!.tile.size));
-      const list: typeof wanted = [];
+      const i0 = Math.max(0, Math.floor((tx - r - m.die[0]) / size));
+      const i1 = Math.min(m.tile.nx - 1, Math.floor((tx + r - m.die[0]) / size));
+      const j0 = Math.max(0, Math.floor((ty - r - m.die[1]) / size));
+      const j1 = Math.min(m.tile.ny - 1, Math.floor((ty + r - m.die[1]) / size));
+      const list: Want[] = [];
       for (let j = j0; j <= j1; j += 1) for (let i = i0; i <= i1; i += 1) {
-        const k = tileKey(i, j);
-        if (!tileBytes.has(k)) continue;
-        const cx = x0 + (i + 0.5) * manifest!.tile.size;
-        const cy = y0 + (j + 0.5) * manifest!.tile.size;
-        list.push({ id: `${level}:${k}`, level, key: k, rank: Math.hypot(cx - tx, cy - ty) * MM_PER_NM / size });
+        const key = tileKey(i, j);
+        if (!tileBytes.has(key)) continue;
+        list.push({ id: `${level}:${key}`, level, key, rank: Math.hypot(m.die[0] + (i + 0.5) * size - tx, m.die[1] + (j + 0.5) * size - ty) / size });
       }
-      list.sort((a, b) => a.rank - b.rank);
-      wanted.push(...list.slice(0, budget));
+      return list.sort((a, b) => a.rank - b.rank).slice(0, budget);
     };
-    if (tileFade > 0) addWindow(clamp(distance * 0.9, 0.07, 0.36), TILE_BUDGET, 'tile');
-    if (cellFade > 0) addWindow(clamp(distance * 0.8, 0.02, 0.06), CELL_BUDGET, 'cells');
+    // Each tile shows once: every shape where the full level streams, upper routing and outlines in the ring beyond.
+    const full = tileFade > 0 ? windowOf(lodWindow(tile, distance), budgetOf(tile), 'tile') : [];
+    const fullKeys = new Set(full.map((item) => item.key));
+    const ring = coarseFade > 0 ? windowOf(lodWindow(coarse, distance), budgetOf(coarse), 'coarse').filter((item) => !fullKeys.has(item.key)) : [];
+    const cellsWanted = cellFade > 0 ? windowOf(lodWindow(inside, distance), budgetOf(inside), 'cells') : [];
+    const wanted = [...cellsWanted, ...full, ...ring];
+    const priority = (item: Want) => item.rank + (item.level === 'cells' ? 0 : item.level === 'tile' ? 0.5 : 1.5);
     for (const item of wanted) {
       const record = resident.get(item.id);
       if (record) record.lastWanted = now;
-      else void requestBlock(item.key, item.rank + (item.level === 'cells' ? 0 : 0.5));
+      else void requestBlock(item.key, priority(item));
     }
     // Tiles queued for a view that has moved on are dropped (a selection's own requests are kept).
     const keys = new Set(wanted.map((item) => item.key));
@@ -1537,24 +2006,26 @@ uniform float uDetail;
       }
     }
     buildQueue = wanted.filter((item) => !resident.has(item.id));
-    // Build what has arrived, within the frame budget; cell interiors need the tile's routing chunk first.
+    // Build what has arrived, within the frame budget; cell interiors need the tile's cells first.
     const started = performance.now();
     pending = 0;
     for (const item of buildQueue) {
-      const block = blocks.get(item.key) ?? resident.get(`tile:${item.key}`)?.block;
-      if (!block) {
-        pending += 1;
-        continue;
-      }
-      if (performance.now() - started > BUILD_BUDGET_MS) {
+      const block = blocks.get(item.key) ?? resident.get(`tile:${item.key}`)?.block ?? resident.get(`coarse:${item.key}`)?.block;
+      if (!block || performance.now() - started > BUILD_BUDGET_MS) {
         pending += 1;
         continue;
       }
       if (item.level === 'tile') addResident(item.id, 'tile', buildRoutingChunk(ctx, block, item.id, 'tile'), block, now);
+      else if (item.level === 'coarse') addResident(item.id, 'coarse', buildCoarseChunk(ctx, block, item.id), block, now);
       else {
-        const routing = resident.get(`tile:${item.key}`)?.chunk.cells ?? buildRoutingChunk(ctx, block, `tile:${item.key}`, 'tile').cells;
-        addResident(item.id, 'cells', buildCellChunk(ctx, block, item.id, routing), block, now);
+        const cells = resident.get(`tile:${item.key}`)?.chunk.cells ?? buildRoutingChunk(ctx, block, `tile:${item.key}`, 'tile').cells;
+        addResident(item.id, 'cells', buildCellChunk(ctx, block, item.id, cells), block, now);
       }
+    }
+    // A region chunk stands down while its tile's full chunk is showing, so no shape is drawn twice.
+    for (const record of resident.values()) {
+      if (record.level !== 'coarse') continue;
+      record.group.visible = !(tileFade > 0 && resident.has(`tile:${record.key}`));
     }
     for (const record of resident.values()) {
       if (record.level === 'global') continue;
@@ -1567,6 +2038,35 @@ uniform float uDetail;
     for (const record of resident.values()) {
       if (performance.now() - started > BUILD_BUDGET_MS * 1.6) break;
       capsFor(record);
+    }
+    // The density map gives way to bare silicon over the square of tiles that are fully loaded around the target.
+    if (overviewUniforms) {
+      let reach = -1;
+      if (tileFade > 0) {
+        for (let r = 0; r < 12; r += 1) {
+          let whole = true;
+          for (let j = tj - r; j <= tj + r && whole; j += 1) for (let i = ti - r; i <= ti + r; i += 1) {
+            if (Math.max(Math.abs(i - ti), Math.abs(j - tj)) !== r) continue;
+            const key = tileKey(i, j);
+            if (i < 0 || j < 0 || i >= m.tile.nx || j >= m.tile.ny || !tileBytes.has(key)) continue;
+            if (!resident.has(`tile:${key}`)) {
+              whole = false;
+              break;
+            }
+          }
+          if (!whole) break;
+          reach = r;
+        }
+      }
+      if (reach < 0) overviewUniforms.uWindow.value.set(1, 1, -1, -1);
+      else {
+        const x0 = m.die[0] + (ti - reach) * size;
+        const y0 = m.die[1] + (tj - reach) * size;
+        const x1 = m.die[0] + (ti + reach + 1) * size;
+        const y1 = m.die[1] + (tj + reach + 1) * size;
+        overviewUniforms.uWindow.value.set(sceneX(f, x0), sceneZ(f, y1), sceneX(f, x1), sceneZ(f, y0));
+      }
+      overviewUniforms.uDetail.value = tileFade;
     }
   }
 
@@ -1617,6 +2117,178 @@ uniform float uDetail;
     return distance;
   }
 
+  // --------------------------------------------------------------- details
+  function factsDetails(m: LayoutManifest): LayoutDetails {
+    const fa = m.facts;
+    const sections: LayoutDetails['sections'] = [];
+    const tile: Row[] = [{ label: 'Die', value: `${fmtUm(um(m.die[2] - m.die[0]))} × ${fmtUm(um(m.die[3] - m.die[1]))} µm` }];
+    if (fa) tile.push({ label: 'Cell area', value: `${(fa.area.cells / 1e6).toFixed(2)} mm²`, hint: `${(fa.area.utilization * 100).toFixed(1)} % of the ${(fa.area.core / 1e6).toFixed(2)} mm² core` });
+    tile.push(
+      { label: 'Process', value: 'SkyWater SKY130 (130 nm)', hint: 'sky130_fd_sc_hd standard cells; li1 and five aluminium metal layers' },
+      { label: 'Signal wiring', value: `${num(Object.values(m.stats.wire).reduce((a, b) => a + b, 0) / 1000)} mm`, hint: `${num(m.nets.signal)} signal nets, ${num(Object.values(m.stats.vias).reduce((a, b) => a + b, 0))} vias` },
+    );
+    sections.push({ title: 'Tile', rows: tile });
+    if (fa) {
+      sections.push({ title: 'Cells', rows: [...Object.entries(fa.counts.byClass).map(([label, value]) => ({ label, value: num(value) })), { label: 'All placed', value: num(fa.counts.all), hint: `${num(fa.counts.cells)} without the fillers` }] });
+      sections.push({ title: 'Transistors', rows: [
+        { label: 'In the layout', value: num(fa.transistors.gds), hint: 'Every cell\'s poly-over-diffusion channels, from the library layout (GDS)' },
+        { label: 'In the netlist', value: num(fa.transistors.cdl), hint: 'The library\'s own transistor netlist (CDL) for the same cells' },
+        { label: 'Cell types agreeing', value: `${fa.transistors.cellsMatching} of ${fa.transistors.cellTypes}`, hint: 'Same type, width, length, and gate pin, device for device' },
+      ] });
+    }
+    if (m.roles) {
+      const r = m.roles;
+      sections.push({ title: 'Dot units (4 × 4)', rows: [
+        { label: 'Logic per unit', value: `${num(Math.min(...r.perUnit.map((_, unit) => unitLogic(unit))))}–${num(Math.max(...r.perUnit.map((_, unit) => unitLogic(unit))))} cells`, hint: 'Traced back from each unit\'s registers through the netlist' },
+        { label: 'Shared between units', value: num(r.counts.shared) },
+        { label: 'Serving no unit', value: num(r.counts.none), hint: 'Control logic' },
+        { label: 'Flip-flops', value: num(r.counts.registers) },
+        ...r.perUnit.map((cells, unit) => ({ label: `Dot unit ${unitLabel(unit)}`, value: `${num(cells)} cells`, hint: `${num(unitLogic(unit))} logic, ${num(m.groups[unit]?.count ?? 0)} flip-flops`, swatch: unitColor(unit) })),
+      ] });
+    }
+    if (fa) {
+      const t = fa.timing;
+      sections.push({ title: `Timing · ${fa.period} ns clock (${(1000 / fa.period).toFixed(0)} MHz)`, rows: [
+        { label: 'Setup, worst slack', value: signedNs(t.setupWs), hint: `${num(t.setupViolations)} endpoints late, ${num(-t.setupTns)} ns in total` },
+        { label: 'Fastest clock it meets', value: `${(t.fmax / 1e6).toFixed(1)} MHz` },
+        { label: 'Hold, worst slack', value: signedNs(t.holdWs), hint: `${num(t.holdViolations)} violations` },
+        { label: 'Clock skew', value: `${t.skewSetup.toFixed(2)} ns` },
+        { label: 'Slew / load limits exceeded', value: `${num(t.maxSlewViolations)} / ${num(t.maxCapViolations)}` },
+      ] });
+    }
+    if (m.criticalPath) {
+      const cp = m.criticalPath;
+      sections.push({ title: 'Slowest path', rows: [
+        { label: 'From', value: cp.startpoint },
+        { label: 'To', value: cp.endpoint },
+        { label: 'Stage', value: cp.stage },
+        { label: 'Arrives / needed', value: `${cp.arrival.toFixed(2)} / ${cp.required.toFixed(2)} ns` },
+        { label: 'Slack', value: signedNs(cp.slack) },
+        { label: 'Cells on it', value: num(cp.cells), hint: `After ${cp.clockBuffers} clock buffers. Show it with Slowest path.` },
+      ] });
+    }
+    if (m.clockTree) sections.push({ title: 'Clock tree', rows: [
+      { label: 'Drivers', value: num(m.clockTree.nodes), hint: 'Clock buffers and inverters' },
+      { label: 'Levels', value: String(m.clockTree.levels) },
+      { label: 'Flip-flops clocked', value: num(m.clockTree.flops) },
+    ] });
+    if (m.ioBuses) {
+      const byName = new Map<string, { dir: string; count: number; sides: Set<string>; layers: Set<string> }>();
+      for (const bus of m.ioBuses) {
+        const entry = byName.get(bus.name) ?? { dir: bus.dir, count: 0, sides: new Set<string>(), layers: new Set<string>() };
+        entry.count += bus.count;
+        entry.sides.add(bus.side);
+        for (const layer of bus.layers) entry.layers.add(layer);
+        byName.set(bus.name, entry);
+      }
+      sections.push({ title: `I/O · ${num(m.stats.ioPins)} pins`, rows: [...byName.entries()].sort((a, b) => b[1].count - a[1].count).map(([name, entry]) => ({ label: name, value: `${num(entry.count)} ${entry.dir === 'output' ? 'out' : entry.dir === 'input' ? 'in' : entry.dir}`, hint: `${[...entry.sides].join(', ')} edges, on ${[...entry.layers].join(' and ')}` })) });
+    }
+    if (fa) {
+      sections.push({ title: 'Power (OpenROAD estimate)', rows: [
+        { label: 'Total', value: watts(fa.power.total), hint: `At the ${fa.period} ns clock` },
+        { label: 'Switching', value: watts(fa.power.switching) },
+        { label: 'Internal', value: watts(fa.power.internal) },
+        { label: 'Leakage', value: watts(fa.power.leakage) },
+      ] });
+      sections.push({ title: 'Supply (IR) drop', rows: [
+        { label: 'VDD, worst', value: millivolts(fa.ir.vddWorst), hint: `Average ${millivolts(fa.ir.vddAverage)}` },
+        { label: 'VSS, worst', value: millivolts(fa.ir.vssWorst), hint: `Average ${millivolts(fa.ir.vssAverage)}` },
+      ] });
+      const signoff: Row[] = [];
+      if (fa.drc) signoff.push({ label: 'DRC', value: `${num(fa.drc.count)} violations`, hint: fa.drc.source });
+      if (fa.lvs) signoff.push({ label: 'LVS', value: fa.lvs.result, hint: `${num(fa.lvs.devices)} devices, ${num(fa.lvs.nets)} nets · ${fa.lvs.source}` });
+      if (fa.lec) signoff.push({ label: 'Equivalence', value: fa.lec.result, hint: fa.lec.source });
+      if (signoff.length) sections.push({ title: 'Signoff', rows: signoff });
+    }
+    return { stop: 'tile', title: m.title, subtitle: `${m.platform} · run ${m.run}`, sections };
+  }
+  function viewDetails(distance: number): LayoutDetails {
+    const m = manifest!;
+    const half = distance * Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+    const aspect = cssWidth / Math.max(1, cssHeight);
+    const rect = { x0: orbit.x - half * aspect, x1: orbit.x + half * aspect, z0: orbit.z - half, z1: orbit.z + half };
+    const touches = (b: LayoutChunk['bounds']) => b.x1 >= rect.x0 && b.x0 <= rect.x1 && b.z1 >= rect.z0 && b.z0 <= rect.z1;
+    // Each tile once: its full chunk where loaded, else its region chunk.
+    const full = new Map<string, LayoutChunk>();
+    const coarse: LayoutChunk[] = [];
+    for (const record of resident.values()) if (record.level === 'tile' && levelGroups.tile.visible && touches(record.chunk.bounds)) full.set(record.key, record.chunk);
+    for (const record of resident.values()) if (record.level === 'coarse' && levelGroups.coarse.visible && !full.has(record.key) && touches(record.chunk.bounds)) coarse.push(record.chunk);
+    const chunks = [...full.values(), ...coarse];
+    const stats = viewStats(chunks, rect, m, library, roles, m.roles?.kinds ?? []);
+    const sections: LayoutDetails['sections'] = [];
+    // What sits at the target itself, down to its transistors.
+    if (stop.id === 'cells' || stop.id === 'devices') {
+      const here = cellNear(defX(frame!, orbit.x), defY(frame!, orbit.z), true);
+      if (here) {
+        const cell = here.cell;
+        const mm = m.macros[cell.macro];
+        const d = describeCell(mm.name);
+        const name = instNameNow(cell.inst);
+        if (name === null) void instChunk(cell.inst);
+        const { unit, role } = roleOf(cell.inst);
+        const rows: Row[] = [{ label: 'Cell', value: name ?? '…', hint: `${d.title}: ${d.what}` }];
+        if (unit !== null) rows.push({ label: 'Dot unit', value: unit < 16 ? unitLabel(unit) : 'Shared by several', swatch: unit < 16 ? unitColor(unit) : undefined });
+        if (role) rows.push({ label: 'Role', value: role });
+        const channels = library?.macros[cell.macro].channels ?? [];
+        if (channels.length) {
+          const n = channels.filter((c) => c[0] === 0).length;
+          rows.push({ label: 'Transistors', value: `${n} NMOS + ${channels.length - n} PMOS`, hint: 'Checked against the library netlist' });
+          if (stop.id === 'devices') {
+            channels.slice(0, 16).forEach((c, index) => {
+              const device = deviceOf(cell, index);
+              if (device) rows.push({ label: `${device.type} · gate ${device.gate ?? 'internal'}`, value: `W ${device.w.toFixed(2)} × L ${device.l.toFixed(2)} µm` });
+            });
+            if (channels.length > 16) rows.push({ label: `${channels.length - 16} more`, value: '' });
+          }
+        }
+        sections.push({ title: 'At the centre', rows });
+      }
+    }
+    const cellRows: Row[] = [];
+    for (const [cls, label] of [['logic', 'Logic gates'], ['sequential', 'Flip-flops'], ['buffer', 'Buffers'], ['clock', 'Clock-tree cells'], ['diode', 'Antenna diodes']] as const) {
+      if (stats.cells[cls]) cellRows.push({ label, value: num(stats.cells[cls]), swatch: CELL_CLASS_TEXT[cls].swatch });
+    }
+    if (stats.transistors > 0) cellRows.push({ label: 'Transistors', value: num(stats.transistors) });
+    if (cellRows.length) sections.push({ title: 'Cells', rows: cellRows });
+    if (roles) {
+      const ranked = stats.units.slice(0, 16).map((cells, unit) => ({ unit, cells })).filter((item) => item.cells > 0).sort((a, b) => b.cells - a.cells);
+      const rows: Row[] = ranked.slice(0, 6).map(({ unit, cells }) => ({ label: `Dot unit ${unitLabel(unit)}`, value: num(cells), swatch: unitColor(unit) }));
+      if (ranked.length > 6) rows.push({ label: `${ranked.length - 6} more units`, value: num(ranked.slice(6).reduce((sum, item) => sum + item.cells, 0)) });
+      if (stats.units[16]) rows.push({ label: 'Shared between units', value: num(stats.units[16]) });
+      if (stats.units[17]) rows.push({ label: 'Operands, control, and clock', value: num(stats.units[17]) });
+      if (rows.length) sections.push({ title: 'Dot units', rows });
+      const stages: Row[] = [];
+      for (const k of [1, 2, 3] as const) if (stats.stages[k - 1] > 0) stages.push({ label: `${STAGE_TEXT[k].title} · ${STAGE_TEXT[k].does}`, value: num(stats.stages[k - 1]) });
+      if (stages.length) sections.push({ title: 'Pipeline stages (logic cells)', rows: stages });
+      const registers: Row[] = Object.entries(stats.registers).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ label: `${capital(name)}s`, value: num(value) }));
+      if (registers.length) sections.push({ title: 'Registers', rows: registers });
+    } else if (m.roles) sections.push({ title: 'Dot units', rows: [{ label: 'Loading the cell roles…', value: '' }] });
+    const wires: Row[] = ROUTING_LAYERS.filter((layer) => stats.wire[layer]).map((layer) => ({ label: `${layer} wire`, value: `${num(stats.wire[layer])} µm` }));
+    const vias = Object.values(stats.vias).reduce((a, b) => a + b, 0);
+    if (vias) wires.push({ label: 'Vias', value: num(vias), hint: Object.entries(stats.vias).map(([layer, value]) => `${layer} ${num(value)}`).join(' · ') });
+    if (stats.nets) wires.push({ label: 'Signal nets', value: num(stats.nets) });
+    if (coarse.length) wires.push({ label: 'li1–met2 and the vias', value: 'Closer in', hint: 'From here the view draws met3–met5; every shape loads at the Routing stop' });
+    if (wires.length) sections.push({ title: 'Routing', rows: wires });
+    const w = (rect.x1 - rect.x0) * 1000;
+    const h = (rect.z1 - rect.z0) * 1000;
+    return { stop: stop.id, title: 'In view', subtitle: `About ${fmtUm(w)} × ${fmtUm(h)} µm around the centre · ${chunks.length} tile${chunks.length === 1 ? '' : 's'} counted`, sections };
+  }
+  let detailsAt = 0;
+  let detailsInput = '';
+  let detailsSent = '';
+  function emitDetails(now: number, distance: number) {
+    if (!manifest || !frame || now < detailsAt) return;
+    detailsAt = now + 500;
+    const input = stop.id === 'tile' ? `tile|${roles ? 1 : 0}` : `${stop.id}|${orbit.x.toFixed(5)}|${orbit.z.toFixed(5)}|${distance.toFixed(5)}|${resident.size}|${pending}|${roles ? 1 : 0}|${cssWidth}x${cssHeight}`;
+    if (input === detailsInput) return;
+    detailsInput = input;
+    const details = stop.id === 'tile' ? factsDetails(manifest) : viewDetails(distance);
+    const sent = JSON.stringify(details);
+    if (sent === detailsSent) return;
+    detailsSent = sent;
+    callbacks.onDetails(details);
+  }
+
   // ----------------------------------------------------------------- loop
   const startTime = performance.now();
   let last = startTime;
@@ -1648,6 +2320,7 @@ uniform float uDetail;
     const distance = constrain(dt);
     updateSection(distance);
     stream(now, distance);
+    updateOverlays(distance);
     renderer.info.reset();
     post.composer.render(dt);
     annotate(now, distance);
@@ -1679,6 +2352,7 @@ uniform float uDetail;
       }
       const mmPerPx = (2 * distance * Math.tan(THREE.MathUtils.degToRad(FOV / 2))) / cssHeight;
       const bar = scaleBar(mmPerPx, 110);
+      emitDetails(now, distance);
       callbacks.onHud({ stop, location: locationAt(orbit.x, orbit.z), scale: { label: bar.label, px: bar.px }, distance, fps: 1000 / Math.max(1, frameEma), frameMs: frameEma, drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles, instances, chunks, pending: pending + fetchQueue.length + inFlight, bytes: bytesLoaded, dpr, gpu: gpu.name, software: gpu.software, view });
     }
   };
@@ -1704,19 +2378,21 @@ uniform float uDetail;
     callbacks.onManifest(m);
     const f = frame;
     const hx = ((m.die[2] - m.die[0]) * MM_PER_NM) / 2;
+    const below = Object.fromEntries(LAYOUT_ZOOM.stops.map((item) => [item.id, item.below])) as Record<LayoutStopId, number>;
     stops = [
-      { id: 'tile', label: 'A1 tile', layer: 'The met5 and met4 power grid over the placed cells', below: Infinity, targetY: f.z.met5[1], floor: null },
-      { id: 'region', label: 'Region', layer: 'Signal routing on met1–met4 under the power grid', below: 1.1, targetY: f.z.met4[1], floor: null },
-      { id: 'routing', label: 'Routing', layer: 'met1–met3 routing, the power straps delayered', below: 0.12, targetY: f.z.met2[1], floor: f.z.met3[1] + 0.00002 },
-      { id: 'cells', label: 'Standard cells', layer: 'li1 and met1 inside the cells, upper metal delayered', below: 0.03, targetY: f.z.li1[1], floor: f.z.met1[1] + 0.00001 },
-      { id: 'devices', label: 'Transistors', layer: 'Diffusion, poly gates, and contacts (metal and li1 delayered)', below: 0.009, targetY: f.z.poly[1], floor: f.z.li1[0] - 0.0000005 },
+      { id: 'tile', label: 'A1 tile', layer: 'The 16 dot units, the I/O pins, and the met5/met4 power grid', below: below.tile, targetY: f.z.met5[1], floor: null },
+      { id: 'region', label: 'Region', layer: 'met3–met5 signal routing over the placed cells', below: below.region, targetY: f.z.met4[1], floor: null },
+      { id: 'routing', label: 'Routing', layer: 'Every wire and via on met1–met3, the power straps delayered', below: below.routing, targetY: f.z.met2[1], floor: f.z.met3[1] + 0.00002 },
+      { id: 'cells', label: 'Standard cells', layer: 'li1 and met1 inside the cells, upper metal delayered', below: below.cells, targetY: f.z.li1[1], floor: f.z.met1[1] + 0.00001 },
+      { id: 'devices', label: 'Transistors', layer: 'Diffusion, poly gates, and contacts (metal and li1 delayered)', below: below.devices, targetY: f.z.poly[1], floor: f.z.li1[0] - 0.0000005 },
     ];
     const at = (p: { x: number; y: number }) => ({ x: sceneX(f, p.x), z: sceneZ(f, p.y) });
+    const ladder = LAYOUT_ZOOM.presets;
     presets.set('tile', { x: 0, z: 0, distance: hx * 3.4, polar: 0.62, azimuth: 0.4 });
-    presets.set('region', { ...at(m.heroes.region), distance: 0.34, polar: 0.78, azimuth: 0.55 });
-    presets.set('routing', { ...at(m.heroes.routing), distance: 0.07, polar: 0.8, azimuth: 0.6 });
-    presets.set('cells', { ...at(m.heroes.cells), distance: 0.02, polar: 0.82, azimuth: 0.7 });
-    presets.set('devices', { ...at(m.heroes.devices), distance: 0.0065, polar: 0.9, azimuth: 0.78 });
+    presets.set('region', { ...at(m.heroes.region), distance: ladder.region, polar: 0.78, azimuth: 0.55 });
+    presets.set('routing', { ...at(m.heroes.routing), distance: ladder.routing, polar: 0.8, azimuth: 0.6 });
+    presets.set('cells', { ...at(m.heroes.cells), distance: ladder.cells, polar: 0.82, azimuth: 0.7 });
+    presets.set('devices', { ...at(m.heroes.devices), distance: ladder.devices, polar: 0.9, azimuth: 0.78 });
     const first = presets.get('tile')!;
     orbit.set(first.x, f.z.met5[1], first.z);
     camera.position.copy(orbit).add(new THREE.Vector3().setFromSphericalCoords(first.distance, first.polar, first.azimuth));
@@ -1729,15 +2405,29 @@ uniform float uDetail;
     library = JSON.parse(new TextDecoder().decode(libBytes)) as LayoutLibrary;
     const globalBlock = decodeBlock(globalBytes);
     ctx = { manifest: m, frame: f, library, clockNets: new Set(m.nets.clockIds), straps: strapsOf(globalBlock) };
+    // Which unit and stage each cell serves: optional, and not needed for the first frame.
+    if (m.roles) {
+      void loadBytes(m.roles.file).then((bytes) => {
+        if (disposed) return;
+        roles = decodeRoles(bytes);
+        planAt = 0;
+      }).catch(() => undefined);
+    }
     await nextTask();
     if (disposed) return;
     addResident('global', 'global', buildRoutingChunk(ctx, globalBlock, 'global', 'global', 'rects'), globalBlock, performance.now());
     addResident('global-vias', 'global', buildRoutingChunk(ctx, globalBlock, 'global-vias', 'global', 'vias'), globalBlock, performance.now());
     const loader = new THREE.TextureLoader();
-    const [metal, cells] = await Promise.all([loader.loadAsync(`${base}${m.overview.files.metal}`), loader.loadAsync(`${base}${m.overview.files.cells}`)]);
+    const unitsFile = m.unitsOverview?.file;
+    const [metal, cells, units] = await Promise.all([
+      loader.loadAsync(`${base}${m.overview.files.metal}`),
+      loader.loadAsync(`${base}${m.overview.files.cells}`),
+      unitsFile ? loader.loadAsync(`${base}${unitsFile}`).catch(() => null) : Promise.resolve(null),
+    ]);
     if (disposed) {
       metal.dispose();
       cells.dispose();
+      units?.dispose();
       return;
     }
     for (const texture of [metal, cells]) {
@@ -1745,7 +2435,15 @@ uniform float uDetail;
       texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
       texture.generateMipmaps = true;
     }
-    buildSubstrate(metal, cells);
+    if (units) {
+      // One index per pixel: read back exactly, never blended between units.
+      units.colorSpace = THREE.NoColorSpace;
+      units.magFilter = THREE.NearestFilter;
+      units.minFilter = THREE.NearestFilter;
+      units.generateMipmaps = false;
+    }
+    buildSubstrate(metal, cells, units);
+    buildIoBars();
     await nextTask();
     if (disposed) return;
     post = createPost();
@@ -1792,6 +2490,14 @@ uniform float uDetail;
     setFlows(flows) {
       shared.uGlowGain.value = flows.data ? 1 : 0;
       shared.uFlowGain.value.set(flows.data ? 1 : 0, flows.power ? 1 : 0, flows.power ? 1 : 0, flows.clock ? 1 : 0);
+      // The clock flow also draws the clock tree from afar.
+      clockShown = flows.clock;
+      planAt = 0;
+    },
+    setOverlays(next) {
+      overlays = { ...next };
+      planAt = 0;
+      detailsInput = '';
     },
     setNetShown(on) {
       netShown = on;
@@ -1843,8 +2549,10 @@ uniform float uDetail;
         const s = shapeOf(target);
         flyTo({ x: s.x, z: s.z, y: s.y, distance: clamp(Math.max(s.sx, s.sz, s.sy) * 3, MIN_DISTANCE * 3, 6), polar: spherical.phi, azimuth: spherical.theta });
       } else if (target.kind === 'region') {
-        const [x0, y0, x1, y1] = target.group.box;
-        flyTo({ x: (sceneX(frame, x0) + sceneX(frame, x1)) / 2, z: (sceneZ(frame, y0) + sceneZ(frame, y1)) / 2, distance: Math.max(x1 - x0, y1 - y0) * MM_PER_NM * 1.6, polar: spherical.phi, azimuth: spherical.theta });
+        const centre = unitCentre(target.unit);
+        if (centre) flyTo({ x: sceneX(frame, centre[0]), z: sceneZ(frame, centre[1]), distance: LAYOUT_ZOOM.presets.region * 1.4, polar: spherical.phi, azimuth: spherical.theta });
+      } else if (target.kind === 'info') {
+        flyTo({ x: target.point.x, z: target.point.z, y: target.point.y, distance: target.zoom, polar: spherical.phi, azimuth: spherical.theta });
       } else flyTo({ x: target.point.x, z: target.point.z, distance: camera.position.distanceTo(orbit) * 0.3, polar: spherical.phi, azimuth: spherical.theta });
     },
     dispose() {

@@ -53,7 +53,15 @@ export type LayoutChunk = {
   cells: ChunkCell[];
 };
 
-export type LibCell = { geom: Array<[number, number, number, number, number]>; pins: number[][]; transistors: number };
+export type LibCell = {
+  geom: Array<[number, number, number, number, number]>;
+  pins: number[][];
+  transistors: number;
+  /** Each transistor's channel (poly over diffusion), cell-local DBU: type (0 NMOS, 1 PMOS), x0, y0, x1, y1, width and length (nm), gate pin (-1: internal). */
+  channels?: Array<[number, number, number, number, number, number, number, number]>;
+  /** The library netlist's devices: type (0 NMOS, 1 PMOS), width and length (nm), gate, drain, source nets. */
+  devices?: Array<[number, number, number, string, string, string]>;
+};
 export type LayoutLibrary = { macros: LibCell[] };
 
 /** Where the tile sits: DEF → scene. */
@@ -415,3 +423,122 @@ export function buildCellChunk(ctx: SceneContext, block: LayoutBlock, id: string
 }
 
 export { FLOATS_PER_INSTANCE, NO_NET };
+
+// ---------------------------------------------------------------------------
+// The region view: upper routing and cell outlines only
+// ---------------------------------------------------------------------------
+
+const COARSE_LAYERS = new Set<number>([LAYER.met3, LAYER.met4, LAYER.met5]);
+
+/**
+ * A tile as the region stop draws it, from far enough that met1, met2, and
+ * the vias are sub-pixel: its met3–met5 signal wiring and the outline of
+ * every stored (non-filler) cell, coloured by kind. Built from the same block
+ * as the full tile, so the two never differ where they overlap.
+ */
+export function buildCoarseChunk(ctx: SceneContext, block: LayoutBlock, id: string): LayoutChunk {
+  const { manifest, frame } = ctx;
+  const size = manifest.tile.size;
+  const ox = manifest.die[0] + block.ix * size;
+  const oy = manifest.die[1] + block.iy * size;
+  const origin: [number, number, number] = [sceneX(frame, ox + size / 2), 0, sceneZ(frame, oy + size / 2)];
+  const builder = new LayoutBuilder(origin);
+  const bounds = { x0: sceneX(frame, ox), z0: sceneZ(frame, oy + size), x1: sceneX(frame, ox + size), z1: sceneZ(frame, oy) };
+  const r = block.rects;
+  for (let k = 0; k < r.kind.length; k += 1) {
+    const layer = kindLayer(r.kind[k]);
+    const purpose = kindPurpose(r.kind[k]);
+    if (!COARSE_LAYERS.has(layer) || r.net[k] >= manifest.nets.vdd || (purpose !== PURPOSE.wire && purpose !== PURPOSE.patch)) continue;
+    const id = LAYER_IDS[layer];
+    const [z0, z1] = frame.z[id];
+    const horizontal = r.x1[k] - r.x0[k] >= r.y1[k] - r.y0[k];
+    builder.box('metal', sceneX(frame, r.x0[k]), sceneX(frame, r.x1[k]), z0, z1, sceneZ(frame, r.y1[k]), sceneZ(frame, r.y0[k]), { what: packWhat(layer, purpose === PURPOSE.wire ? CATEGORY.wire : CATEGORY.patch), ref: r.net[k], glow: 0, flow: 0, phase: 0, axis: horizontal ? 'x' : 'z', start: 0, lift: true });
+  }
+  const cells: ChunkCell[] = [];
+  const inset = 25;
+  const top = frame.z.ndiff[0] * 0.5;
+  for (let c = 0; c < block.cells.macro.length; c += 1) {
+    const cell = { macro: block.cells.macro[c], x: block.cells.x[c], y: block.cells.y[c], orient: block.cells.orient[c], inst: block.firstInst + c };
+    const m = manifest.macros[cell.macro];
+    if (m.cls === 'tap') continue;
+    const slot = cells.length;
+    cells.push(cell);
+    builder.box(MATERIAL_OF_CLASS[m.cls], sceneX(frame, cell.x + inset), sceneX(frame, cell.x + m.w - inset), 0, top, sceneZ(frame, cell.y + m.h - inset), sceneZ(frame, cell.y + inset), { what: packWhat(LAYER.nwell, CATEGORY.footprint), ref: slot, glow: 0, flow: 0, phase: 0, axis: 'x', start: 0, lift: false });
+  }
+  return builder.finish(id, 'tile', block.ix, block.iy, bounds, cells);
+}
+
+// ---------------------------------------------------------------------------
+// Roles of the stored cells (dot unit and pipeline stage)
+// ---------------------------------------------------------------------------
+
+export type CellRoles = { unit: Uint8Array; kind: Uint8Array };
+
+/** The cells-meta file: units, then kinds, one byte each per stored instance. */
+export function decodeRoles(bytes: Uint8Array): CellRoles {
+  const n = bytes.length / 2;
+  return { unit: bytes.subarray(0, n), kind: bytes.subarray(n) };
+}
+
+export const unitLabel = (unit: number) => `D[${unit >> 2}][${unit & 3}]`;
+
+// ---------------------------------------------------------------------------
+// What is in view
+// ---------------------------------------------------------------------------
+
+export type ViewStats = {
+  cells: Record<string, number>;
+  /** Stored cells per dot unit (16), then shared, then none. */
+  units: number[];
+  /** Logic cells per stage (1, 2, 3). */
+  stages: [number, number, number];
+  registers: Record<string, number>;
+  transistors: number;
+  nets: number;
+  /** Wire length per routing layer (µm) and vias per cut layer. */
+  wire: Record<string, number>;
+  vias: Record<string, number>;
+};
+
+/**
+ * Counts over the chunks' cells and shapes whose centres fall inside `rect`
+ * (scene millimetres). Chunks are counted once per tile: pass the full tile
+ * where it is loaded, the region chunk elsewhere.
+ */
+export function viewStats(chunks: LayoutChunk[], rect: { x0: number; z0: number; x1: number; z1: number }, manifest: LayoutManifest, library: LayoutLibrary | null, roles: CellRoles | null, roleKinds: readonly string[]): ViewStats {
+  const out: ViewStats = { cells: {}, units: Array.from({ length: 18 }, () => 0), stages: [0, 0, 0], registers: {}, transistors: 0, nets: 0, wire: {}, vias: {} };
+  const frame = frameOf(manifest);
+  const inside = (x: number, z: number) => x >= rect.x0 && x <= rect.x1 && z >= rect.z0 && z <= rect.z1;
+  const nets = new Set<number>();
+  for (const chunk of chunks) {
+    const [ox, , oz] = chunk.origin;
+    for (const cell of chunk.cells) {
+      const m = manifest.macros[cell.macro];
+      if (!inside(sceneX(frame, cell.x + m.w / 2), sceneZ(frame, cell.y + m.h / 2))) continue;
+      out.cells[m.cls] = (out.cells[m.cls] ?? 0) + 1;
+      if (library) out.transistors += library.macros[cell.macro].transistors;
+      // Physical cells (fillers, taps, antenna diodes, decaps) serve no unit or stage.
+      if (!roles || cell.inst < 0 || m.cls === 'fill' || m.cls === 'tap' || m.cls === 'diode' || m.cls === 'decap') continue;
+      const unit = roles.unit[cell.inst];
+      out.units[unit < 16 ? unit : unit === 16 ? 16 : 17] += 1;
+      const kind = roles.kind[cell.inst];
+      if (kind >= 1 && kind <= 3) out.stages[kind - 1] += 1;
+      else if (kind >= 4) out.registers[roleKinds[kind]] = (out.registers[roleKinds[kind]] ?? 0) + 1;
+    }
+    for (const batch of chunk.batches) {
+      for (let k = 0; k < batch.count; k += 1) {
+        const what = batch.what[k];
+        const category = whatCategory(what);
+        if (category !== 'wire' && category !== 'cut') continue;
+        const o = k * FLOATS_PER_INSTANCE;
+        if (!inside(batch.data[o] + ox, batch.data[o + 2] + oz)) continue;
+        const layer = whatLayer(what);
+        if (category === 'cut') out.vias[layer] = (out.vias[layer] ?? 0) + 1;
+        else out.wire[layer] = (out.wire[layer] ?? 0) + Math.max(batch.data[o + 3], batch.data[o + 5]) * 1000;
+        if (batch.ref[k] < manifest.nets.vdd) nets.add(batch.ref[k]);
+      }
+    }
+  }
+  out.nets = nets.size;
+  return out;
+}

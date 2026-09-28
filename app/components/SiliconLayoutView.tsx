@@ -5,7 +5,7 @@ import type { LayoutManifest } from '@/lib/a1-layout-format';
 import { CELL_CLASS_TEXT } from '@/lib/a1-layout-parts';
 import { getUiAudit } from '@/lib/ui-audit';
 import { useTrackedValue } from '@/lib/ui-audit-react';
-import type { DragMode, Flows, LabelMode, LayoutEngine, LayoutHud, LayoutSelection, LayoutStopId } from './silicon/layout-engine';
+import type { DragMode, Flows, LabelMode, LayoutDetails, LayoutEngine, LayoutHud, LayoutOverlays, LayoutSelection, LayoutStopId } from './silicon/layout-engine';
 
 // The Silicon macro view's "A1 layout" mode: the real routed A1 tensor tile
 // (SKY130), drawn from its DEF and the SkyWater cell library, with the same
@@ -29,14 +29,18 @@ const LADDER: Array<{ id: LayoutStopId; label: string }> = [
   { id: 'devices', label: 'Transistors' },
 ];
 const LABEL_MODES: Array<{ id: LabelMode; label: string; title: string }> = [
-  { id: 'all', label: 'All', title: 'Label the register regions and each kind of wire, via, cell, and device in view' },
+  { id: 'all', label: 'All', title: 'Label the dot units, the I/O pins, and each kind of wire, via, cell, and transistor in view' },
   { id: 'key', label: 'Key', title: 'Label only the main regions and parts' },
   { id: 'off', label: 'Off', title: 'Hide the labels (hover still names what is under the cursor)' },
 ];
 const FLOW_TOGGLES: Array<{ id: keyof Flows; label: string; title: string; swatch: string }> = [
   { id: 'data', label: 'Data', title: 'Pulses run along each signal net, starting at the output pin of the cell that drives it (where that cell is loaded) and running out to the pins it drives', swatch: '#38dbff' },
   { id: 'power', label: 'Power', title: 'Show the supply: VDD (amber) down from the straps through the via stacks to the rails; VSS (green) back', swatch: '#ff8a1c' },
-  { id: 'clock', label: 'Clock', title: 'Show the clock-tree nets from their buffers to the flip-flops', swatch: '#db5cff' },
+  { id: 'clock', label: 'Clock', title: 'Show the clock: the clock tree from the clk pin to every flip-flop from afar, and the clock nets pulsing up close', swatch: '#db5cff' },
+];
+const OVERLAY_TOGGLES: Array<{ id: keyof LayoutOverlays; label: string; title: string; swatch: string }> = [
+  { id: 'units', label: 'Units', title: 'Colour the tile by dot unit: where the cells serving each of the 16 dot units were placed, traced through the netlist', swatch: 'conic-gradient(#d24b4b, #bcaa2f, #2fbc58, #4bbcd2, #352fbc, #c74bd2, #d24b4b)' },
+  { id: 'path', label: 'Slowest path', title: 'Draw the worst setup path of the timing report, pin by pin, from the flip-flop that launches it to the one that captures it', swatch: '#ff6a4d' },
 ];
 const FLOW_WORDS: Record<NonNullable<LayoutSelection['net']>['kind'], string> = { signal: 'Signal net', clock: 'Clock net', vdd: 'VDD supply network', vss: 'VSS ground network' };
 const FLOW_CLASS: Record<NonNullable<LayoutSelection['net']>['kind'], string> = { signal: 'flow-data', clock: 'flow-clock', vdd: 'flow-vdd', vss: 'flow-vss' };
@@ -46,18 +50,21 @@ const SW = { metal: '#a9abb2', plug: '#9aa1aa', local: '#8a7a6e', poly: '#9a7560
 const cellItems = (): LegendItem[] => (['logic', 'sequential', 'clock', 'fill'] as const).map((cls) => ({ title: CELL_CLASS_TEXT[cls].title, layer: CELL_CLASS_TEXT[cls].role, swatch: CELL_CLASS_TEXT[cls].swatch }));
 const LEGEND: Record<LayoutStopId, LegendItem[]> = {
   tile: [
+    { title: 'Dot units', layer: 'the 16 units by colour: where the cells serving each one were placed (with Units on)', swatch: OVERLAY_TOGGLES[0].swatch },
     { title: 'Supply straps', layer: 'met5 (horizontal) and met4 (vertical), VDD and VSS', swatch: SW.metal },
     { title: 'Via 4 arrays', layer: 'where a met5 and a met4 strap of one supply cross', swatch: SW.plug },
     { title: 'Routing density', layer: 'met1–met4 coverage per 2.5 µm, brighter = denser', swatch: '#8d8c90' },
     { title: 'Registers', layer: 'flip-flop density (blue)', swatch: CELL_CLASS_TEXT.sequential.swatch },
     { title: 'Clock tree and buffers', layer: 'their density (violet)', swatch: CELL_CLASS_TEXT.clock.swatch },
-    { title: 'I/O pins', layer: 'met2/met3, along the tile edges', swatch: SW.metal },
+    { title: 'Input pins', layer: 'the command buses cmd_a, cmd_b, cmd_c: cyan bands along the edges', swatch: '#5fdcff' },
+    { title: 'Output pins', layer: 'the response bus rsp_data: amber bands', swatch: '#ffb066' },
   ],
   region: [
-    { title: 'Metal 1–4 wires', layer: 'routed signal nets', swatch: SW.metal, glow: true },
-    { title: 'Vias', layer: 'via, via2, via3: where a route changes layer', swatch: SW.plug, glow: true },
-    { title: 'Supply rails and straps', layer: 'met1 rails, met4/met5 straps', swatch: SW.metal },
+    { title: 'Metal 3–5 wires', layer: 'the upper signal routing, over every placed cell', swatch: SW.metal },
+    { title: 'Every wire and via', layer: 'metal 1–5 and all vias, loading in around the centre as you zoom in', swatch: SW.plug, glow: true },
+    { title: 'Supply straps', layer: 'met4/met5, VDD and VSS', swatch: SW.metal },
     ...cellItems(),
+    { title: 'Stage labels', layer: 'where each nearby unit\'s three pipeline stages sit (the median of their cells)', swatch: '#ffc978' },
   ],
   routing: [
     { title: 'Metal 1, 2, 3 wires', layer: 'horizontal, vertical, horizontal', swatch: SW.metal, glow: true },
@@ -70,6 +77,7 @@ const LEGEND: Record<LayoutStopId, LegendItem[]> = {
     { title: 'mcon contacts', layer: 'li1 up to met1', swatch: SW.plug },
     { title: 'Metal 1', layer: 'routes and the supply rails', swatch: SW.metal, glow: true },
     { title: 'Diffusion and poly', layer: 'the transistors below', swatch: SW.poly },
+    { title: 'Cell labels', layer: 'instance, cell type, dot unit, and pipeline role', swatch: '#ffc978' },
   ],
   devices: [
     { title: 'N+ diffusion', layer: 'NMOS source and drain', swatch: SW.ndiff },
@@ -77,8 +85,13 @@ const LEGEND: Record<LayoutStopId, LegendItem[]> = {
     { title: 'Polysilicon', layer: 'gates: each crossing of diffusion is a transistor', swatch: SW.poly },
     { title: 'Contacts (licon)', layer: 'diffusion and poly up to li1', swatch: SW.plug },
     { title: 'N-well', layer: 'body of the PMOS transistors', swatch: SW.well },
+    { title: 'Transistor labels', layer: 'NMOS or PMOS, the pin on its gate, and its width × length', swatch: '#7fe3ff' },
   ],
 };
+const PATH_KEY: LegendItem[] = [
+  { title: 'Slowest path, data', layer: 'from the launching flip-flop through each cell to the capturing one', swatch: '#ff6a4d' },
+  { title: 'Slowest path, clock', layer: 'the clock buffers that launch it', swatch: '#d58cff' },
+];
 const FLOW_KEY: Array<{ id: string; label: string; swatch: string; detail: string }> = [
   { id: 'data', label: 'Data', swatch: '#38dbff', detail: 'from the driving pin outward' },
   { id: 'vdd', label: 'VDD', swatch: '#ff8a1c', detail: 'supply, down the via stacks' },
@@ -105,6 +118,9 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
   const [labelMode, setLabelMode] = useState<LabelMode>('all');
   const [dragMode, setDragMode] = useState<DragMode>('rotate');
   const [legendOpen, setLegendOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches);
+  const [panel, setPanel] = useState<'details' | 'legend'>('details');
+  const [overlays, setOverlays] = useState<LayoutOverlays>({ units: true, path: false });
+  const [details, setDetails] = useState<LayoutDetails | null>(null);
   const [selection, setSelection] = useState<LayoutSelection | null>(null);
 
   useTrackedValue('ui.state', 'changed', 'silicon.layout.flows', Object.entries(flows).filter(([, on]) => on).map(([id]) => id).join(',') || 'none');
@@ -117,6 +133,8 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
   useTrackedValue('ui.state', 'changed', 'silicon.layout.labels', labelMode);
   useTrackedValue('ui.state', 'changed', 'silicon.layout.dragMode', dragMode);
   useTrackedValue('ui.state', 'changed', 'silicon.layout.legend', legendOpen);
+  useTrackedValue('ui.state', 'changed', 'silicon.layout.panel', panel);
+  useTrackedValue('ui.state', 'changed', 'silicon.layout.overlays', Object.entries(overlays).filter(([, on]) => on).map(([id]) => id).join(',') || 'none');
   useTrackedValue('ui.state', 'changed', 'silicon.layout.selection', selection ? `${selection.title} (${selection.layer})` : null);
 
   useEffect(() => {
@@ -141,6 +159,7 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
               onError: setError,
               onCameraGesture: (details) => getUiAudit()?.interaction('camera', details, { type: 'control', id: 'A1 layout camera' }),
               onSelect: setSelection,
+              onDetails: setDetails,
             });
             engineRef.current = engine;
           } catch (reason) {
@@ -165,6 +184,7 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
   useEffect(() => { engineRef.current?.setAutoRotate(autoRotate); }, [autoRotate, ready]);
   useEffect(() => { engineRef.current?.setLabelMode(labelMode); }, [labelMode, ready]);
   useEffect(() => { engineRef.current?.setDragMode(dragMode); }, [dragMode, ready]);
+  useEffect(() => { engineRef.current?.setOverlays(overlays); }, [overlays, ready]);
 
   useEffect(() => {
     const shell = shellRef.current as FullscreenElement | null;
@@ -201,7 +221,7 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
   const def = manifest?.sources.find((source) => source.role.startsWith('Routed layout'));
   const evidenceTitle = manifest ? `${manifest.evidence.statement}\n\n${manifest.evidence.drc}\n${manifest.evidence.lvs}\n${manifest.evidence.timing}` : 'Loading the layout';
   const caption = manifest
-    ? `${manifest.title} · ${((manifest.die[2] - manifest.die[0]) / manifest.dbuPerMicron / 1000).toFixed(2)} mm square · ${(manifest.insts.count + manifest.insts.fill).toLocaleString()} placed cells · ${manifest.nets.count.toLocaleString()} nets`
+    ? `${manifest.title} · ${((manifest.die[2] - manifest.die[0]) / manifest.dbuPerMicron / 1000).toFixed(2)} mm square · ${manifest.insts.count.toLocaleString()} cells (+${manifest.insts.fill.toLocaleString()} fillers) · ${manifest.nets.count.toLocaleString()} nets`
     : 'AIMEM-A1 tensor tile · SkyWater SKY130';
 
   return (
@@ -227,6 +247,14 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
               </button>
             ))}
           </span>
+          <span className="silicon-segment silicon-flows" role="group" aria-label="Overlays">
+            <em>Show</em>
+            {OVERLAY_TOGGLES.map((item) => (
+              <button key={item.id} className={overlays[item.id] ? 'active' : ''} aria-pressed={overlays[item.id]} onClick={() => setOverlays((current) => ({ ...current, [item.id]: !current[item.id] }))} title={item.title}>
+                <i style={{ background: item.swatch }} />{item.label}
+              </button>
+            ))}
+          </span>
           <button className={bloom && !hud?.software ? 'active' : ''} aria-pressed={bloom && !hud?.software} disabled={hud?.software} onClick={() => setBloom((value) => !value)} title={hud?.software ? 'Bloom is off on software rendering (no GPU acceleration)' : 'Bloom on the pulses'}>Bloom</button>
           <button className={section ? 'active' : ''} aria-pressed={section} onClick={() => setSection((value) => !value)} title="Cut a vertical section through the target to show the real SKY130 layer stack at true scale">Cross-section</button>
           <button className={autoRotate ? 'active' : ''} aria-pressed={autoRotate} onClick={() => setAutoRotate((value) => !value)} title="Spin the tile slowly on its own; drag any time to take over">Spin</button>
@@ -237,7 +265,7 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
               <button key={mode.id} className={labelMode === mode.id ? 'active' : ''} aria-pressed={labelMode === mode.id} onClick={() => setLabelMode(mode.id)} title={mode.title}>{mode.label}</button>
             ))}
           </span>
-          <button className={legendOpen ? 'active' : ''} aria-pressed={legendOpen} onClick={() => setLegendOpen((value) => !value)} title="What each colour and structure is at this zoom">Legend</button>
+          <button className={legendOpen ? 'active' : ''} aria-pressed={legendOpen} onClick={() => setLegendOpen((value) => !value)} title="The tile's facts from its run, what is in view, and what each colour means at this zoom">Details</button>
           {fullscreenSupported && <button className={fullscreen ? 'active' : ''} aria-pressed={fullscreen} onClick={toggleFullscreen} title={fullscreen ? 'Exit full screen (Esc)' : 'Open the view full screen'}>{fullscreen ? '⤡ Exit' : '⤢ Full screen'}</button>}
         </div>
         <nav className="silicon-ladder" aria-label="Zoom ladder: fly to a scale of the A1 tile">
@@ -250,24 +278,52 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
       </div>
 
       {legendOpen && (
-        <aside className="silicon-legend" data-silicon-occluder aria-label={`Legend: what the A1 layout shows at the ${hud?.stop.label ?? 'tile'} scale`}>
+        <aside className="silicon-legend silicon-info" data-silicon-occluder aria-label={panel === 'details' ? `Details: ${details?.title ?? 'the A1 tile'}` : `Legend: what the A1 layout shows at the ${hud?.stop.label ?? 'tile'} scale`}>
           <header>
-            <span className="silicon-kicker">Legend · {hud?.stop.label ?? 'A1 tile'}</span>
-            <button onClick={() => setLegendOpen(false)} aria-label="Close the legend">×</button>
+            <span className="silicon-tabs" role="tablist" aria-label="Panel">
+              <button role="tab" aria-selected={panel === 'details'} className={panel === 'details' ? 'active' : ''} onClick={() => setPanel('details')}>Details</button>
+              <button role="tab" aria-selected={panel === 'legend'} className={panel === 'legend' ? 'active' : ''} onClick={() => setPanel('legend')}>Legend</button>
+            </span>
+            <button onClick={() => setLegendOpen(false)} aria-label="Close the details panel">×</button>
           </header>
-          <ul>
-            {legend.map((item) => (
-              <li key={item.title} title={item.layer}>
-                <i className={item.glow ? 'glow' : ''} style={{ background: item.swatch }} />
-                <span><b>{item.title}</b><small>{item.layer}</small></span>
-              </li>
-            ))}
-          </ul>
-          <div className="silicon-flow-key" aria-label="Pulse colours">
-            {FLOW_KEY.map((item) => <span key={item.id} title={item.detail}><i style={{ background: item.swatch }} />{item.label}</span>)}
-          </div>
-          <p>Wires, vias, and the transistors of every cell are the real layout at true height; from afar, cell outlines and the density map summarize it. Pulses mark what a wire carries and which way the signal goes; their timing is not simulated.</p>
-          {manifest && <p className="silicon-provenance">Run {manifest.run} · RTL {manifest.rtlCommit}{def ? ` · DEF ${def.sha256.slice(0, 12)}…` : ''}</p>}
+          {panel === 'details' ? (
+            <div className="silicon-details" role="tabpanel" aria-label="Details">
+              <span className="silicon-kicker">{details?.stop === 'tile' || !details ? 'The whole tile' : `${hud?.stop.label ?? ''} · in view`}</span>
+              <strong>{details?.title ?? 'Loading the layout…'}</strong>
+              {details && <small>{details.subtitle}</small>}
+              {details?.sections.map((section, index) => (
+                <details key={section.title} open={index < (details.stop === 'tile' ? 2 : 4)}>
+                  <summary>{section.title}</summary>
+                  <ul>
+                    {section.rows.map((row, index) => (
+                      <li key={`${index}|${row.label}`} title={row.hint}>
+                        <span>{row.swatch && <i style={{ background: row.swatch }} />}{row.label}</span>
+                        <b>{row.value}</b>
+                        {row.hint && <small>{row.hint}</small>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))}
+              {manifest && <p className="silicon-provenance">Run {manifest.run} · RTL {manifest.rtlCommit}{def ? ` · DEF ${def.sha256.slice(0, 12)}…` : ''}</p>}
+            </div>
+          ) : (
+            <div role="tabpanel" aria-label="Legend">
+              <span className="silicon-kicker">Legend · {hud?.stop.label ?? 'A1 tile'}</span>
+              <ul>
+                {[...legend, ...(overlays.path ? PATH_KEY : [])].map((item) => (
+                  <li key={item.title} title={item.layer}>
+                    <i className={item.glow ? 'glow' : ''} style={{ background: item.swatch }} />
+                    <span><b>{item.title}</b><small>{item.layer}</small></span>
+                  </li>
+                ))}
+              </ul>
+              <div className="silicon-flow-key" aria-label="Pulse colours">
+                {FLOW_KEY.map((item) => <span key={item.id} title={item.detail}><i style={{ background: item.swatch }} />{item.label}</span>)}
+              </div>
+              <p>Wires, vias, and the transistors of every cell are the real layout at true height; from afar, cell outlines and the density map summarize it. Pulses mark what a wire carries and which way the signal goes; their timing is not simulated.</p>
+            </div>
+          )}
         </aside>
       )}
 
@@ -306,11 +362,32 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
               </div>
             </section>
           )}
+          {selection.device && (
+            <section className="silicon-explain" aria-label="Transistor">
+              <h4>Transistor</h4>
+              <p><b>{selection.device.type}</b>: gate {selection.device.gate ? <>on input pin <b className="silicon-mono">{selection.device.gate}</b></> : 'on a node inside the cell'}, channel {selection.device.w.toFixed(2)} µm wide and {selection.device.l.toFixed(2)} µm long.</p>
+              <p className="silicon-net-pins">{selection.device.count.n} NMOS + {selection.device.count.p} PMOS in this cell · W/L {(selection.device.w / selection.device.l).toFixed(1)}</p>
+            </section>
+          )}
+          {selection.unit && (
+            <section className="silicon-explain" aria-label="Dot unit">
+              <h4>Dot unit</h4>
+              <p className="silicon-unit"><i style={{ background: selection.unit.color }} /><b>{selection.unit.cells.toLocaleString()}</b> logic cells serve it alone · <b>{selection.unit.registers.toLocaleString()}</b> flip-flops</p>
+            </section>
+          )}
           {selection.cell && (
             <section className="silicon-explain" aria-label="Cell">
               <h4>Cell</h4>
               <p><b className="silicon-mono">{selection.cell.macro.replace('sky130_fd_sc_hd__', '')}</b>: {selection.cell.what}{selection.cell.drive ? `, ${selection.cell.drive}` : ''}. {CELL_CLASS_TEXT[selection.cell.cls].title}: {CELL_CLASS_TEXT[selection.cell.cls].role}.</p>
               <p className="silicon-net-pins">{selection.cell.size} · {selection.cell.place}{selection.cell.transistors > 0 ? ` · ${selection.cell.transistors} transistors` : ''}</p>
+              {(selection.cell.unit !== null || selection.cell.role) && (
+                <p className="silicon-unit">
+                  {selection.cell.unit !== null && selection.cell.unit < 16 && manifest?.unitsOverview && <i style={{ background: manifest.unitsOverview.palette[selection.cell.unit] }} />}
+                  {selection.cell.unit !== null ? (selection.cell.unit < 16 ? `Dot unit D[${selection.cell.unit >> 2}][${selection.cell.unit & 3}]` : 'Shared by several dot units') : ''}
+                  {selection.cell.unit !== null && selection.cell.role ? ' · ' : ''}
+                  {selection.cell.role}
+                </p>
+              )}
               {selection.cell.pins && selection.cell.pins.length > 0 && (
                 <ol className="silicon-net-layers" aria-label="The cell's pins and their nets">
                   {selection.cell.pins.map((pin) => <li key={pin.pin}><span>{pin.pin} · {pin.dir}</span><em className="silicon-mono">{pin.net ?? 'not connected'}</em></li>)}
@@ -336,7 +413,7 @@ export default function SiliconLayoutView({ sourceSwitch }: { sourceSwitch: Reac
           )}
           <dl>
             {selection.material && <><dt>Material</dt><dd>{selection.material}</dd></>}
-            <dt>Size</dt><dd>{selection.size}</dd>
+            {selection.size && <><dt>Size</dt><dd>{selection.size}</dd></>}
             <dt>Where</dt><dd>{selection.location.join(' › ')}</dd>
           </dl>
           {selection.notes.length > 0 && <ul>{selection.notes.map((note) => <li key={note}>{note}</li>)}</ul>}

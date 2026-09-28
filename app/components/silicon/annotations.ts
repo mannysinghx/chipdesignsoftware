@@ -12,6 +12,8 @@ export type Anchor = {
   key: boolean;
   /** Floorplan regions and package parts read differently from wires and devices. */
   tone: 'region' | 'part' | 'package';
+  /** A colour for the label's marker, where the colour itself means something (a dot unit's on the map). */
+  accent?: string;
   /** Selection key of what the label names, to highlight it while selected. */
   targetKey: string;
   select: () => void;
@@ -181,9 +183,16 @@ export function createAnnotations(host: HTMLElement) {
           return;
         }
         const aria = `${anchor.title}: ${anchor.detail}`;
-        if (slot.element.getAttribute('aria-label') !== aria || slot.element.dataset.tone !== anchor.tone) {
+        if (slot.element.getAttribute('aria-label') !== aria || slot.element.dataset.tone !== anchor.tone || (slot.element.dataset.accent ?? '') !== (anchor.accent ?? '')) {
           slot.text.textContent = anchor.title;
           slot.element.dataset.tone = anchor.tone;
+          if (anchor.accent) {
+            slot.element.dataset.accent = anchor.accent;
+            slot.element.style.setProperty('--label-accent', anchor.accent);
+          } else {
+            delete slot.element.dataset.accent;
+            slot.element.style.removeProperty('--label-accent');
+          }
           slot.element.dataset.auditLabel = anchor.title;
           slot.element.setAttribute('aria-label', aria);
           slot.element.title = anchor.detail;
