@@ -1,0 +1,30 @@
+{
+  "comment": "Measured inputs for the C3 3 nm-class projection of the A1 tensor tile (a1_mma_tile). Same RTL and flow settings on both predictive kits; both at the typical corner, 0.7 V. Run folders are on the aimem-eda volume (Extreme Pro).",
+  "rtl_commit": "317c297",
+  "flops_per_cycle": { "comment": "one MMA per cycle (rotating accumulators, C2): 64 BF16, 128 FP8 or 256 FP4 multiply-adds; 2 FLOP per multiply-add", "bf16": 128, "fp8": 256, "fp4": 512 },
+  "endpoints": {
+    "asap7": {
+      "kit": "ASAP7 (predictive 7 nm FinFET, 2016)", "irds_style_label": "G54M36",
+      "gate_pitch_nm": 54, "tightest_metal_pitch_nm": 36, "cell_height_nm": 270, "tracks": 7.5, "power_delivery": "frontside",
+      "stage": "fully routed, 0 DRC; equivalence proved (post-repair and final)",
+      "run": "asap7-20260927T094758Z",
+      "cell_area_um2": 34545.8, "cell_area_source": "logs/asap7/a1_mma_tile/base/6_report.json finish__design__instance__area",
+      "fmax_mhz": 141.1, "fmax_source": "OpenSTA at TT (RVT TT NLDM) on 6_final.odb + 6_final.spef; the run itself used the BC corner (196.7 MHz)",
+      "power_w": 0.566, "power_clock_period_ns": 4.0, "power_source": "same TT STA, report_power, OpenSTA default switching activity"
+    },
+    "gt2n": {
+      "kit": "GT2N (predictive 2 nm nanosheet GAA, backside power, ISCAS 2026)", "irds_style_label": "G42M24",
+      "gate_pitch_nm": 42, "tightest_metal_pitch_nm": 24, "cell_height_nm": 144, "tracks": 6, "power_delivery": "backside",
+      "stage": "through global routing only: detailed routing needs more than the 39 GB Docker VM (peaked 38.6 GB); post-repair equivalence proved",
+      "run": "gt2n-20260928T004214Z",
+      "cell_area_um2": 11092.9, "cell_area_source": "logs/gt2n/a1_mma_tile/base/5_1_grt.json globalroute__design__instance__area__stdcell",
+      "fmax_mhz": 368.5, "fmax_source": "5_1_grt.json timing__fmax (global-route parasitic estimate, TT 0.7 V 25 C); post-CTS was 399.7 MHz",
+      "power_w": 0.190325, "power_clock_period_ns": 2.5, "power_source": "5_1_grt.json power__total, OpenSTA default switching activity"
+    }
+  },
+  "target": {
+    "name": "IRDS 2023 \"3nm+\" logic node", "irds_label": "G48M24", "gate_pitch_nm": 48, "tightest_metal_pitch_nm": 24,
+    "source": "IRDS 2023 More Moore, Table MM-7 (Device Architecture and Ground Rules Roadmap), 2023 column: G48M24, M0 pitch 24 nm, gate pitch 48 nm",
+    "url": "https://irds.ieee.org/images/files/pdf/2023/2023IRDS_MM.pdf"
+  }
+}

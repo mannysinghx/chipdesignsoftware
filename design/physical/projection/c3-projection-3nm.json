@@ -1,0 +1,85 @@
+{
+  "label": "modeled",
+  "qualifier": "predictive, not foundry: interpolated between two academic PDKs (ASAP7, GT2N) to IRDS 3nm+ pitches",
+  "method": "C3: project the A1 tile's area, clock and energy to an IRDS 3 nm-class node.\n\nMethod (fixed in C0, docs/compute-die/C0_RESEARCH_DOSSIER.md section 6): run the same\ntile on ASAP7 and GT2N, take the range between them, adjusted by IRDS pitch ratios, and\nlabel it `modeled` (\"predictive, not foundry\").\n\n- Pitch coordinate: p = gate pitch x tightest metal pitch (nm^2). ASAP7 G54M36 = 1,944;\n  GT2N G42M24 = 1,008; IRDS 3nm+ G48M24 = 1,152.\n- Area: dense logic scales with p at a fixed cell architecture. Scale each endpoint to the\n  target pitches. From ASAP7 (7.5 tracks, frontside power) gives the high bound; from GT2N\n  (6 tracks, backside power) the low bound. The spread is the cell-architecture question\n  (tracks, backside power), which pitch alone does not decide. Central = geometric mean.\n- Clock and energy per cycle: no pitch law, so interpolate in log space between the two\n  measured endpoints at t along ln p (central). The band uses t from gate pitch alone and\n  from metal pitch alone.\nAll inputs come from design/physical/projection/c3-inputs.json; see the caveats it carries.",
+  "pitch_products_nm2": {
+    "asap7": 1944,
+    "target_3nm": 1152,
+    "gt2n": 1008
+  },
+  "t": {
+    "central_pitch_product": 0.7966876474887309,
+    "gate_pitch_only": 0.4686680206228817,
+    "metal_pitch_only": 1.0
+  },
+  "cell_area_um2": {
+    "low": 12677.599999999999,
+    "central": 16109.952462490499,
+    "high": 20471.585185185188
+  },
+  "fmax_mhz": {
+    "low": 221.26851565227238,
+    "central": 303.1617755994245,
+    "high": 368.4999999999999
+  },
+  "energy_per_cycle_pj": {
+    "high": 1089.8875434360932,
+    "central": 653.383080607263,
+    "low": 475.81249999999983
+  },
+  "derived": {
+    "bf16": {
+      "tflops_per_tile": {
+        "low": 0.028322370003490863,
+        "central": 0.038804707276726344,
+        "high": 0.04716799999999999
+      },
+      "tflops_per_w": {
+        "worst": 0.11744330942296473,
+        "central": 0.19590345051640315,
+        "best": 0.269013529489032
+      },
+      "tflops_per_mm2": {
+        "central": 2.4087412651947315
+      }
+    },
+    "fp8": {
+      "tflops_per_tile": {
+        "low": 0.05664474000698173,
+        "central": 0.07760941455345269,
+        "high": 0.09433599999999998
+      },
+      "tflops_per_w": {
+        "worst": 0.23488661884592946,
+        "central": 0.3918069010328063,
+        "best": 0.538027058978064
+      },
+      "tflops_per_mm2": {
+        "central": 4.817482530389463
+      }
+    },
+    "fp4": {
+      "tflops_per_tile": {
+        "low": 0.11328948001396345,
+        "central": 0.15521882910690538,
+        "high": 0.18867199999999995
+      },
+      "tflops_per_w": {
+        "worst": 0.4697732376918589,
+        "central": 0.7836138020656126,
+        "best": 1.076054117956128
+      },
+      "tflops_per_mm2": {
+        "central": 9.634965060778926
+      }
+    }
+  },
+  "caveats": [
+    "Power uses OpenSTA default switching activity, not a workload trace; energy per cycle is taken as format-independent.",
+    "GT2N numbers are post-global-route estimates (detailed routing did not fit in 39 GB); its clock end is optimistic.",
+    "ASAP7 was optimised at its BC corner and re-timed at TT; its clock end is pessimistic.",
+    "Tile only: no operand memory, DMA, interconnect or clock tree beyond the tile.",
+    "The tile's slowest path is stage 2 (17-term align and sum) on every kit; rebalancing the pipeline is a C4 lever."
+  ],
+  "inputs": "design/physical/projection/c3-inputs.json"
+}

@@ -1,7 +1,7 @@
 # AIMEM-A1: an AI Compute Die Built and Improved by Agents
 
 **Plan date:** 26 September 2026
-**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). **C1 complete** the same day, after three model versions: version 3 meets every exit criterion under owner-approved scoring (best MLPerf submission per chip, Offline qualifies). Its held-out GB200 predictions are +8.3% and +10.4%. Versions 1 and 2 failed their held-out checks, and those results stay on record (see [C1 status](#c1-status-2026-09-26-version-3)). **C2 increment 1** (the tensor tile's arithmetic and control) was built and verified the same day: bit-exact against the golden model, formally proved, lint clean, and audited (see [C2 status](#c2-status-2026-09-26-increment-1)). **C2 increments 2a and 2b** were verified the same day: a 3-stage pipelined tile with an accumulator scoreboard (2a), and MX E8M0 scales, FP4 E2M1, and packed elements, so FP8 does 2× and FP4 4× the BF16 multiplies per step (2b). **Increment 2c** (a descriptor-driven tile DMA and the tensor core) completed C2 the same day. With a 64-bit memory port the core issues one MMA per 8 cycles against the tile's one per cycle: operand bandwidth, not math, sets the rate. C3 to C6 are proposed; C3 needs owner decision 3 (disk space or a worker).
+**Status:** C0 (research and targets) done on 26 September 2026: all four exit criteria met (see [C0 status](#c0-status-2026-09-26)). **C1 complete** the same day, after three model versions: version 3 meets every exit criterion under owner-approved scoring (best MLPerf submission per chip, Offline qualifies). Its held-out GB200 predictions are +8.3% and +10.4%. Versions 1 and 2 failed their held-out checks, and those results stay on record (see [C1 status](#c1-status-2026-09-26-version-3)). **C2 increment 1** (the tensor tile's arithmetic and control) was built and verified the same day: bit-exact against the golden model, formally proved, lint clean, and audited (see [C2 status](#c2-status-2026-09-26-increment-1)). **C2 increments 2a and 2b** were verified the same day: a 3-stage pipelined tile with an accumulator scoreboard (2a), and MX E8M0 scales, FP4 E2M1, and packed elements, so FP8 does 2× and FP4 4× the BF16 multiplies per step (2b). **Increment 2c** (a descriptor-driven tile DMA and the tensor core) completed C2 the same day. With a 64-bit memory port the core issues one MMA per 8 cycles against the tile's one per cycle: operand bandwidth, not math, sets the rate. **C3 complete** on 27 September 2026 (see [C3 status](#c3-status-2026-09-27-complete)): the tile passes DRC and LVS on sky130 (LVS with a six-cell qualification), routes with zero violations on ASAP7, and has a `modeled` 3 nm-class projection: 303 MHz and 0.016 mm² central, with 0.20 BF16 TFLOPS per W, about 6× below Blackwell. C4 to C6 are proposed.
 **Extends:** [`RSI_PLATFORM_PLAN.md`](RSI_PLATFORM_PLAN.md). That plan builds the machinery that lets agents improve designs (L1), themselves (L2), and their models (L3). This plan adds what they build next: a compute die that pairs with the AIMEM memory stacks. It also sets the autonomy policy for running those loops unattended.
 
 ---
@@ -39,7 +39,7 @@ The owner accepted the recommendations below in chat.
 |---|---|---|
 | 1 | **Autonomy** | Loops run unattended within hard budgets. People approve only promotions, spending or deploys, and boundary actions (section 4). |
 | 2 | **Target** | NVIDIA **B200** per package is the calibration and primary target. **Rubin** is the stretch target. H100 and H200 are calibration points. B300 is held out to test the model's predictions (section 6, C1). |
-| 3 | **Compute** | Nothing heavy runs until C3. The Mac's data volume is 97% full (34 GB free on 2026-09-26). Before C3, either free at least 100 GB or add a native x86-64 Linux worker. The worker is recommended because it also removes two recorded workarounds: Rosetta crashing ORFS's equivalence check (`LEC_CHECK=0`), and cocotb running on Icarus instead of Verilator. **Open:** which option. |
+| 3 | **Compute** | Nothing heavy runs until C3. The Mac's data volume is 97% full (34 GB free on 2026-09-26). Before C3, either free at least 100 GB or add a native x86-64 Linux worker. The worker is recommended because it also removes two recorded workarounds: Rosetta crashing ORFS's equivalence check (`LEC_CHECK=0`), and cocotb running on Icarus instead of Verilator. **Resolved 26 September 2026, differently:** the owner ruled out third-party services and tools (open source only), so there is no x86 worker. The flow was built natively for arm64 from source and runs on a case-sensitive APFS disk image on the owner's Extreme Pro drive. That also removes the Rosetta workaround: the equivalence check runs natively. Docker Desktop has 39 GB of memory, which is too little for GT2N's detailed routing. |
 | 4 | **Model route** | Unchanged: local `qwen3.6:35b` by default. Hosted Claude only when the owner sets a key, a monthly spend ceiling, and a mission opts in. **Open:** the ceiling. Until one is set, hosted stays off. |
 
 ---
@@ -203,6 +203,18 @@ Ten planted bugs were each caught. The design was written from scratch, with Ten
 - Formal proofs on the control and handshake logic, with cover and vacuity checks.
 - Verilator lint clean.
 - Runs through the existing sandboxed adapters, so every run is audited and reproducible.
+
+### C3 status (2026-09-27): complete
+
+The A1 tile (RTL `317c297`, unchanged) was placed and routed with a native arm64 ORFS build on sky130hd, ASAP7, and GT2N. Full results: [`C3_PHYSICAL_TILE.md`](compute-die/C3_PHYSICAL_TILE.md).
+
+| Criterion | Result |
+|---|---|
+| sky130: DRC 0 and LVS match, with timing from OpenSTA | Met. KLayout DRC: 0 items. Netgen LVS: "Circuits match uniquely" (257,481 devices, 296,087 nets). Six library cell types are compared at connectivity level because the ORFS CDL models their folded transistor stacks differently from the layout. Timing: 19.5 MHz, 2.42 mm² |
+| ASAP7: routes cleanly | Met. 0 routing violations; equivalence proved; 141 MHz at the typical corner, 0.0345 mm² |
+| Projection labelled `modeled`, with method and band | Met. The C0 method, with IRDS 2023 G48M24 as the target. Central values: 303 MHz, 0.016 mm², 653 pJ per cycle, 0.20 BF16 TFLOPS per W. The band is 221–369 MHz and 0.12–0.27 TFLOPS per W. Checked by `tests/c3-projection.test.ts` |
+
+GT2N stopped after global routing (368 MHz estimate, 0.011 mm²), because its detailed routing needs more than 39 GB. On every kit the slowest path is stage 2, the 17-term align-and-sum. The energy figure uses default switching activity and leaves the tile about 6× short of Blackwell's chip-level BF16 efficiency. Measuring real activity and lowering it are C4's first targets.
 
 ### C3: Physical tile on open PDKs, and the scaling projection
 
