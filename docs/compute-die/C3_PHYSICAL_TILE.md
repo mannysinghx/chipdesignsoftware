@@ -94,6 +94,41 @@ It needed renames only (`lvs-netgen/normalize.py`), because ORFS's CDL and Magic
 
 Six cell types model folded transistor stacks differently in the ORFS CDL. The CDL has one series pair with `m=2` and a shared middle node; the SkyWater layout has two separate stacks. `lvs-netgen/library_cells.py` takes those six cells' definitions from their layout netlists, keeping the schematic's pin order. A first attempt did not keep it and scrambled the instances; that was caught and fixed.
 
+## The layout in 3D (Silicon macro view, "A1 layout")
+
+The Silicon macro view has a second mode, **A1 layout**, next to the illustrative model. It draws this sky130hd tile as routed: every wire, via, supply rail, strap, and placed cell comes from the final DEF (`6_final.def` of run `sky130hd-20260927T144910Z`), and each cell's own transistors, contacts, li1, and met1 come from the SkyWater `sky130_fd_sc_hd` library GDS. Layer heights are the PDK's own, from the sky130A Magic tech file (for example met1 at 1.3761 µm and 0.36 µm thick). Heights are to scale; nothing is exaggerated.
+
+`tools/physical/layout-export/export-layout.ts` makes the data in `public/layouts/a1-sky130hd/`. It uses Node only, no third-party packages. It reads the DEF, LEF, and GDS with its own small parsers and cuts the tile into 64 µm tiles that the view streams as you zoom. It stores three things as rules instead of shapes, and before it writes anything it checks each rule against the DEF for every instance:
+
+| Rebuilt, not stored | Rule | Check |
+|---|---|---|
+| Filler cells | Every gap in every row is filled greedily: `fill_8`, then 4, 2, 1, left to right | All 671,016 fillers rebuilt exactly (937 of 937 rows) |
+| Supply via stacks | A via2/via3/via4-to-met4 stack at each crossing of a met4 strap and a met1 rail of the same supply | All 88,172 crossings rebuilt exactly; no other supply via is left over |
+| Which net each cell pin is on | The metal that lands on the pin's shape (an mcon pad or a met1 wire) | 908,706 pins found on the metal, 3,652 unconnected, **0** disagree with the DEF |
+
+The exporter also checks that every tile decodes back to exactly the shapes it was given.
+
+The view shows:
+
+- **Tile:** the met5/met4 power grid over real per-layer coverage. It also shows where each of the 16 dot-product units' registers landed; the RTL's own bus layout assigns every flip-flop to a unit (for example `s2_terms[306k +: 306]`).
+- **Region and Routing:** the routed met1–met4 signal nets, with the cells colored by kind.
+- **Cells:** li1 and met1 inside the standard cells, labelled with their real instance names.
+- **Transistors:** diffusion, poly gates, contacts, and the n-well.
+
+Clicking a wire gives its real net name, length, vias, and layers, plus the pins it joins (driver first), all read off the metal. Clicking a cell gives its instance, its function, and each pin's net. Pulses on a signal net start at the pin that drives it and run outward. Where the driver is not loaded, the wire stays dark rather than pulse the wrong way. The pulse timing is not simulated.
+
+Size: the data totals 25.7 MB across 1,900 files. The largest share is the tiles (20.5 MB, in 5 nm units, stored as deltas along each net's route). A view downloads only what it shows: 1.2 MB for the whole tile, about 3–4 MB after zooming into a region. `tests/a1-layout.test.ts` checks the format round trip, the three rules above, the cell-name decoding, and that the shipped data is complete and uses the PDK's layer stack. It caught a planted decoder bug.
+
+To regenerate after a new run:
+
+```
+node --experimental-strip-types --max-old-space-size=14000 tools/physical/layout-export/export-layout.ts \
+  --def <EDA>/runs/a1_mma_tile/<run>/results/sky130hd/a1_mma_tile/base/6_final.def \
+  --platform <EDA>/src/OpenROAD-flow-scripts/flow/platforms/sky130hd \
+  --tech <EDA>/tools/lvs/sky130A/sky130A.tech \
+  --run <run> --out public/layouts/a1-sky130hd
+```
+
 ## Files
 
 - Configs: `design/physical/orfs/a1_mma_tile/{sky130hd,asap7,gt2n}/`
@@ -103,3 +138,4 @@ Six cell types model folded transistor stacks differently in the ORFS CDL. The C
   - `lvs-netgen/`
 - Projection: `design/physical/projection/`, `tools/physical/projection/project_3nm.py`, `tests/c3-projection.test.ts`
 - Runs and layouts (not in git): the `aimem-eda` image on the Extreme Pro, under `runs/a1_mma_tile/`
+- The layout as the Silicon macro view draws it: `public/layouts/a1-sky130hd/`, made by `tools/physical/layout-export/`; the viewer is `app/components/SiliconLayoutView.tsx` and `app/components/silicon/layout-engine.ts`, over `lib/a1-layout-format.ts`, `lib/a1-layout-scene.ts`, and `lib/a1-layout-parts.ts`

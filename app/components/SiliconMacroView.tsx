@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { DIE, PHYS, PRESETS, SILICON_EVIDENCE, TILES } from '@/lib/silicon-macro';
 import { EXPLAIN, explainRegion, type Explanation } from '@/lib/silicon-explain';
 import { PARTS, legendFor, type PartId } from '@/lib/silicon-parts';
 import { getUiAudit } from '@/lib/ui-audit';
 import { useTrackedValue } from '@/lib/ui-audit-react';
 import type { DragMode, Flows, LabelMode, SiliconEngine, SiliconHud, SiliconSelection } from './silicon/engine';
+import SiliconLayoutView from './SiliconLayoutView';
 
 // Safari still ships only the prefixed Fullscreen API.
 type FullscreenElement = HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void };
@@ -49,7 +50,28 @@ const VIEW_NOTE: Record<SiliconHud['view'], string | null> = {
   backside: 'Backside view · package hidden, looking up through the silicon',
 };
 
+type Source = 'model' | 'layout';
+
+/** The two things the Silicon macro view can show: the illustrative model, or the real A1 tile layout. */
+function SourceSwitch({ source, onChange }: { source: Source; onChange: (source: Source) => void }) {
+  return (
+    <span className="silicon-segment silicon-source" role="group" aria-label="What the view shows">
+      <em>Show</em>
+      <button className={source === 'model' ? 'active' : ''} aria-pressed={source === 'model'} onClick={() => onChange('model')} title="The illustrative accelerator die: procedural geometry, from the package down to single transistors">Model</button>
+      <button className={source === 'layout' ? 'active' : ''} aria-pressed={source === 'layout'} onClick={() => onChange('layout')} title="The real AIMEM-A1 tensor tile: its routed SKY130 layout (DEF) and the SkyWater cell library's own transistors, at true layer heights">A1 layout</button>
+    </span>
+  );
+}
+
 export default function SiliconMacroView() {
+  const [source, setSource] = useState<Source>('model');
+  useTrackedValue('ui.state', 'changed', 'silicon.source', source);
+  const toggle = <SourceSwitch source={source} onChange={setSource} />;
+  // Only one engine (and one WebGL context) lives at a time: switching unmounts the other.
+  return source === 'layout' ? <SiliconLayoutView sourceSwitch={toggle} /> : <ProceduralSiliconView sourceSwitch={toggle} />;
+}
+
+function ProceduralSiliconView({ sourceSwitch }: { sourceSwitch: ReactNode }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<SiliconEngine | null>(null);
@@ -116,7 +138,10 @@ export default function SiliconMacroView() {
       cancelled = true;
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
-      engine?.dispose();
+      // Tear the engine down in a task of its own: losing a WebGL context can take
+      // seconds on software GL, and the click that switched views should not wait.
+      const current = engine;
+      if (current) window.setTimeout(() => current.dispose(), 0);
       engineRef.current = null;
     };
   }, []);
@@ -179,6 +204,7 @@ export default function SiliconMacroView() {
 
       <div className="silicon-top">
         <div className="silicon-toolbar" role="toolbar" aria-label="Silicon macro view controls">
+          {sourceSwitch}
           <button onClick={() => fly('die')} title="Fly back to the whole die">Fit</button>
           <span className="silicon-segment silicon-flows" role="group" aria-label="Flows">
             <em>Flow</em>

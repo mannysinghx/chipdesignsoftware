@@ -11,7 +11,7 @@ Every number in the app carries an evidence class: **executed** (reproduced loca
 | View | Purpose |
 | --- | --- |
 | 3D design twin | Orbit, explode, and select every component of the X1 package: BGA, substrate, stiffener, decoupling capacitors, C4 bumps, silicon interposer with TSVs and RDL route bundles, microbumps, accelerator floorplan, eight 16-high memory stacks with base-die floorplans, TSV columns, hybrid bonds, and individual DRAM tiers. Six data overlays and a 12-step build sequence. |
-| Silicon macro | Photoreal, real-time zoom into the accelerator die, from the whole package down to single transistors: gold power mesh, copper routing, standard cells, FinFETs, TSVs, backside-power nano-TSVs, and deep-trench capacitors, with a cross-section view. Every interconnect belongs to a net that joins components through vias on every layer, from the transistors to the bumps and across the interposer to the HBM stacks; pulses follow the nets to show data, power (VDD/VSS), and clock flowing. Click any part to trace its whole net and read what it does, what it connects, and how it is made. The chip turns a full 360°, underneath included. Illustrative: procedural geometry, not GDS. |
+| Silicon macro | Photoreal, real-time zoom into the accelerator die, from the whole package down to single transistors: gold power mesh, copper routing, standard cells, FinFETs, TSVs, backside-power nano-TSVs, and deep-trench capacitors, with a cross-section view. Every interconnect belongs to a net that joins components through vias on every layer, from the transistors to the bumps and across the interposer to the HBM stacks; pulses follow the nets to show data, power (VDD/VSS), and clock flowing. Click any part to trace its whole net and read what it does, what it connects, and how it is made. The chip turns a full 360°, underneath included. Two modes: the illustrative **Model** (procedural geometry, not GDS) and **A1 layout**, the real routed AIMEM-A1 tile on SKY130 (its DEF and the cell library's GDS, true layer heights), with real net and instance names. |
 | Readiness · Architecture · Workloads · Correlation · Experiment · Gates | T0 pathfinder: capacity, bandwidth, power, and reliability models, Ramulator2 correlation, analytical sweeps, and the evidence gate ledger. |
 | RTL + verification | Elaborated `aimem_t0_channel` and SECDED datapath, bounded formal properties, and synthesis evidence. |
 | Physical implementation | Sky130 HD technology mapping (2,447 cells), timing contract, and the OpenROAD implementation plan through DRC/LVS. |
@@ -61,6 +61,16 @@ A macro-photography view of the accelerator die that zooms continuously across f
 - **Performance.** Measured on an Apple M4 Max in headless Chrome at 1600 × 1000: a steady 60 fps at every rung. With vsync off, the rungs run at 409–644 fps at 1× pixel ratio with labels and hover running, including the complete nets (up to about 95,000 parts in view at the Cells zoom). Label placement runs in steps of at most 1.2 ms per frame. A chunk generates in about 1 ms once warm; the first chunk of each level takes 10–17 ms, once. Adaptive resolution trades pixels for frame rate from the median frame time, and a software-GL fallback (SwiftShader) runs at reduced resolution without MSAA.
 
 Code: `lib/silicon-macro.ts` (floorplan, stack, cell layouts, local router, generators, package wiring, crater, fly paths, section caps; tested in `tests/silicon-macro.test.ts`), `lib/silicon-part-ids.ts` (part identities and flows packed per primitive), `lib/silicon-parts.ts` (part names, labels, legend, ruler, ray picking, net summaries; tested in `tests/silicon-parts.test.ts`), `lib/silicon-trace.ts` (net tracing; tested with the connectivity checks in `tests/silicon-nets.test.ts`), `lib/silicon-explain.ts` (what each part does, connects, and how it is made), `app/components/silicon/` (engine, inspector for picking and label planning, screen annotations, materials and shader patches, die textures), and `app/components/SiliconMacroView.tsx` (controls, legend, selection panel, and HUD).
+
+### A1 layout mode
+
+The toolbar's **Show: Model | A1 layout** switch replaces the illustrative die with the real AIMEM-A1 tensor tile as placed and routed on SkyWater SKY130 in C3 (run `sky130hd-20260927T144910Z`: DRC 0, LVS match with a stated qualification). Every wire, via, rail, strap, and placed cell is drawn from the final DEF. Each cell's own diffusion, poly gates, contacts, li1, and met1 come from the SkyWater `sky130_fd_sc_hd` GDS. Layer heights are the PDK's (sky130A Magic tech file), at true scale.
+
+- **Data.** `tools/physical/layout-export/export-layout.ts` writes `public/layouts/a1-sky130hd/`: 25.7 MB, streamed as 64 µm tiles. It stores three things as rules and proves each against the DEF before writing: filler cells (greedy fill of each row gap), the supply via stacks (one per same-net strap/rail crossing), and which net each cell pin is on (the metal landing on the pin's shape). The results are 671,016, 88,172, and 908,706 matches, with 0 disagreements. See `docs/compute-die/C3_PHYSICAL_TILE.md`.
+- **Zoom ladder.** Tile (the met5/met4 power grid over per-layer routing and cell density, with the 16 dot-product units labelled where their registers landed) → Region (met1–met4 routing, cells coloured by kind) → Routing (met4/met5 delayered) → Cells (li1 and met1 in each cell, real instance names) → Transistors (diffusion, poly, contacts, n-well).
+- **Selection.** A wire gives its real net: name, length, vias, layers, and the pins it joins, driver first, read off the metal in the net's tiles. A cell gives its instance, what the SkyWater cell does (decoded from its name, for example `a21oi` is AND-OR-invert), its transistor count, and each pin's net.
+- **Flows.** Data pulses start at a net's driving pin and run outward. A wire whose driver is outside the loaded area stays dark rather than pulse the wrong way. Power runs down the via stacks; clock pulses follow the clock tree. Timing is not simulated.
+- **Measured.** 60 fps at every rung on the M4 Max (up to about 440k shapes at Region). The near-white-pixel share is 1.10 %, against 1.11 % for the model view. Tested in `tests/a1-layout.test.ts`.
 
 ## Getting started
 
@@ -123,8 +133,9 @@ Two build paths share the same source:
 ## Repository layout
 
 ```
-app/                 Next-style app: page.tsx (all views), components/Chip3DExplorer.tsx (3D twin), components/SiliconMacroView.tsx + components/silicon/ (silicon macro view), globals.css
-lib/                 Deterministic models: t0/t1/x1, campaigns, reliability, physics, package connectors, floorplans
+app/                 Next-style app: page.tsx (all views), components/Chip3DExplorer.tsx (3D twin), components/SiliconMacroView.tsx + components/silicon/ (silicon macro view), components/SiliconLayoutView.tsx + components/silicon/layout-engine.ts (its A1 layout mode), globals.css
+lib/                 Deterministic models: t0/t1/x1, campaigns, reliability, physics, package connectors, floorplans; a1-layout-* (the A1 layout's data format, scene, and descriptions)
+public/layouts/      The routed A1 tile exported for the A1 layout mode (tools/physical/layout-export)
 tests/               node:test suites for every model in lib/
 design/spec/         Versioned T0, T1, and X1 architecture contracts and schema
 design/physical/     SDC timing contract and OpenROAD / T1 handoff contracts

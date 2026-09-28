@@ -554,8 +554,11 @@ export type RayHit = { batch: number; index: number; t: number };
  * cut face). `skip` drops hits the view does not draw, such as points cleared
  * by the delayering crater; it receives the world point where the ray enters.
  */
+/** What pickChunk reads of a chunk; the Silicon macro's own chunks and the A1 layout's both fit. */
+export type PickableChunk = Pick<ChunkData, 'origin' | 'bounds' | 'yMin' | 'yMax'> & { batches: ReadonlyArray<{ shape: ShapeKey; data: Float32Array; count: number }> };
+
 export function pickChunk(
-  chunk: ChunkData,
+  chunk: PickableChunk,
   origin: readonly [number, number, number],
   dir: readonly [number, number, number],
   tMin = 0,

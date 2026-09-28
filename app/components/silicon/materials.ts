@@ -55,7 +55,7 @@ export const FLOW_COLORS = {
 } as const satisfies Record<string, [number, number, number]>;
 
 // Physically based base colours (linear sRGB reflectance for the metals).
-type Surface = { color: [number, number, number]; metalness: number; roughness: number; tint: number };
+export type Surface = { color: [number, number, number]; metalness: number; roughness: number; tint: number };
 const SURFACES: Record<MaterialKey, Surface> = {
   copper: { color: [0.955, 0.638, 0.538], metalness: 1, roughness: 0.32, tint: 0.16 },
   gold: { color: [1.0, 0.766, 0.336], metalness: 1, roughness: 0.28, tint: 0.1 },
@@ -67,6 +67,27 @@ const SURFACES: Record<MaterialKey, Surface> = {
   oxide: { color: [0.5, 0.58, 0.68], metalness: 0, roughness: 0.18, tint: 0.06 },
   solder: { color: [0.78, 0.78, 0.8], metalness: 1, roughness: 0.38, tint: 0.08 },
 };
+
+/**
+ * Surfaces of the real A1 layout (SKY130). The metal is aluminium, whose true
+ * reflectance (~0.91) would mirror the studio softbox straight into the lens
+ * from above; like the copper here it is kept below that, and rough enough to
+ * hold the near-white-pixel share at the procedural view's level.
+ */
+export const LAYOUT_SURFACES = {
+  metal: { color: [0.6, 0.61, 0.64], metalness: 1, roughness: 0.46, tint: 0.14 },
+  plug: SURFACES.tungsten,
+  local: { color: [0.42, 0.37, 0.33], metalness: 0.75, roughness: 0.5, tint: 0.12 },
+  poly: { color: [0.5, 0.36, 0.28], metalness: 0.45, roughness: 0.42, tint: 0.1 },
+  ndiff: SURFACES.epiN,
+  pdiff: SURFACES.epiP,
+  well: { color: [0.13, 0.16, 0.22], metalness: 0.3, roughness: 0.55, tint: 0.04 },
+  logic: { color: [0.26, 0.26, 0.29], metalness: 0.15, roughness: 0.6, tint: 0.1 },
+  sequential: { color: [0.12, 0.24, 0.46], metalness: 0.15, roughness: 0.6, tint: 0.1 },
+  clockcell: { color: [0.36, 0.17, 0.44], metalness: 0.15, roughness: 0.6, tint: 0.1 },
+  physical: { color: [0.08, 0.085, 0.1], metalness: 0.15, roughness: 0.6, tint: 0.06 },
+  silicon: SURFACES.silicon,
+} satisfies Record<string, Surface>;
 
 const CHIP_VERTEX_HEAD = /* glsl */ `
 attribute vec3 iOffset;
@@ -147,7 +168,11 @@ if (vChip.z != 0.0) {
  * crater, dithered level fade, and a cheap height-based occlusion term.
  */
 export function createChipMaterial(key: MaterialKey, shared: SharedUniforms, level: LevelUniforms): THREE.MeshStandardMaterial {
-  const surface = SURFACES[key];
+  return createSurfaceMaterial(SURFACES[key], shared, level);
+}
+
+/** The chip primitive material (see createChipMaterial) for any surface. */
+export function createSurfaceMaterial(surface: Surface, shared: SharedUniforms, level: LevelUniforms): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
     color: new THREE.Color().setRGB(...surface.color, THREE.LinearSRGBColorSpace),
     metalness: surface.metalness,
